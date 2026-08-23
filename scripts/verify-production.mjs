@@ -423,6 +423,19 @@ try {
         rotation.rotated === true &&
         rotation.restarted === true &&
         /^[0-9a-f]{64}$/.test(rotation.redactedJournalEventSha256) &&
+        createHash("sha256")
+          .update(
+            JSON.stringify({
+              at: rotation.completedAt,
+              event: runtimeEvidence.eventName,
+              agentId: runtimeEvidence.agentId,
+              runtimeInstance: runtimeEvidence.runtimeInstance,
+              rotated: rotation.rotated,
+              restarted: rotation.restarted,
+              expiresAt: rotation.expiresAt,
+            }),
+          )
+          .digest("hex") === rotation.redactedJournalEventSha256 &&
         Date.parse(rotation.expiresAt) > Date.parse(rotation.completedAt) &&
         Date.parse(rotation.onlineObservation.observedAt) >
           Date.parse(rotation.completedAt) &&

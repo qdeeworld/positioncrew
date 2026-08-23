@@ -8,6 +8,7 @@ import {
   AACP_PROVIDER_BLUEPRINTS,
   fetchAacpProductionConfig,
   getAacpProductionReadiness,
+  redactedRuntimeRotationEventSha256,
   unavailableAacpProductionReadiness,
 } from "../src/commerce/aacp-production.js";
 
@@ -294,6 +295,17 @@ describe("dedicated TermiX flagship evidence", () => {
       expect(rotation.sequence).toBe(index + 1);
       expect(rotation.rotated).toBe(true);
       expect(rotation.restarted).toBe(true);
+      expect(
+        redactedRuntimeRotationEventSha256({
+          completedAt: rotation.completedAt,
+          eventName: AACP_RUNTIME_ROTATION_EVIDENCE.eventName,
+          agentId: AACP_RUNTIME_ROTATION_EVIDENCE.agentId,
+          runtimeInstance: AACP_RUNTIME_ROTATION_EVIDENCE.runtimeInstance,
+          rotated: rotation.rotated,
+          restarted: rotation.restarted,
+          expiresAt: rotation.expiresAt,
+        }),
+      ).toBe(rotation.redactedJournalEventSha256);
       expect(Date.parse(rotation.expiresAt)).toBeGreaterThan(
         Date.parse(rotation.completedAt),
       );
@@ -307,6 +319,18 @@ describe("dedicated TermiX flagship evidence", () => {
         status: "ONLINE_AND_LISTED",
       });
     }
+    const firstRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations[0]!;
+    expect(
+      redactedRuntimeRotationEventSha256({
+        completedAt: firstRotation.completedAt,
+        eventName: AACP_RUNTIME_ROTATION_EVIDENCE.eventName,
+        agentId: AACP_RUNTIME_ROTATION_EVIDENCE.agentId,
+        runtimeInstance: AACP_RUNTIME_ROTATION_EVIDENCE.runtimeInstance,
+        rotated: firstRotation.rotated,
+        restarted: firstRotation.restarted,
+        expiresAt: "2026-08-23T10:38:32.000Z",
+      }),
+    ).not.toBe(firstRotation.redactedJournalEventSha256);
     expect(AACP_RUNTIME_ROTATION_EVIDENCE.boundaries.join(" ")).toContain(
       "do not establish continuous uptime",
     );

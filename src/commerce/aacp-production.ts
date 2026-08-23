@@ -4,6 +4,8 @@ import {
   encodeFunctionData,
   getAddress,
   parseAbi,
+  sha256,
+  stringToHex,
 } from "viem";
 import termixIdentityEvidence from "../../evidence/termix-identities.mainnet.json" with { type: "json" };
 import termixListingEvidence from "../../evidence/termix-listings.mainnet.json" with { type: "json" };
@@ -461,6 +463,27 @@ export const AACP_MAINNET_LISTING_EVIDENCE =
 export const AACP_DEDICATED_LENDING_EVIDENCE =
   AacpDedicatedLendingEvidenceSchema.parse(dedicatedLendingEvidence);
 
+export function redactedRuntimeRotationEventSha256(input: {
+  completedAt: string;
+  eventName: string;
+  agentId: string;
+  runtimeInstance: string;
+  rotated: boolean;
+  restarted: boolean;
+  expiresAt: string;
+}) {
+  const canonicalEvent = JSON.stringify({
+    at: input.completedAt,
+    event: input.eventName,
+    agentId: input.agentId,
+    runtimeInstance: input.runtimeInstance,
+    rotated: input.rotated,
+    restarted: input.restarted,
+    expiresAt: input.expiresAt,
+  });
+  return sha256(stringToHex(canonicalEvent)).slice(2);
+}
+
 const AacpRuntimeRotationEvidenceSchema = z
   .object({
     schemaVersion: z.literal("positioncrew.termix-runtime-rotations.v1"),
@@ -513,6 +536,22 @@ const AacpRuntimeRotationEvidenceSchema = z
   .strict()
   .superRefine((value, context) => {
     value.rotations.forEach((rotation, index) => {
+      const computedJournalEventSha256 = redactedRuntimeRotationEventSha256({
+        completedAt: rotation.completedAt,
+        eventName: value.eventName,
+        agentId: value.agentId,
+        runtimeInstance: value.runtimeInstance,
+        rotated: rotation.rotated,
+        restarted: rotation.restarted,
+        expiresAt: rotation.expiresAt,
+      });
+      if (rotation.redactedJournalEventSha256 !== computedJournalEventSha256) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "redactedJournalEventSha256"],
+          message: "rotation journal event digest does not match its canonical fields",
+        });
+      }
       if (rotation.sequence !== index + 1) {
         context.addIssue({
           code: "custom",
