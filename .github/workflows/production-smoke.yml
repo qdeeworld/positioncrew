@@ -98,4 +98,6 @@ jobs:
       - name: Attest preserved runtime rotation archives
         uses: actions/attest@v4
         with:
-          subject-path: evidence/termix-runtime-rotation-artifacts/*.zip
+          subject-path: |
+            evidence/termix-runtime-rotation-artifacts/*.zip
+            evidence/termix-runtime-rotation-events.manifest.json

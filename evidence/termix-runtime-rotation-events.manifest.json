@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "positioncrew.termix-runtime-rotation-events.v1",
+  "network": "bsc-mainnet",
+  "chainId": 56,
+  "service": "LENDING_RESCUE",
+  "role": "DEDICATED_FLAGSHIP_RUNTIME",
+  "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+  "agentTokenId": "293111",
+  "runtimeInstance": "dedicated-lending",
+  "eventName": "termix.runtime-token.renewal-complete",
+  "redactedJournalEventCanonicalization": "UTF8_JSON_STRINGIFY_ORDERED_KEYS_NO_NEWLINE",
+  "rotations": [
+    {
+      "sequence": 1,
+      "completedAt": "2026-08-22T22:38:32.041Z",
+      "expiresAt": "2026-08-23T10:38:31.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "7e4ed6092fc8627db8f2f5ffe863c0fb280bdef5034147f57fa6f2a8c5a3cc37"
+    },
+    {
+      "sequence": 2,
+      "completedAt": "2026-08-23T07:45:02.147Z",
+      "expiresAt": "2026-08-23T19:45:01.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "667b8b7476e7c3ce5d94394dd387ed0b28bfd15ea0921bd9f28ee958a0bab982"
+    },
+    {
+      "sequence": 3,
+      "completedAt": "2026-08-23T16:54:45.832Z",
+      "expiresAt": "2026-08-24T04:54:45.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "23c84b96d89ded6f98f8807447f25d9b5def93de6a2f1a63ae4f344f67176040"
+    }
+  ]
+}

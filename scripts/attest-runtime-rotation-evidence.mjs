@@ -12,6 +12,15 @@ const evidence = JSON.parse(
     "utf8",
   ),
 );
+const rotationManifest = JSON.parse(
+  await readFile(
+    resolve(
+      repositoryRoot,
+      "evidence/termix-runtime-rotation-events.manifest.json",
+    ),
+    "utf8",
+  ),
+);
 const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
 
 function assert(condition, message) {
@@ -73,9 +82,42 @@ assert(
     evidence.rotations?.length >= 3,
   "Runtime rotation evidence is missing",
 );
+assert(
+  rotationManifest.schemaVersion ===
+    "positioncrew.termix-runtime-rotation-events.v1" &&
+    rotationManifest.agentId === evidence.agentId &&
+    rotationManifest.agentTokenId === evidence.agentTokenId &&
+    rotationManifest.runtimeInstance === evidence.runtimeInstance &&
+    rotationManifest.eventName === evidence.eventName &&
+    rotationManifest.redactedJournalEventCanonicalization ===
+      evidence.redactedJournalEventCanonicalization &&
+    rotationManifest.rotations?.length === evidence.rotations.length,
+  "Canonical rotation-event manifest is missing or unbound",
+);
 
 const authenticated = [];
-for (const rotation of evidence.rotations) {
+for (const [index, rotation] of evidence.rotations.entries()) {
+  const manifestRotation = rotationManifest.rotations[index];
+  const canonicalJournalEvent = JSON.stringify({
+    at: rotation.completedAt,
+    event: evidence.eventName,
+    agentId: evidence.agentId,
+    runtimeInstance: evidence.runtimeInstance,
+    rotated: rotation.rotated,
+    restarted: rotation.restarted,
+    expiresAt: rotation.expiresAt,
+  });
+  assert(
+    manifestRotation.sequence === rotation.sequence &&
+      manifestRotation.completedAt === rotation.completedAt &&
+      manifestRotation.expiresAt === rotation.expiresAt &&
+      manifestRotation.rotated === rotation.rotated &&
+      manifestRotation.restarted === rotation.restarted &&
+      manifestRotation.redactedJournalEventSha256 ===
+        rotation.redactedJournalEventSha256 &&
+      sha256(canonicalJournalEvent) === rotation.redactedJournalEventSha256,
+    `Canonical manifest does not match rotation ${rotation.sequence}`,
+  );
   const observation = rotation.onlineObservation;
   const runEvidence = observation.githubRun;
   const artifactEvidence = observation.artifact;
@@ -152,5 +194,16 @@ console.log(
     repository,
     sourceCommit: process.env.GITHUB_SHA ?? null,
     rotations: authenticated,
+    rotationManifest: {
+      path: "evidence/termix-runtime-rotation-events.manifest.json",
+      sha256: sha256(
+        await readFile(
+          resolve(
+            repositoryRoot,
+            "evidence/termix-runtime-rotation-events.manifest.json",
+          ),
+        ),
+      ),
+    },
   }),
 );
