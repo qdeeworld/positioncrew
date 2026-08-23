@@ -177,6 +177,22 @@ export interface AacpRuntimeRotationEvidence {
   eventName: "termix.runtime-token.renewal-complete";
   renewalUnit: "positioncrew-runtime-renew@dedicated-lending.service";
   redactedJournalEventCanonicalization: "UTF8_JSON_STRINGIFY_ORDERED_KEYS_NO_NEWLINE";
+  archiveAttestation: {
+    provider: "GITHUB_ARTIFACT_ATTESTATIONS";
+    predicateType: "https://slsa.dev/provenance/v1";
+    bundlePath: "evidence/termix-runtime-rotation-attestation.bundle.jsonl";
+    bundleSha256: string;
+    signerWorkflow: "dolepee/positioncrew/.github/workflows/production-smoke.yml";
+    sourceCommit: string;
+    sourceRef: "refs/heads/fix/runtime-rotation-evidence";
+    runId: string;
+    runAttempt: number;
+    runUrl: string;
+    event: "workflow_dispatch";
+    conclusion: "success";
+    runnerEnvironment: "github-hosted";
+    subjectCount: number;
+  };
   rotations: Array<{
     sequence: number;
     completedAt: string;

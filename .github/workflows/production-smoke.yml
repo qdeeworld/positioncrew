@@ -38,6 +38,7 @@ jobs:
         id: verify
         continue-on-error: true
         env:
+          GH_TOKEN: ${{ github.token }}
           POSITIONCREW_BASE_URL: https://positioncrew.dolepee.com
           POSITIONCREW_HEALTH_OUTPUT: /tmp/positioncrew-production-health.json
         run: npm run verify:production

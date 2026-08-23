@@ -289,6 +289,18 @@ describe("dedicated TermiX flagship evidence", () => {
       agentTokenId: AACP_DEDICATED_LENDING_EVIDENCE.agentTokenId,
       handle: AACP_DEDICATED_LENDING_EVIDENCE.handle,
       owner: AACP_DEDICATED_LENDING_EVIDENCE.owner,
+      archiveAttestation: {
+        provider: "GITHUB_ARTIFACT_ATTESTATIONS",
+        predicateType: "https://slsa.dev/provenance/v1",
+        signerWorkflow:
+          "dolepee/positioncrew/.github/workflows/production-smoke.yml",
+        sourceCommit: "03425effc575c6c754105fb867bf0136db7269a4",
+        runId: "32663075140",
+        event: "workflow_dispatch",
+        conclusion: "success",
+        runnerEnvironment: "github-hosted",
+        subjectCount: 3,
+      },
     });
     expect(AACP_RUNTIME_ROTATION_EVIDENCE.rotations).toHaveLength(3);
     for (const [index, rotation] of AACP_RUNTIME_ROTATION_EVIDENCE.rotations.entries()) {

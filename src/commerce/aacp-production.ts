@@ -502,6 +502,28 @@ const AacpRuntimeRotationEvidenceSchema = z
     redactedJournalEventCanonicalization: z.literal(
       "UTF8_JSON_STRINGIFY_ORDERED_KEYS_NO_NEWLINE",
     ),
+    archiveAttestation: z
+      .object({
+        provider: z.literal("GITHUB_ARTIFACT_ATTESTATIONS"),
+        predicateType: z.literal("https://slsa.dev/provenance/v1"),
+        bundlePath: z.literal(
+          "evidence/termix-runtime-rotation-attestation.bundle.jsonl",
+        ),
+        bundleSha256: Sha256Schema,
+        signerWorkflow: z.literal(
+          "dolepee/positioncrew/.github/workflows/production-smoke.yml",
+        ),
+        sourceCommit: z.string().regex(/^[0-9a-f]{40}$/),
+        sourceRef: z.literal("refs/heads/fix/runtime-rotation-evidence"),
+        runId: z.string().regex(/^\d+$/),
+        runAttempt: z.number().int().positive(),
+        runUrl: z.string().url(),
+        event: z.literal("workflow_dispatch"),
+        conclusion: z.literal("success"),
+        runnerEnvironment: z.literal("github-hosted"),
+        subjectCount: z.number().int().positive(),
+      })
+      .strict(),
     rotations: z
       .array(
         z
@@ -583,6 +605,17 @@ const AacpRuntimeRotationEvidenceSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    if (
+      value.archiveAttestation.subjectCount !== value.rotations.length ||
+      value.archiveAttestation.runUrl !==
+        `https://github.com/dolepee/positioncrew/actions/runs/${value.archiveAttestation.runId}`
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["archiveAttestation"],
+        message: "archive attestation is not bound to every rotation and its run",
+      });
+    }
     value.rotations.forEach((rotation, index) => {
       const computedJournalEventSha256 = redactedRuntimeRotationEventSha256({
         completedAt: rotation.completedAt,

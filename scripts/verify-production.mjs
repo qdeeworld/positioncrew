@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
@@ -478,6 +479,7 @@ try {
   );
   const runtimeEvidence = aacpReadiness.integration.runtime.rotationEvidence;
   const rotations = runtimeEvidence?.rotations ?? [];
+  const archiveAttestation = runtimeEvidence?.archiveAttestation;
   assert(
     aacpReadiness.integration.runtime.automationScope === "DEDICATED_FLAGSHIP_ONLY" &&
       aacpReadiness.integration.runtime.signerIsolation ===
@@ -496,6 +498,94 @@ try {
       runtimeEvidence.verifiedRotationCount === rotations.length &&
       rotations.length >= 3,
     "Dedicated runtime rotation evidence is missing or unbound",
+  );
+  assert(
+    archiveAttestation?.provider === "GITHUB_ARTIFACT_ATTESTATIONS" &&
+      archiveAttestation.predicateType === "https://slsa.dev/provenance/v1" &&
+      archiveAttestation.signerWorkflow ===
+        "dolepee/positioncrew/.github/workflows/production-smoke.yml" &&
+      archiveAttestation.event === "workflow_dispatch" &&
+      archiveAttestation.conclusion === "success" &&
+      archiveAttestation.runnerEnvironment === "github-hosted" &&
+      archiveAttestation.subjectCount === rotations.length &&
+      archiveAttestation.runUrl ===
+        `https://github.com/dolepee/positioncrew/actions/runs/${archiveAttestation.runId}`,
+    "Runtime archive attestation metadata is missing or unbound",
+  );
+  const attestationBundlePath = resolve(
+    repositoryRoot,
+    archiveAttestation.bundlePath,
+  );
+  const attestationBundle = await readFile(attestationBundlePath);
+  assert(
+    createHash("sha256").update(attestationBundle).digest("hex") ===
+      archiveAttestation.bundleSha256,
+    "Runtime archive attestation bundle failed digest verification",
+  );
+  const attestationOutput = execFileSync(
+    "gh",
+    [
+      "attestation",
+      "verify",
+      resolve(repositoryRoot, rotations[0].onlineObservation.artifact.archivePath),
+      "--bundle",
+      attestationBundlePath,
+      "--repo",
+      "dolepee/positioncrew",
+      "--signer-workflow",
+      archiveAttestation.signerWorkflow,
+      "--source-digest",
+      archiveAttestation.sourceCommit,
+      "--deny-self-hosted-runners",
+      "--format",
+      "json",
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...(process.env.GITHUB_TOKEN && !process.env.GH_TOKEN
+          ? { GH_TOKEN: process.env.GITHUB_TOKEN }
+          : {}),
+      },
+      maxBuffer: 2_000_000,
+      timeout: 90_000,
+    },
+  );
+  const attestationResults = JSON.parse(attestationOutput);
+  assert(
+    Array.isArray(attestationResults) && attestationResults.length === 1,
+    "Expected exactly one verified runtime archive attestation",
+  );
+  const attestationResult = attestationResults[0].verificationResult;
+  const attestationCertificate = attestationResult.signature?.certificate;
+  const attestationStatement = attestationResult.statement;
+  const expectedSubjects = rotations
+    .map((rotation) => ({
+      name: basename(rotation.onlineObservation.artifact.archivePath),
+      sha256: rotation.onlineObservation.artifact.archiveSha256,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const attestedSubjects = (attestationStatement?.subject ?? [])
+    .map((subject) => ({ name: subject.name, sha256: subject.digest?.sha256 }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  assert(
+    attestationStatement?.predicateType === archiveAttestation.predicateType &&
+      JSON.stringify(attestedSubjects) === JSON.stringify(expectedSubjects) &&
+      attestationCertificate?.githubWorkflowTrigger === archiveAttestation.event &&
+      attestationCertificate?.githubWorkflowSHA === archiveAttestation.sourceCommit &&
+      attestationCertificate?.githubWorkflowRef === archiveAttestation.sourceRef &&
+      attestationCertificate?.githubWorkflowRepository === "dolepee/positioncrew" &&
+      attestationCertificate?.runnerEnvironment ===
+        archiveAttestation.runnerEnvironment &&
+      attestationCertificate?.sourceRepositoryDigest ===
+        archiveAttestation.sourceCommit &&
+      attestationCertificate?.runInvocationURI ===
+        `${archiveAttestation.runUrl}/attempts/${archiveAttestation.runAttempt}` &&
+      attestationStatement?.predicate?.runDetails?.metadata?.invocationId ===
+        `${archiveAttestation.runUrl}/attempts/${archiveAttestation.runAttempt}` &&
+      attestationResult.verifiedTimestamps?.length > 0,
+    "Runtime archive attestation does not match its pinned workflow provenance",
   );
   assert(
     rotations.every(
