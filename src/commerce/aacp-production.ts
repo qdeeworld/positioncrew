@@ -4,10 +4,14 @@ import {
   encodeFunctionData,
   getAddress,
   parseAbi,
+  sha256,
+  stringToHex,
 } from "viem";
 import termixIdentityEvidence from "../../evidence/termix-identities.mainnet.json" with { type: "json" };
 import termixListingEvidence from "../../evidence/termix-listings.mainnet.json" with { type: "json" };
 import dedicatedLendingEvidence from "../../evidence/termix-dedicated-lending.mainnet.json" with { type: "json" };
+import termixRuntimeRotationManifest from "../../evidence/termix-runtime-rotation-events.manifest.json" with { type: "json" };
+import termixRuntimeRotationEvidence from "../../evidence/termix-runtime-rotations.mainnet.json" with { type: "json" };
 import { AddressSchema, ServiceTypeSchema } from "../contracts/common.js";
 import {
   TERMIX_RUNTIME_DEFAULT_POLL_SECONDS,
@@ -459,6 +463,340 @@ export const AACP_MAINNET_LISTING_EVIDENCE =
 
 export const AACP_DEDICATED_LENDING_EVIDENCE =
   AacpDedicatedLendingEvidenceSchema.parse(dedicatedLendingEvidence);
+
+export function redactedRuntimeRotationEventSha256(input: {
+  completedAt: string;
+  eventName: string;
+  agentId: string;
+  runtimeInstance: string;
+  rotated: boolean;
+  restarted: boolean;
+  expiresAt: string;
+}) {
+  const canonicalEvent = JSON.stringify({
+    at: input.completedAt,
+    event: input.eventName,
+    agentId: input.agentId,
+    runtimeInstance: input.runtimeInstance,
+    rotated: input.rotated,
+    restarted: input.restarted,
+    expiresAt: input.expiresAt,
+  });
+  return sha256(stringToHex(canonicalEvent)).slice(2);
+}
+
+const AacpRuntimeRotationEvidenceSchema = z
+  .object({
+    schemaVersion: z.literal("positioncrew.termix-runtime-rotations.v1"),
+    network: z.literal("bsc-mainnet"),
+    chainId: z.literal(56),
+    service: z.literal("LENDING_RESCUE"),
+    role: z.literal("DEDICATED_FLAGSHIP_RUNTIME"),
+    owner: AddressSchema,
+    handle: z.literal("positioncrew-rescue-adf9.agent"),
+    agentId: z.string().min(1),
+    agentTokenId: z.string().regex(/^\d+$/),
+    runtimeInstance: z.literal("dedicated-lending"),
+    observationSource: z.literal("DEDICATED_VPS_SYSTEMD_JOURNAL"),
+    eventName: z.literal("termix.runtime-token.renewal-complete"),
+    renewalUnit: z.literal("positioncrew-runtime-renew@dedicated-lending.service"),
+    redactedJournalEventCanonicalization: z.literal(
+      "UTF8_JSON_STRINGIFY_ORDERED_KEYS_NO_NEWLINE",
+    ),
+    archiveAttestation: z
+      .object({
+        provider: z.literal("GITHUB_ARTIFACT_ATTESTATIONS"),
+        predicateType: z.literal("https://slsa.dev/provenance/v1"),
+        bundlePath: z.literal(
+          "evidence/termix-runtime-rotation-attestation.bundle.jsonl",
+        ),
+        bundleSha256: Sha256Schema,
+        signerWorkflow: z.literal(
+          "dolepee/positioncrew/.github/workflows/production-smoke.yml",
+        ),
+        sourceCommit: z.string().regex(/^[0-9a-f]{40}$/),
+        sourceRef: z.literal("refs/heads/fix/runtime-rotation-evidence"),
+        runId: z.string().regex(/^\d+$/),
+        runAttempt: z.number().int().positive(),
+        runUrl: z.string().url(),
+        event: z.literal("workflow_dispatch"),
+        conclusion: z.literal("success"),
+        runnerEnvironment: z.literal("github-hosted"),
+        rotationManifestPath: z.literal(
+          "evidence/termix-runtime-rotation-events.manifest.json",
+        ),
+        rotationManifestSha256: Sha256Schema,
+        subjectCount: z.number().int().positive(),
+      })
+      .strict(),
+    rotations: z
+      .array(
+        z
+          .object({
+            sequence: z.number().int().positive(),
+            completedAt: z.string().datetime(),
+            expiresAt: z.string().datetime(),
+            rotated: z.literal(true),
+            restarted: z.literal(true),
+            redactedJournalEventSha256: Sha256Schema,
+            onlineObservation: z
+              .object({
+                observedAt: z.string().datetime(),
+                source: z.literal("GITHUB_ACTIONS_PRODUCTION_SMOKE"),
+                runId: z.string().regex(/^\d+$/),
+                url: z.string().url(),
+                githubRun: z
+                  .object({
+                    workflowId: z.literal("333142188"),
+                    workflowPath: z.literal(
+                      ".github/workflows/production-smoke.yml",
+                    ),
+                    event: z.literal("schedule"),
+                    status: z.literal("completed"),
+                    conclusion: z.literal("success"),
+                    headBranch: z.literal("main"),
+                    headSha: z.string().regex(/^[0-9a-f]{40}$/),
+                    runAttempt: z.number().int().positive(),
+                  })
+                  .strict(),
+                artifact: z
+                  .object({
+                    id: z.string().regex(/^\d+$/),
+                    name: z.string().min(1),
+                    archivePath: z.string().min(1),
+                    archiveSha256: Sha256Schema,
+                    sizeBytes: z.number().int().positive(),
+                    reportFileName: z.literal(
+                      "positioncrew-production-health.json",
+                    ),
+                    reportSha256: Sha256Schema,
+                  })
+                  .strict(),
+                healthReport: z
+                  .object({
+                    schemaVersion: z.literal(
+                      "positioncrew.production-health-report.v1",
+                    ),
+                    baseUrl: z.literal("https://positioncrew.dolepee.com"),
+                    checkedAt: z.string().datetime(),
+                    completedAt: z.string().datetime(),
+                    status: z.literal("OPERATIONAL"),
+                    aacpGeneratedAt: z.string().datetime(),
+                    dedicatedFlagship: z
+                      .object({
+                        agentId: z.string().min(1),
+                        agentTokenId: z.string().regex(/^\d+$/),
+                        listingStatus: z.literal("PUBLISHED"),
+                        a2aStatus: z.literal("ONLINE"),
+                        status: z.literal("ONLINE_AND_LISTED"),
+                      })
+                      .strict(),
+                  })
+                  .strict(),
+                productionStatus: z.literal("OPERATIONAL"),
+                listingStatus: z.literal("PUBLISHED"),
+                liveListingVerified: z.literal(true),
+                a2aStatus: z.literal("ONLINE"),
+                presence: z.literal("online"),
+                status: z.literal("ONLINE_AND_LISTED"),
+              })
+              .strict(),
+          })
+          .strict(),
+      )
+      .min(3),
+    verifiedAt: z.string().datetime(),
+    boundaries: z.array(z.string().min(1)).min(3),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.archiveAttestation.subjectCount !== value.rotations.length + 1 ||
+      value.archiveAttestation.runUrl !==
+        `https://github.com/dolepee/positioncrew/actions/runs/${value.archiveAttestation.runId}`
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["archiveAttestation"],
+        message: "archive attestation is not bound to every rotation and its run",
+      });
+    }
+    if (
+      termixRuntimeRotationManifest.schemaVersion !==
+        "positioncrew.termix-runtime-rotation-events.v1" ||
+      termixRuntimeRotationManifest.network !== value.network ||
+      termixRuntimeRotationManifest.chainId !== value.chainId ||
+      termixRuntimeRotationManifest.service !== value.service ||
+      termixRuntimeRotationManifest.role !== value.role ||
+      termixRuntimeRotationManifest.agentId !== value.agentId ||
+      termixRuntimeRotationManifest.agentTokenId !== value.agentTokenId ||
+      termixRuntimeRotationManifest.runtimeInstance !== value.runtimeInstance ||
+      termixRuntimeRotationManifest.eventName !== value.eventName ||
+      termixRuntimeRotationManifest.redactedJournalEventCanonicalization !==
+        value.redactedJournalEventCanonicalization ||
+      termixRuntimeRotationManifest.rotations.length !== value.rotations.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["archiveAttestation", "rotationManifestPath"],
+        message: "signed rotation-event manifest is missing or unbound",
+      });
+    }
+    value.rotations.forEach((rotation, index) => {
+      const manifestRotation = termixRuntimeRotationManifest.rotations[index];
+      if (
+        !manifestRotation ||
+        manifestRotation.sequence !== rotation.sequence ||
+        manifestRotation.completedAt !== rotation.completedAt ||
+        manifestRotation.expiresAt !== rotation.expiresAt ||
+        manifestRotation.rotated !== rotation.rotated ||
+        manifestRotation.restarted !== rotation.restarted ||
+        manifestRotation.redactedJournalEventSha256 !==
+          rotation.redactedJournalEventSha256
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index],
+          message: "rotation does not match the signed event manifest",
+        });
+      }
+      const computedJournalEventSha256 = redactedRuntimeRotationEventSha256({
+        completedAt: rotation.completedAt,
+        eventName: value.eventName,
+        agentId: value.agentId,
+        runtimeInstance: value.runtimeInstance,
+        rotated: rotation.rotated,
+        restarted: rotation.restarted,
+        expiresAt: rotation.expiresAt,
+      });
+      if (rotation.redactedJournalEventSha256 !== computedJournalEventSha256) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "redactedJournalEventSha256"],
+          message: "rotation journal event digest does not match its canonical fields",
+        });
+      }
+      if (rotation.sequence !== index + 1) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "sequence"],
+          message: "rotation sequence must be contiguous",
+        });
+      }
+      const observation = rotation.onlineObservation;
+      if (
+        observation.url !==
+          `https://github.com/dolepee/positioncrew/actions/runs/${observation.runId}` ||
+        observation.artifact.name !==
+          `positioncrew-production-health-${observation.runId}` ||
+        observation.artifact.archivePath !==
+          `evidence/termix-runtime-rotation-artifacts/${observation.runId}.zip` ||
+        observation.healthReport.aacpGeneratedAt !== observation.observedAt ||
+        observation.healthReport.dedicatedFlagship.agentId !== value.agentId ||
+        observation.healthReport.dedicatedFlagship.agentTokenId !==
+          value.agentTokenId
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation"],
+          message: "online observation is not bound to its run, artifact, and identity",
+        });
+      }
+      if (
+        Date.parse(observation.healthReport.checkedAt) >
+          Date.parse(observation.observedAt) ||
+        Date.parse(observation.healthReport.completedAt) <
+          Date.parse(observation.observedAt)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation", "healthReport"],
+          message: "online observation is outside its health-report window",
+        });
+      }
+      if (Date.parse(rotation.expiresAt) <= Date.parse(rotation.completedAt)) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "expiresAt"],
+          message: "rotation expiry must follow completion",
+        });
+      }
+      if (
+        Date.parse(rotation.onlineObservation.observedAt) <=
+        Date.parse(rotation.completedAt)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation", "observedAt"],
+          message: "online observation must follow rotation completion",
+        });
+      }
+      if (
+        Date.parse(rotation.onlineObservation.observedAt) >=
+        Date.parse(rotation.expiresAt)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation", "observedAt"],
+          message: "online observation must precede rotation expiry",
+        });
+      }
+      const next = value.rotations[index + 1];
+      if (
+        next &&
+        Date.parse(rotation.onlineObservation.observedAt) >=
+          Date.parse(next.completedAt)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation", "observedAt"],
+          message: "online observation must precede the next rotation",
+        });
+      }
+      const previous = value.rotations[index - 1];
+      if (
+        previous &&
+        (Date.parse(rotation.completedAt) <= Date.parse(previous.completedAt) ||
+          Date.parse(rotation.expiresAt) <= Date.parse(previous.expiresAt))
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index],
+          message: "rotation observations must be strictly chronological",
+        });
+      }
+    });
+    const latest = value.rotations.at(-1);
+    if (
+      latest &&
+      Date.parse(value.verifiedAt) <
+        Date.parse(latest.onlineObservation.healthReport.completedAt)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["verifiedAt"],
+        message: "verification cannot predate the latest health report",
+      });
+    }
+  });
+
+export const AACP_RUNTIME_ROTATION_EVIDENCE =
+  AacpRuntimeRotationEvidenceSchema.parse(termixRuntimeRotationEvidence);
+
+if (
+  AACP_RUNTIME_ROTATION_EVIDENCE.owner.toLowerCase() !==
+  AACP_DEDICATED_LENDING_EVIDENCE.owner.toLowerCase()
+) {
+  throw new Error("Runtime rotation evidence owner does not match the dedicated flagship");
+}
+for (const field of ["service", "role", "handle", "agentId", "agentTokenId"] as const) {
+  if (
+    AACP_RUNTIME_ROTATION_EVIDENCE[field] !==
+    AACP_DEDICATED_LENDING_EVIDENCE[field]
+  ) {
+    throw new Error(`Runtime rotation evidence ${field} does not match the dedicated flagship`);
+  }
+}
 
 for (const blueprintValue of AACP_PROVIDER_BLUEPRINTS) {
   const identity = AACP_MAINNET_IDENTITY_EVIDENCE.providers.find(
@@ -991,6 +1329,39 @@ async function discoverDedicatedFlagship(
   }
 }
 
+function aacpRuntimeReadiness() {
+  const rotations = AACP_RUNTIME_ROTATION_EVIDENCE.rotations;
+  return {
+    status: "PREISSUED_TOKEN_ADAPTER_IMPLEMENTED" as const,
+    ownerSignerOnHost: true as const,
+    autoRenewsToken: true as const,
+    automationScope: "DEDICATED_FLAGSHIP_ONLY" as const,
+    signerIsolation: "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT" as const,
+    pollerHasSigningMaterial: false as const,
+    originalProvidersAutoRenew: false as const,
+    tokenLifetimeHours: TERMIX_RUNTIME_TOKEN_LIFETIME_HOURS,
+    expiryBufferSeconds: TERMIX_RUNTIME_EXPIRY_BUFFER_SECONDS,
+    pollSeconds: TERMIX_RUNTIME_DEFAULT_POLL_SECONDS,
+    automaticConversationKinds: [
+      "DIRECT_MESSAGE",
+      "QUOTE_NEGOTIATION",
+      "PREPAYMENT_ORDER",
+    ],
+    operatorRequiredConversationKinds: [
+      "ORDER_DELIVERY",
+      "CHALLENGE",
+      "OPERATOR_CASE",
+    ],
+    rotationEvidence: {
+      ...AACP_RUNTIME_ROTATION_EVIDENCE,
+      verifiedRotationCount: rotations.length,
+      firstCompletedAt: rotations[0]!.completedAt,
+      latestCompletedAt: rotations.at(-1)!.completedAt,
+      latestTokenExpiresAt: rotations.at(-1)!.expiresAt,
+    },
+  };
+}
+
 export async function getAacpProductionReadiness(options: FetchOptions = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const generatedAt = (options.now ?? new Date()).toISOString();
@@ -1073,24 +1444,7 @@ export async function getAacpProductionReadiness(options: FetchOptions = {}) {
         openApiUrl: AACP_OPENAPI_URL,
         openApiStatus: "SAMPLE_SPEC_NOT_USED" as const,
       },
-      runtime: {
-        status: "PREISSUED_TOKEN_ADAPTER_IMPLEMENTED" as const,
-        ownerSignerOnHost: true,
-        autoRenewsToken: true,
-        tokenLifetimeHours: TERMIX_RUNTIME_TOKEN_LIFETIME_HOURS,
-        expiryBufferSeconds: TERMIX_RUNTIME_EXPIRY_BUFFER_SECONDS,
-        pollSeconds: TERMIX_RUNTIME_DEFAULT_POLL_SECONDS,
-        automaticConversationKinds: [
-          "DIRECT_MESSAGE",
-          "QUOTE_NEGOTIATION",
-          "PREPAYMENT_ORDER",
-        ],
-        operatorRequiredConversationKinds: [
-          "ORDER_DELIVERY",
-          "CHALLENGE",
-          "OPERATOR_CASE",
-        ],
-      },
+      runtime: aacpRuntimeReadiness(),
       orderGuard: {
         status: "STRICT_LOCAL_LIFECYCLE_IMPLEMENTED" as const,
         chainId: 56 as const,
@@ -1131,7 +1485,7 @@ export async function getAacpProductionReadiness(options: FetchOptions = {}) {
         : "The four listings are published at 5 USDC each; it does not claim an online A2A runtime, stake, token approval, paid order, delivery, settlement, reputation result, external purchase, or revenue.",
       "Agent.family's default banner remains on the four listings until the prepared PositionCrew media is uploaded through the supported editor flow.",
       "PositionCrew's no-wallet trial and deterministic conformance scorer remain separate from AACP escrow and operator-granted dispute adjudication.",
-      "The dedicated Lending Rescue provider uses an isolated root-only owner signer to rotate its scoped 12-hour runtime token; the poller never receives signing material, and the first automatic rotation remains pending verification.",
+      `${AACP_RUNTIME_ROTATION_EVIDENCE.rotations.length} automatic scoped-token rotations have been observed for the dedicated Lending Rescue runtime. The owner signer is isolated in its root-only renewal unit, the unprivileged poller never receives signing material, and these discrete events do not establish continuous uptime or future renewal success.`,
       "The additional dedicated flagship identity and listing are reported separately and do not replace, transfer, or erase the four original provider records.",
     ],
   };
@@ -1169,24 +1523,7 @@ export function unavailableAacpProductionReadiness(now = new Date()) {
         openApiUrl: AACP_OPENAPI_URL,
         openApiStatus: "SAMPLE_SPEC_NOT_USED" as const,
       },
-      runtime: {
-        status: "PREISSUED_TOKEN_ADAPTER_IMPLEMENTED" as const,
-        ownerSignerOnHost: true,
-        autoRenewsToken: true,
-        tokenLifetimeHours: TERMIX_RUNTIME_TOKEN_LIFETIME_HOURS,
-        expiryBufferSeconds: TERMIX_RUNTIME_EXPIRY_BUFFER_SECONDS,
-        pollSeconds: TERMIX_RUNTIME_DEFAULT_POLL_SECONDS,
-        automaticConversationKinds: [
-          "DIRECT_MESSAGE",
-          "QUOTE_NEGOTIATION",
-          "PREPAYMENT_ORDER",
-        ],
-        operatorRequiredConversationKinds: [
-          "ORDER_DELIVERY",
-          "CHALLENGE",
-          "OPERATOR_CASE",
-        ],
-      },
+      runtime: aacpRuntimeReadiness(),
       orderGuard: {
         status: "STRICT_LOCAL_LIFECYCLE_IMPLEMENTED" as const,
         chainId: 56 as const,
@@ -1248,7 +1585,7 @@ export function unavailableAacpProductionReadiness(now = new Date()) {
       "TermiX production config or BSC RPC could not be validated at this time; no cached deployment claim is substituted.",
       "This record does not claim that a wallet-signed agent mint, paid order, delivery, settlement, reputation result, or external purchase has occurred.",
       "PositionCrew's no-wallet trial and deterministic conformance scorer remain separate from AACP escrow and operator-granted dispute adjudication.",
-      "The dedicated Lending Rescue provider uses an isolated root-only owner signer to rotate its scoped 12-hour runtime token; the poller never receives signing material, and the first automatic rotation remains pending verification.",
+      `Committed evidence records ${AACP_RUNTIME_ROTATION_EVIDENCE.rotations.length} host-observed automatic rotations for the dedicated Lending Rescue runtime; current runtime presence is unavailable and is not inferred from that history.`,
       "The additional dedicated flagship identity and listing are reported separately and do not replace, transfer, or erase the four original provider records.",
     ],
   };

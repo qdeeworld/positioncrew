@@ -1,7 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+import { fileURLToPath } from "node:url";
+import { inflateRawSync } from "node:zlib";
 import {
   createPublicClient,
   defineChain,
@@ -18,6 +21,7 @@ const baseUrl = new URL(
 const outputPath = resolve(
   process.env.POSITIONCREW_HEALTH_OUTPUT ?? "/tmp/positioncrew-production-health.json",
 );
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedServices = new Set([
   "LENDING_RESCUE",
   "LP_REBALANCE",
@@ -153,6 +157,84 @@ async function fetchJson(name, input) {
   assert(response.ok, `${name} returned HTTP ${response.status}${failureDetail}`);
   assert(body && typeof body === "object", `${name} did not return a JSON object`);
   return body;
+}
+
+async function fetchGithubJson(name, input) {
+  const url = new URL(input);
+  assert(url.origin === "https://api.github.com", `Refusing non-GitHub API URL: ${url}`);
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const startedAt = performance.now();
+  const { response, attempts } = await fetchReadOnly(url, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "Cache-Control": "no-cache",
+      "User-Agent": "PositionCrew-Production-Monitor/1.0",
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
+  const body = await response.json().catch(() => null);
+  checks.push({ name, url: url.toString(), status: response.status, latencyMs, attempts });
+  assert(response.ok, `${name} returned HTTP ${response.status}`);
+  assert(body && typeof body === "object", `${name} did not return a JSON object`);
+  return body;
+}
+
+function extractZipEntry(archive, expectedName) {
+  const endSearchStart = Math.max(0, archive.length - 65_557);
+  let endOffset = -1;
+  for (let offset = archive.length - 22; offset >= endSearchStart; offset -= 1) {
+    if (archive.readUInt32LE(offset) === 0x06054b50) {
+      endOffset = offset;
+      break;
+    }
+  }
+  assert(endOffset >= 0, "Artifact ZIP end-of-central-directory record is missing");
+  const entryCount = archive.readUInt16LE(endOffset + 10);
+  let cursor = archive.readUInt32LE(endOffset + 16);
+  for (let index = 0; index < entryCount; index += 1) {
+    assert(
+      archive.readUInt32LE(cursor) === 0x02014b50,
+      "Artifact ZIP central-directory entry is malformed",
+    );
+    const compressionMethod = archive.readUInt16LE(cursor + 10);
+    const compressedSize = archive.readUInt32LE(cursor + 20);
+    const uncompressedSize = archive.readUInt32LE(cursor + 24);
+    const fileNameLength = archive.readUInt16LE(cursor + 28);
+    const extraLength = archive.readUInt16LE(cursor + 30);
+    const commentLength = archive.readUInt16LE(cursor + 32);
+    const localHeaderOffset = archive.readUInt32LE(cursor + 42);
+    const fileName = archive.toString(
+      "utf8",
+      cursor + 46,
+      cursor + 46 + fileNameLength,
+    );
+    if (fileName === expectedName) {
+      assert(
+        archive.readUInt32LE(localHeaderOffset) === 0x04034b50,
+        "Artifact ZIP local entry is malformed",
+      );
+      const localFileNameLength = archive.readUInt16LE(localHeaderOffset + 26);
+      const localExtraLength = archive.readUInt16LE(localHeaderOffset + 28);
+      const dataStart =
+        localHeaderOffset + 30 + localFileNameLength + localExtraLength;
+      const compressed = archive.subarray(dataStart, dataStart + compressedSize);
+      const content = compressionMethod === 0
+        ? Buffer.from(compressed)
+        : compressionMethod === 8
+          ? inflateRawSync(compressed)
+          : null;
+      assert(content, `Unsupported artifact ZIP compression method: ${compressionMethod}`);
+      assert(
+        content.length === uncompressedSize,
+        "Artifact ZIP report size does not match its central directory",
+      );
+      return content;
+    }
+    cursor += 46 + fileNameLength + extraLength + commentLength;
+  }
+  throw new Error(`Artifact ZIP is missing ${expectedName}`);
 }
 
 async function postJson(name, input, payload) {
@@ -395,6 +477,281 @@ try {
       aacpReadiness.integration.runtime.tokenLifetimeHours === 12,
     "AACP runtime signing or expiry boundary changed",
   );
+  const runtimeEvidence = aacpReadiness.integration.runtime.rotationEvidence;
+  const rotations = runtimeEvidence?.rotations ?? [];
+  const archiveAttestation = runtimeEvidence?.archiveAttestation;
+  assert(
+    aacpReadiness.integration.runtime.automationScope === "DEDICATED_FLAGSHIP_ONLY" &&
+      aacpReadiness.integration.runtime.signerIsolation ===
+        "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT" &&
+      aacpReadiness.integration.runtime.pollerHasSigningMaterial === false &&
+      aacpReadiness.integration.runtime.originalProvidersAutoRenew === false,
+    "AACP runtime automation scope is overstated",
+  );
+  assert(
+    runtimeEvidence?.schemaVersion === "positioncrew.termix-runtime-rotations.v1" &&
+      runtimeEvidence.agentId ===
+        aacpReadiness.marketplace.dedicatedFlagship.agentId &&
+      runtimeEvidence.agentTokenId ===
+        aacpReadiness.marketplace.dedicatedFlagship.agentTokenId &&
+      runtimeEvidence.handle === aacpReadiness.marketplace.dedicatedFlagship.handle &&
+      runtimeEvidence.verifiedRotationCount === rotations.length &&
+      rotations.length >= 3,
+    "Dedicated runtime rotation evidence is missing or unbound",
+  );
+  assert(
+    archiveAttestation?.provider === "GITHUB_ARTIFACT_ATTESTATIONS" &&
+      archiveAttestation.predicateType === "https://slsa.dev/provenance/v1" &&
+      archiveAttestation.signerWorkflow ===
+        "dolepee/positioncrew/.github/workflows/production-smoke.yml" &&
+      archiveAttestation.event === "workflow_dispatch" &&
+      archiveAttestation.conclusion === "success" &&
+      archiveAttestation.runnerEnvironment === "github-hosted" &&
+      archiveAttestation.subjectCount === rotations.length + 1 &&
+      archiveAttestation.runUrl ===
+        `https://github.com/dolepee/positioncrew/actions/runs/${archiveAttestation.runId}`,
+    "Runtime archive attestation metadata is missing or unbound",
+  );
+  const attestationBundlePath = resolve(
+    repositoryRoot,
+    archiveAttestation.bundlePath,
+  );
+  const attestationBundle = await readFile(attestationBundlePath);
+  assert(
+    createHash("sha256").update(attestationBundle).digest("hex") ===
+      archiveAttestation.bundleSha256,
+    "Runtime archive attestation bundle failed digest verification",
+  );
+  const rotationManifestPath = resolve(
+    repositoryRoot,
+    archiveAttestation.rotationManifestPath,
+  );
+  const rotationManifestBytes = await readFile(rotationManifestPath);
+  assert(
+    createHash("sha256").update(rotationManifestBytes).digest("hex") ===
+      archiveAttestation.rotationManifestSha256,
+    "Runtime rotation-event manifest failed digest verification",
+  );
+  const rotationManifest = JSON.parse(rotationManifestBytes.toString("utf8"));
+  assert(
+    rotationManifest.schemaVersion ===
+      "positioncrew.termix-runtime-rotation-events.v1" &&
+      rotationManifest.network === runtimeEvidence.network &&
+      rotationManifest.chainId === runtimeEvidence.chainId &&
+      rotationManifest.service === runtimeEvidence.service &&
+      rotationManifest.role === runtimeEvidence.role &&
+      rotationManifest.agentId === runtimeEvidence.agentId &&
+      rotationManifest.agentTokenId === runtimeEvidence.agentTokenId &&
+      rotationManifest.runtimeInstance === runtimeEvidence.runtimeInstance &&
+      rotationManifest.eventName === runtimeEvidence.eventName &&
+      rotationManifest.redactedJournalEventCanonicalization ===
+        runtimeEvidence.redactedJournalEventCanonicalization &&
+      rotationManifest.rotations?.length === rotations.length &&
+      rotationManifest.rotations.every((manifestRotation, index) => {
+        const rotation = rotations[index];
+        return (
+          manifestRotation.sequence === rotation.sequence &&
+          manifestRotation.completedAt === rotation.completedAt &&
+          manifestRotation.expiresAt === rotation.expiresAt &&
+          manifestRotation.rotated === rotation.rotated &&
+          manifestRotation.restarted === rotation.restarted &&
+          manifestRotation.redactedJournalEventSha256 ===
+            rotation.redactedJournalEventSha256
+        );
+      }),
+    "Runtime rotations do not match the signed event manifest",
+  );
+  const attestationOutput = execFileSync(
+    "gh",
+    [
+      "attestation",
+      "verify",
+      resolve(repositoryRoot, rotations[0].onlineObservation.artifact.archivePath),
+      "--bundle",
+      attestationBundlePath,
+      "--repo",
+      "dolepee/positioncrew",
+      "--signer-workflow",
+      archiveAttestation.signerWorkflow,
+      "--source-digest",
+      archiveAttestation.sourceCommit,
+      "--deny-self-hosted-runners",
+      "--format",
+      "json",
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...(process.env.GITHUB_TOKEN && !process.env.GH_TOKEN
+          ? { GH_TOKEN: process.env.GITHUB_TOKEN }
+          : {}),
+      },
+      maxBuffer: 2_000_000,
+      timeout: 90_000,
+    },
+  );
+  const attestationResults = JSON.parse(attestationOutput);
+  assert(
+    Array.isArray(attestationResults) && attestationResults.length === 1,
+    "Expected exactly one verified runtime archive attestation",
+  );
+  const attestationResult = attestationResults[0].verificationResult;
+  const attestationCertificate = attestationResult.signature?.certificate;
+  const attestationStatement = attestationResult.statement;
+  const expectedSubjects = [
+    ...rotations.map((rotation) => ({
+      name: basename(rotation.onlineObservation.artifact.archivePath),
+      sha256: rotation.onlineObservation.artifact.archiveSha256,
+    })),
+    {
+      name: basename(archiveAttestation.rotationManifestPath),
+      sha256: archiveAttestation.rotationManifestSha256,
+    },
+  ]
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const attestedSubjects = (attestationStatement?.subject ?? [])
+    .map((subject) => ({ name: subject.name, sha256: subject.digest?.sha256 }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  assert(
+    attestationStatement?.predicateType === archiveAttestation.predicateType &&
+      JSON.stringify(attestedSubjects) === JSON.stringify(expectedSubjects) &&
+      attestationCertificate?.githubWorkflowTrigger === archiveAttestation.event &&
+      attestationCertificate?.githubWorkflowSHA === archiveAttestation.sourceCommit &&
+      attestationCertificate?.githubWorkflowRef === archiveAttestation.sourceRef &&
+      attestationCertificate?.githubWorkflowRepository === "dolepee/positioncrew" &&
+      attestationCertificate?.runnerEnvironment ===
+        archiveAttestation.runnerEnvironment &&
+      attestationCertificate?.sourceRepositoryDigest ===
+        archiveAttestation.sourceCommit &&
+      attestationCertificate?.runInvocationURI ===
+        `${archiveAttestation.runUrl}/attempts/${archiveAttestation.runAttempt}` &&
+      attestationStatement?.predicate?.runDetails?.metadata?.invocationId ===
+        `${archiveAttestation.runUrl}/attempts/${archiveAttestation.runAttempt}` &&
+      attestationResult.verifiedTimestamps?.length > 0,
+    "Runtime archive attestation does not match its pinned workflow provenance",
+  );
+  assert(
+    rotations.every(
+      (rotation, index) =>
+        rotation.sequence === index + 1 &&
+        rotation.rotated === true &&
+        rotation.restarted === true &&
+        /^[0-9a-f]{64}$/.test(rotation.redactedJournalEventSha256) &&
+        createHash("sha256")
+          .update(
+            JSON.stringify({
+              at: rotation.completedAt,
+              event: runtimeEvidence.eventName,
+              agentId: runtimeEvidence.agentId,
+              runtimeInstance: runtimeEvidence.runtimeInstance,
+              rotated: rotation.rotated,
+              restarted: rotation.restarted,
+              expiresAt: rotation.expiresAt,
+            }),
+          )
+          .digest("hex") === rotation.redactedJournalEventSha256 &&
+        Date.parse(rotation.expiresAt) > Date.parse(rotation.completedAt) &&
+        Date.parse(rotation.onlineObservation.observedAt) >
+          Date.parse(rotation.completedAt) &&
+        Date.parse(rotation.onlineObservation.observedAt) <
+          Date.parse(rotation.expiresAt) &&
+        (index === rotations.length - 1 ||
+          Date.parse(rotation.onlineObservation.observedAt) <
+            Date.parse(rotations[index + 1].completedAt)) &&
+        rotation.onlineObservation.a2aStatus === "ONLINE" &&
+        rotation.onlineObservation.status === "ONLINE_AND_LISTED" &&
+        rotation.onlineObservation.githubRun.event === "schedule" &&
+        rotation.onlineObservation.githubRun.status === "completed" &&
+        rotation.onlineObservation.githubRun.conclusion === "success" &&
+        rotation.onlineObservation.githubRun.headBranch === "main" &&
+        rotation.onlineObservation.url ===
+          `https://github.com/dolepee/positioncrew/actions/runs/${rotation.onlineObservation.runId}` &&
+        rotation.onlineObservation.artifact.name ===
+          `positioncrew-production-health-${rotation.onlineObservation.runId}` &&
+        rotation.onlineObservation.artifact.archivePath ===
+          `evidence/termix-runtime-rotation-artifacts/${rotation.onlineObservation.runId}.zip` &&
+        rotation.onlineObservation.healthReport.aacpGeneratedAt ===
+          rotation.onlineObservation.observedAt &&
+        Date.parse(rotation.onlineObservation.healthReport.checkedAt) <=
+          Date.parse(rotation.onlineObservation.observedAt) &&
+        Date.parse(rotation.onlineObservation.healthReport.completedAt) >=
+          Date.parse(rotation.onlineObservation.observedAt) &&
+        (index === 0 ||
+          (Date.parse(rotation.completedAt) >
+            Date.parse(rotations[index - 1].completedAt) &&
+            Date.parse(rotation.expiresAt) >
+              Date.parse(rotations[index - 1].expiresAt))),
+    ),
+    "Dedicated runtime rotations are not ordered verified completion events",
+  );
+  for (const rotation of rotations) {
+    const observation = rotation.onlineObservation;
+    const runEvidence = observation.githubRun;
+    const artifactEvidence = observation.artifact;
+    const reportEvidence = observation.healthReport;
+    const githubRun = await fetchGithubJson(
+      `github-run-${observation.runId}`,
+      `https://api.github.com/repos/dolepee/positioncrew/actions/runs/${observation.runId}`,
+    );
+    assert(
+      String(githubRun.id) === observation.runId &&
+        String(githubRun.workflow_id) === runEvidence.workflowId &&
+        githubRun.path === runEvidence.workflowPath &&
+        githubRun.event === runEvidence.event &&
+        githubRun.status === runEvidence.status &&
+        githubRun.conclusion === runEvidence.conclusion &&
+        githubRun.head_branch === runEvidence.headBranch &&
+        githubRun.head_sha === runEvidence.headSha &&
+        githubRun.run_attempt === runEvidence.runAttempt &&
+        githubRun.html_url === observation.url,
+      `GitHub run ${observation.runId} does not match its scheduled-success evidence`,
+    );
+    const archive = await readFile(resolve(repositoryRoot, artifactEvidence.archivePath));
+    assert(
+      archive.length === artifactEvidence.sizeBytes &&
+        createHash("sha256").update(archive).digest("hex") ===
+          artifactEvidence.archiveSha256,
+      `Preserved artifact ZIP for run ${observation.runId} failed digest verification`,
+    );
+    const reportBuffer = extractZipEntry(archive, artifactEvidence.reportFileName);
+    assert(
+      createHash("sha256").update(reportBuffer).digest("hex") ===
+        artifactEvidence.reportSha256,
+      `Health report for run ${observation.runId} failed digest verification`,
+    );
+    const report = JSON.parse(reportBuffer.toString("utf8"));
+    const dedicatedFlagship = report.aacpReadiness?.marketplace?.dedicatedFlagship;
+    assert(
+      report.schemaVersion === reportEvidence.schemaVersion &&
+        report.baseUrl === reportEvidence.baseUrl &&
+        report.checkedAt === reportEvidence.checkedAt &&
+        report.completedAt === reportEvidence.completedAt &&
+        report.status === reportEvidence.status &&
+        report.error === null &&
+        report.aacpReadiness?.generatedAt === reportEvidence.aacpGeneratedAt &&
+        report.aacpReadiness.generatedAt === observation.observedAt &&
+        dedicatedFlagship?.agentId === runtimeEvidence.agentId &&
+        dedicatedFlagship?.agentTokenId === runtimeEvidence.agentTokenId &&
+        dedicatedFlagship?.listingStatus === observation.listingStatus &&
+        dedicatedFlagship?.a2aStatus === observation.a2aStatus &&
+        dedicatedFlagship?.status === observation.status,
+      `Health report for run ${observation.runId} does not prove the dedicated runtime observation`,
+    );
+  }
+  const latestRotation = rotations.at(-1);
+  assert(
+    latestRotation &&
+      Date.parse(runtimeEvidence.verifiedAt) >=
+        Date.parse(latestRotation.onlineObservation.healthReport.completedAt),
+    "Runtime rotation verification predates the latest health report",
+  );
+  assert(
+    runtimeEvidence.boundaries
+      .join(" ")
+      .includes("do not establish continuous uptime"),
+    "Rotation evidence overstates uptime",
+  );
   assert(
     aacpReadiness.integration?.orderGuard?.status ===
       "STRICT_LOCAL_LIFECYCLE_IMPLEMENTED" &&
@@ -430,6 +787,9 @@ try {
     status: onlineAacpProviders.length === 4 ? "ONLINE" : "RUNTIME_PENDING",
     onlineProviderCount: onlineAacpProviders.length,
     requiredProviderCount: 4,
+    dedicatedFlagshipStatus: aacpReadiness.marketplace.dedicatedFlagship.status,
+    verifiedAutomaticRotations: runtimeEvidence.verifiedRotationCount,
+    latestRotationAt: runtimeEvidence.latestCompletedAt,
     boundary:
       "TermiX integration is optional for the challenge. Expiring A2A presence is reported separately and never converted into continuous-uptime evidence.",
   };

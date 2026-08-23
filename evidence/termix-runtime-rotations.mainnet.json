@@ -1,0 +1,205 @@
+{
+  "schemaVersion": "positioncrew.termix-runtime-rotations.v1",
+  "network": "bsc-mainnet",
+  "chainId": 56,
+  "service": "LENDING_RESCUE",
+  "role": "DEDICATED_FLAGSHIP_RUNTIME",
+  "owner": "0xADd748C416E8A7efd7d65D18Abb121dea268ddF9",
+  "handle": "positioncrew-rescue-adf9.agent",
+  "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+  "agentTokenId": "293111",
+  "runtimeInstance": "dedicated-lending",
+  "observationSource": "DEDICATED_VPS_SYSTEMD_JOURNAL",
+  "eventName": "termix.runtime-token.renewal-complete",
+  "renewalUnit": "positioncrew-runtime-renew@dedicated-lending.service",
+  "redactedJournalEventCanonicalization": "UTF8_JSON_STRINGIFY_ORDERED_KEYS_NO_NEWLINE",
+  "archiveAttestation": {
+    "provider": "GITHUB_ARTIFACT_ATTESTATIONS",
+    "predicateType": "https://slsa.dev/provenance/v1",
+    "bundlePath": "evidence/termix-runtime-rotation-attestation.bundle.jsonl",
+    "bundleSha256": "b9a5c9f82323858911ea0eaddc7204fb2a1d9b3d761382f65a508a4f5c0a91e2",
+    "signerWorkflow": "dolepee/positioncrew/.github/workflows/production-smoke.yml",
+    "sourceCommit": "e09c9bb2af256d01695d2109a552e8ed42f58832",
+    "sourceRef": "refs/heads/fix/runtime-rotation-evidence",
+    "runId": "32664036259",
+    "runAttempt": 1,
+    "runUrl": "https://github.com/dolepee/positioncrew/actions/runs/32664036259",
+    "event": "workflow_dispatch",
+    "conclusion": "success",
+    "runnerEnvironment": "github-hosted",
+    "rotationManifestPath": "evidence/termix-runtime-rotation-events.manifest.json",
+    "rotationManifestSha256": "df08fffd8d2a12b893cb7e843be5f7be74fe72ce72cadbaece939f063e16fcfb",
+    "subjectCount": 4
+  },
+  "rotations": [
+    {
+      "sequence": 1,
+      "completedAt": "2026-08-22T22:38:32.041Z",
+      "expiresAt": "2026-08-23T10:38:31.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "7e4ed6092fc8627db8f2f5ffe863c0fb280bdef5034147f57fa6f2a8c5a3cc37",
+      "onlineObservation": {
+        "observedAt": "2026-08-22T22:58:08.818Z",
+        "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
+        "runId": "32603904267",
+        "url": "https://github.com/dolepee/positioncrew/actions/runs/32603904267",
+        "githubRun": {
+          "workflowId": "333142188",
+          "workflowPath": ".github/workflows/production-smoke.yml",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "success",
+          "headBranch": "main",
+          "headSha": "cb167361eb39ea4917058e37901501ae8252309c",
+          "runAttempt": 1
+        },
+        "artifact": {
+          "id": "9483624689",
+          "name": "positioncrew-production-health-32603904267",
+          "archivePath": "evidence/termix-runtime-rotation-artifacts/32603904267.zip",
+          "archiveSha256": "aeff9a1b837b2b3b91c141f99c14248b4d7790fa59437cb48349cbb504b4a7aa",
+          "sizeBytes": 14564,
+          "reportFileName": "positioncrew-production-health.json",
+          "reportSha256": "935f000b4ab3d9cf99fb10181d1111270282d3bbcefac5d46b2f667cb9ad1066"
+        },
+        "healthReport": {
+          "schemaVersion": "positioncrew.production-health-report.v1",
+          "baseUrl": "https://positioncrew.dolepee.com",
+          "checkedAt": "2026-08-22T22:58:07.135Z",
+          "completedAt": "2026-08-22T22:58:23.473Z",
+          "status": "OPERATIONAL",
+          "aacpGeneratedAt": "2026-08-22T22:58:08.818Z",
+          "dedicatedFlagship": {
+            "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+            "agentTokenId": "293111",
+            "listingStatus": "PUBLISHED",
+            "a2aStatus": "ONLINE",
+            "status": "ONLINE_AND_LISTED"
+          }
+        },
+        "productionStatus": "OPERATIONAL",
+        "listingStatus": "PUBLISHED",
+        "liveListingVerified": true,
+        "a2aStatus": "ONLINE",
+        "presence": "online",
+        "status": "ONLINE_AND_LISTED"
+      }
+    },
+    {
+      "sequence": 2,
+      "completedAt": "2026-08-23T07:45:02.147Z",
+      "expiresAt": "2026-08-23T19:45:01.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "667b8b7476e7c3ce5d94394dd387ed0b28bfd15ea0921bd9f28ee958a0bab982",
+      "onlineObservation": {
+        "observedAt": "2026-08-23T07:46:57.023Z",
+        "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
+        "runId": "32626467898",
+        "url": "https://github.com/dolepee/positioncrew/actions/runs/32626467898",
+        "githubRun": {
+          "workflowId": "333142188",
+          "workflowPath": ".github/workflows/production-smoke.yml",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "success",
+          "headBranch": "main",
+          "headSha": "cb167361eb39ea4917058e37901501ae8252309c",
+          "runAttempt": 1
+        },
+        "artifact": {
+          "id": "9489822987",
+          "name": "positioncrew-production-health-32626467898",
+          "archivePath": "evidence/termix-runtime-rotation-artifacts/32626467898.zip",
+          "archiveSha256": "1c39017bea24dd31d12cfbef37cdaacf3d0b8e21737eb537be2d4ffea25e84f1",
+          "sizeBytes": 14554,
+          "reportFileName": "positioncrew-production-health.json",
+          "reportSha256": "11ecb58236ddf8a507b7a72e7ad3a8342481b4713dabc283095732f647d6eb6c"
+        },
+        "healthReport": {
+          "schemaVersion": "positioncrew.production-health-report.v1",
+          "baseUrl": "https://positioncrew.dolepee.com",
+          "checkedAt": "2026-08-23T07:46:55.602Z",
+          "completedAt": "2026-08-23T07:47:09.209Z",
+          "status": "OPERATIONAL",
+          "aacpGeneratedAt": "2026-08-23T07:46:57.023Z",
+          "dedicatedFlagship": {
+            "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+            "agentTokenId": "293111",
+            "listingStatus": "PUBLISHED",
+            "a2aStatus": "ONLINE",
+            "status": "ONLINE_AND_LISTED"
+          }
+        },
+        "productionStatus": "OPERATIONAL",
+        "listingStatus": "PUBLISHED",
+        "liveListingVerified": true,
+        "a2aStatus": "ONLINE",
+        "presence": "online",
+        "status": "ONLINE_AND_LISTED"
+      }
+    },
+    {
+      "sequence": 3,
+      "completedAt": "2026-08-23T16:54:45.832Z",
+      "expiresAt": "2026-08-24T04:54:45.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "23c84b96d89ded6f98f8807447f25d9b5def93de6a2f1a63ae4f344f67176040",
+      "onlineObservation": {
+        "observedAt": "2026-08-23T17:00:57.930Z",
+        "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
+        "runId": "32653452771",
+        "url": "https://github.com/dolepee/positioncrew/actions/runs/32653452771",
+        "githubRun": {
+          "workflowId": "333142188",
+          "workflowPath": ".github/workflows/production-smoke.yml",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "success",
+          "headBranch": "main",
+          "headSha": "cb167361eb39ea4917058e37901501ae8252309c",
+          "runAttempt": 1
+        },
+        "artifact": {
+          "id": "9496813609",
+          "name": "positioncrew-production-health-32653452771",
+          "archivePath": "evidence/termix-runtime-rotation-artifacts/32653452771.zip",
+          "archiveSha256": "66725fa251ea1b91ae387fc12d9ecd6e3ba0e7bfc9c52fbc09a276f7cd3a3768",
+          "sizeBytes": 14484,
+          "reportFileName": "positioncrew-production-health.json",
+          "reportSha256": "9f99254beffd00ea9c63a458616091f5fd39da250321b2da2c5c05601a2bbb0f"
+        },
+        "healthReport": {
+          "schemaVersion": "positioncrew.production-health-report.v1",
+          "baseUrl": "https://positioncrew.dolepee.com",
+          "checkedAt": "2026-08-23T17:00:56.571Z",
+          "completedAt": "2026-08-23T17:01:07.054Z",
+          "status": "OPERATIONAL",
+          "aacpGeneratedAt": "2026-08-23T17:00:57.930Z",
+          "dedicatedFlagship": {
+            "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+            "agentTokenId": "293111",
+            "listingStatus": "PUBLISHED",
+            "a2aStatus": "ONLINE",
+            "status": "ONLINE_AND_LISTED"
+          }
+        },
+        "productionStatus": "OPERATIONAL",
+        "listingStatus": "PUBLISHED",
+        "liveListingVerified": true,
+        "a2aStatus": "ONLINE",
+        "presence": "online",
+        "status": "ONLINE_AND_LISTED"
+      }
+    }
+  ],
+  "verifiedAt": "2026-08-23T20:21:38.000Z",
+  "boundaries": [
+    "Each entry is a redacted completion event emitted by the dedicated root-only systemd renewal unit with rotated=true and restarted=true, followed by the earliest successful scheduled production observation that reported the dedicated listing online; the referenced GitHub run metadata, original artifact ZIP, GitHub-published archive digest, and extracted health-report digest are preserved for independent verification.",
+    "A GitHub OIDC-backed SLSA provenance attestation from the pinned production-smoke workflow and source commit binds all three preserved ZIP digests after independently checking each original run-to-artifact relationship; the Sigstore bundle is retained in this repository and verified without the expiring Actions artifact API.",
+    "These entries establish discrete host-observed automatic scoped-token rotations; they do not establish continuous uptime, availability between observations, or future renewal success.",
+    "No runtime token, owner key, wallet signature, or other signing material is recorded."
+  ]
+}

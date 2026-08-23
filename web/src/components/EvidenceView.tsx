@@ -131,7 +131,7 @@ export function EvidenceView({
   const aacpStatus = aacpReadiness?.state === "PROVIDERS_ONLINE"
     ? { label: "Providers online", tone: "good" }
     : aacpReadiness?.state === "LISTINGS_PUBLISHED_RUNTIME_PENDING"
-      ? { label: "Runtime pending", tone: "warn" }
+      ? { label: "Original runtimes pending", tone: "warn" }
       : aacpReadiness?.state === "IDENTITIES_MINTED_LISTINGS_PENDING"
         ? { label: "Listings pending", tone: "good" }
       : aacpReadiness?.state === "ONBOARDING_PENDING"
@@ -251,10 +251,14 @@ export function EvidenceView({
               ))}
             </div>
             <div className="aacp-runtime-band">
-              <div><strong>Signer excluded</strong><span>Runtime host accepts only a scoped agent token</span></div>
+              <div><strong>Poller signer-free</strong><span>Root-only renewer signs; the A2A poller receives only its scoped token</span></div>
               <div><strong>{aacpReadiness.integration.orderGuard.guardedActions.length} actions guarded</strong><span>ABI calldata and mined transaction must match</span></div>
-              <div><strong>{aacpReadiness.integration.runtime.tokenLifetimeHours} hours</strong><span>Dedicated root-only renewal signer; first automatic rotation pending verification</span></div>
+              <div><strong>{aacpReadiness.integration.runtime.rotationEvidence.verifiedRotationCount} verified rotations</strong><span>Dedicated automatic renewals; discrete host observations, not continuous uptime</span></div>
               <div><strong>{aacpReadiness.integration.runtime.automaticConversationKinds.length} + {aacpReadiness.integration.runtime.operatorRequiredConversationKinds.length} surfaces</strong><span>Pre-sale automated; orders and disputes gated</span></div>
+            </div>
+            <div className="operations-boundary">
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span><strong>Rotation boundary.</strong>{aacpReadiness.integration.runtime.rotationEvidence.boundaries[1]}</span>
             </div>
             <div className="operations-boundary">
               <ShieldCheck size={16} aria-hidden="true" />

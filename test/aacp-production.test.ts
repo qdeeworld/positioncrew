@@ -4,9 +4,11 @@ import {
   AACP_MAINNET_IDENTITY_EVIDENCE,
   AACP_MAINNET_LISTING_EVIDENCE,
   AACP_DEDICATED_LENDING_EVIDENCE,
+  AACP_RUNTIME_ROTATION_EVIDENCE,
   AACP_PROVIDER_BLUEPRINTS,
   fetchAacpProductionConfig,
   getAacpProductionReadiness,
+  redactedRuntimeRotationEventSha256,
   unavailableAacpProductionReadiness,
 } from "../src/commerce/aacp-production.js";
 
@@ -266,6 +268,134 @@ describe("dedicated TermiX flagship evidence", () => {
       liveListingVerified: true,
       onchainVerified: true,
     });
+    expect(readiness.state).toBe("LISTINGS_PUBLISHED_RUNTIME_PENDING");
+    expect(readiness.marketplace.onlineProviderCount).toBe(0);
+    expect(readiness.integration.runtime).toMatchObject({
+      automationScope: "DEDICATED_FLAGSHIP_ONLY",
+      signerIsolation: "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT",
+      pollerHasSigningMaterial: false,
+      originalProvidersAutoRenew: false,
+      rotationEvidence: {
+        verifiedRotationCount: 3,
+        agentId: readiness.marketplace.dedicatedFlagship.agentId,
+        agentTokenId: readiness.marketplace.dedicatedFlagship.agentTokenId,
+      },
+    });
+  });
+
+  it("binds three chronological production rotations to the dedicated identity", () => {
+    expect(AACP_RUNTIME_ROTATION_EVIDENCE).toMatchObject({
+      agentId: AACP_DEDICATED_LENDING_EVIDENCE.agentId,
+      agentTokenId: AACP_DEDICATED_LENDING_EVIDENCE.agentTokenId,
+      handle: AACP_DEDICATED_LENDING_EVIDENCE.handle,
+      owner: AACP_DEDICATED_LENDING_EVIDENCE.owner,
+      archiveAttestation: {
+        provider: "GITHUB_ARTIFACT_ATTESTATIONS",
+        predicateType: "https://slsa.dev/provenance/v1",
+        signerWorkflow:
+          "dolepee/positioncrew/.github/workflows/production-smoke.yml",
+        sourceCommit: "e09c9bb2af256d01695d2109a552e8ed42f58832",
+        runId: "32664036259",
+        event: "workflow_dispatch",
+        conclusion: "success",
+        runnerEnvironment: "github-hosted",
+        rotationManifestPath:
+          "evidence/termix-runtime-rotation-events.manifest.json",
+        rotationManifestSha256:
+          "df08fffd8d2a12b893cb7e843be5f7be74fe72ce72cadbaece939f063e16fcfb",
+        subjectCount: 4,
+      },
+    });
+    expect(AACP_RUNTIME_ROTATION_EVIDENCE.rotations).toHaveLength(3);
+    for (const [index, rotation] of AACP_RUNTIME_ROTATION_EVIDENCE.rotations.entries()) {
+      expect(rotation.sequence).toBe(index + 1);
+      expect(rotation.rotated).toBe(true);
+      expect(rotation.restarted).toBe(true);
+      expect(
+        redactedRuntimeRotationEventSha256({
+          completedAt: rotation.completedAt,
+          eventName: AACP_RUNTIME_ROTATION_EVIDENCE.eventName,
+          agentId: AACP_RUNTIME_ROTATION_EVIDENCE.agentId,
+          runtimeInstance: AACP_RUNTIME_ROTATION_EVIDENCE.runtimeInstance,
+          rotated: rotation.rotated,
+          restarted: rotation.restarted,
+          expiresAt: rotation.expiresAt,
+        }),
+      ).toBe(rotation.redactedJournalEventSha256);
+      expect(Date.parse(rotation.expiresAt)).toBeGreaterThan(
+        Date.parse(rotation.completedAt),
+      );
+      expect(Date.parse(rotation.onlineObservation.observedAt)).toBeGreaterThan(
+        Date.parse(rotation.completedAt),
+      );
+      expect(Date.parse(rotation.onlineObservation.observedAt)).toBeLessThan(
+        Date.parse(rotation.expiresAt),
+      );
+      const nextRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations[index + 1];
+      if (nextRotation) {
+        expect(Date.parse(rotation.onlineObservation.observedAt)).toBeLessThan(
+          Date.parse(nextRotation.completedAt),
+        );
+      }
+      expect(rotation.onlineObservation).toMatchObject({
+        productionStatus: "OPERATIONAL",
+        listingStatus: "PUBLISHED",
+        a2aStatus: "ONLINE",
+        status: "ONLINE_AND_LISTED",
+      });
+      expect(rotation.onlineObservation.githubRun).toMatchObject({
+        workflowId: "333142188",
+        workflowPath: ".github/workflows/production-smoke.yml",
+        event: "schedule",
+        status: "completed",
+        conclusion: "success",
+        headBranch: "main",
+      });
+      expect(rotation.onlineObservation.artifact).toMatchObject({
+        name: `positioncrew-production-health-${rotation.onlineObservation.runId}`,
+        archivePath:
+          `evidence/termix-runtime-rotation-artifacts/${rotation.onlineObservation.runId}.zip`,
+        reportFileName: "positioncrew-production-health.json",
+      });
+      expect(rotation.onlineObservation.healthReport).toMatchObject({
+        schemaVersion: "positioncrew.production-health-report.v1",
+        baseUrl: "https://positioncrew.dolepee.com",
+        status: "OPERATIONAL",
+        aacpGeneratedAt: rotation.onlineObservation.observedAt,
+        dedicatedFlagship: {
+          agentId: AACP_RUNTIME_ROTATION_EVIDENCE.agentId,
+          agentTokenId: AACP_RUNTIME_ROTATION_EVIDENCE.agentTokenId,
+          listingStatus: "PUBLISHED",
+          a2aStatus: "ONLINE",
+          status: "ONLINE_AND_LISTED",
+        },
+      });
+      expect(
+        Date.parse(rotation.onlineObservation.healthReport.checkedAt),
+      ).toBeLessThanOrEqual(Date.parse(rotation.onlineObservation.observedAt));
+      expect(
+        Date.parse(rotation.onlineObservation.healthReport.completedAt),
+      ).toBeGreaterThanOrEqual(Date.parse(rotation.onlineObservation.observedAt));
+    }
+    const latestRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations.at(-1)!;
+    expect(Date.parse(AACP_RUNTIME_ROTATION_EVIDENCE.verifiedAt)).toBeGreaterThanOrEqual(
+      Date.parse(latestRotation.onlineObservation.healthReport.completedAt),
+    );
+    const firstRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations[0]!;
+    expect(
+      redactedRuntimeRotationEventSha256({
+        completedAt: firstRotation.completedAt,
+        eventName: AACP_RUNTIME_ROTATION_EVIDENCE.eventName,
+        agentId: AACP_RUNTIME_ROTATION_EVIDENCE.agentId,
+        runtimeInstance: AACP_RUNTIME_ROTATION_EVIDENCE.runtimeInstance,
+        rotated: firstRotation.rotated,
+        restarted: firstRotation.restarted,
+        expiresAt: "2026-08-23T10:38:32.000Z",
+      }),
+    ).not.toBe(firstRotation.redactedJournalEventSha256);
+    expect(AACP_RUNTIME_ROTATION_EVIDENCE.boundaries.join(" ")).toContain(
+      "do not establish continuous uptime",
+    );
   });
 
   it("fails closed when the dedicated NFT owner or metadata URI changes on chain", async () => {
@@ -348,7 +478,13 @@ describe("TermiX production AACP readiness", () => {
           status: "PREISSUED_TOKEN_ADAPTER_IMPLEMENTED",
           ownerSignerOnHost: true,
           autoRenewsToken: true,
+          automationScope: "DEDICATED_FLAGSHIP_ONLY",
+          pollerHasSigningMaterial: false,
+          originalProvidersAutoRenew: false,
           tokenLifetimeHours: 12,
+          rotationEvidence: {
+            verifiedRotationCount: 3,
+          },
         },
         orderGuard: {
           status: "STRICT_LOCAL_LIFECYCLE_IMPLEMENTED",
@@ -464,6 +600,8 @@ describe("TermiX production AACP readiness", () => {
 
     expect(readiness.state).toBe("PROVIDERS_ONLINE");
     expect(readiness.marketplace.onlineProviderCount).toBe(4);
+    expect(readiness.marketplace.dedicatedFlagship.status).toBe("ONLINE_AND_LISTED");
+    expect(readiness.marketplace.requiredProviderCount).toBe(4);
     expect(readiness.boundaries.join(" ")).toContain("reported an online A2A runtime");
     expect(readiness.boundaries.join(" ")).toContain("not a durable uptime claim");
   });
@@ -479,6 +617,11 @@ describe("TermiX production AACP readiness", () => {
     expect(readiness.marketplace.registeredIdentityCount).toBe(0);
     expect(readiness.integration.runtime.ownerSignerOnHost).toBe(true);
     expect(readiness.integration.runtime.autoRenewsToken).toBe(true);
+    expect(readiness.integration.runtime.rotationEvidence.rotations).toHaveLength(3);
+    expect(readiness.marketplace.dedicatedFlagship.status).toBe("UPSTREAM_UNAVAILABLE");
+    expect(readiness.boundaries.join(" ")).toContain(
+      "current runtime presence is unavailable and is not inferred",
+    );
     expect(readiness.integration.orderGuard.guardedActions).toHaveLength(10);
     expect(readiness.marketplace.providers.every((provider) => provider.status === "UPSTREAM_UNAVAILABLE")).toBe(true);
     expect(readiness.boundaries.join(" ")).toContain("no cached deployment claim");
