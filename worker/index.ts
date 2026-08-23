@@ -8,6 +8,7 @@ import agentAdvantagePublicationStatus from "../web/public/evidence/agent-advant
 import founderAgentAdvantagePublicationStatus from "../web/public/evidence/founder-agent-advantage-status.json" with { type: "json" };
 import {
   runBenchmarkRepeatability,
+  runCurrentBlockPinnedLendingRequest,
   runFixtureRequest,
   runFrozenFixture,
   runFrozenMatrix,
@@ -29,12 +30,16 @@ import {
   type D1Database,
 } from "../src/commerce/d1-marketplace-store.js";
 import {
+  CurrentBlockPinnedEvidenceSchema,
   FRESH_MARKETPLACE_TASKS,
   FreshMarketplaceHireRequestSchema,
+  HistoricalFixtureEvidenceSchema,
   canonicalJson,
   sha256Commitment,
+  type FreshMarketplaceChain,
 } from "../src/commerce/fresh-hire-schema.js";
 import { PositionCrewRequestSchema } from "../src/contracts/index.js";
+import { canonicalHash } from "../src/core/canonical.js";
 import { PROVIDER_CATALOG } from "../src/marketplace/catalog.js";
 import {
   buildMarketplaceManifest,
@@ -95,10 +100,41 @@ const AACP_READINESS_RESPONSE_BUDGET_MS = 8_000;
 const API_HEADERS = {
   "Access-Control-Allow-Headers": "Accept, Content-Type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Origin": "*",
   "Content-Type": "application/json; charset=utf-8",
   "X-Content-Type-Options": "nosniff",
 };
+
+const CANONICAL_PRODUCT_ORIGIN = "https://positioncrew.dolepee.com";
+const MAX_FRESH_MARKETPLACE_REQUEST_BYTES = 32_768;
+
+function isAllowedMutationOrigin(request: Request): boolean {
+  const origin = request.headers.get("Origin");
+  if (origin === null) return true;
+  if (origin === new URL(request.url).origin || origin === CANONICAL_PRODUCT_ORIGIN) return true;
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]");
+  } catch {
+    return false;
+  }
+}
+
+function withApiCors(response: Response, request: Request): Response {
+  const headers = new Headers(response.headers);
+  const origin = request.headers.get("Origin");
+  if (request.method === "GET" || request.method === "HEAD") {
+    headers.set("Access-Control-Allow-Origin", "*");
+  } else if (origin !== null && isAllowedMutationOrigin(request)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Vary", "Origin");
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 function json(body: unknown, status = 200, cacheControl = "no-store"): Response {
   return new Response(JSON.stringify(body), {
@@ -124,19 +160,19 @@ class FreshMarketplaceRequestError extends Error {
 
 async function boundedJson(request: Request): Promise<unknown> {
   const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
-  if (Number.isFinite(declaredLength) && declaredLength > 4_096) {
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_FRESH_MARKETPLACE_REQUEST_BYTES) {
     throw new FreshMarketplaceRequestError(
       413,
       "REQUEST_TOO_LARGE",
-      "Fresh marketplace request exceeds 4096 bytes",
+      `Fresh marketplace request exceeds ${MAX_FRESH_MARKETPLACE_REQUEST_BYTES} bytes`,
     );
   }
   const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > 4_096) {
+  if (new TextEncoder().encode(text).byteLength > MAX_FRESH_MARKETPLACE_REQUEST_BYTES) {
     throw new FreshMarketplaceRequestError(
       413,
       "REQUEST_TOO_LARGE",
-      "Fresh marketplace request exceeds 4096 bytes",
+      `Fresh marketplace request exceeds ${MAX_FRESH_MARKETPLACE_REQUEST_BYTES} bytes`,
     );
   }
   try {
@@ -155,6 +191,16 @@ function freshStore(env: Env): FreshMarketplaceStore {
   return new FreshMarketplaceStore(env.DB);
 }
 
+async function freshMarketplaceRateLimitKey(request: Request): Promise<string> {
+  const connectingIp = request.headers.get("CF-Connecting-IP")?.trim();
+  return sha256Commitment({
+    schemaVersion: "positioncrew.fresh-marketplace-rate-limit-key.v1",
+    client: connectingIp && connectingIp.length > 0
+      ? `cf-ip:${connectingIp}`
+      : `direct-host:${new URL(request.url).hostname}`,
+  });
+}
+
 async function createFreshMarketplaceHire(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
   const parsed = FreshMarketplaceHireRequestSchema.parse(await boundedJson(request));
@@ -165,15 +211,47 @@ async function createFreshMarketplaceHire(request: Request, env: Env): Promise<R
       "The selected provider is not bound to this frozen benchmark task.",
     ]);
   }
-  const persistedRequest = {
-    schemaVersion: "positioncrew.fresh-marketplace-provider-request.v1",
-    benchmarkSlug: parsed.benchmarkSlug,
+  const createdAt = new Date().toISOString();
+  const currentBlockPinned = parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2";
+  const persistedRequest = currentBlockPinned
+    ? parsed.request
+    : {
+        schemaVersion: "positioncrew.fresh-marketplace-provider-request.v1",
+        benchmarkSlug: parsed.benchmarkSlug,
+        providerSlug: parsed.providerSlug,
+        providerId: provider.providerId,
+        requestSchema: task.requestSchema,
+        evidenceMode: "HISTORICAL_FIXTURE",
+        directCostUsd: "0.00",
+        walletRequired: false,
+      };
+  const evidenceMode = currentBlockPinned ? "CURRENT_BLOCK_PINNED" : "HISTORICAL_FIXTURE";
+  const evidence = currentBlockPinned
+    ? CurrentBlockPinnedEvidenceSchema.parse({
+        schemaVersion: "positioncrew.current-block-pinned-evidence.v1",
+        evidenceClass: "CURRENT_BLOCK_PINNED",
+        chainId: 56,
+        source: parsed.observation,
+        freshnessAtCreation: Date.parse(parsed.observation.observedAt) > Date.parse(createdAt)
+          ? "FUTURE_DATED"
+          : Date.parse(createdAt) - Date.parse(parsed.observation.observedAt) >
+              parsed.request.maxDataAgeSeconds * 1_000
+            ? "STALE"
+            : "FRESH",
+        evaluatedAt: createdAt,
+        maxDataAgeSeconds: parsed.request.maxDataAgeSeconds,
+      })
+    : HistoricalFixtureEvidenceSchema.parse({
+        schemaVersion: "positioncrew.historical-fixture-evidence.v1",
+        evidenceClass: "HISTORICAL_FIXTURE",
+        benchmarkSlug: parsed.benchmarkSlug,
+        requestSchema: task.requestSchema,
+      });
+  const providerBinding = {
     providerSlug: parsed.providerSlug,
     providerId: provider.providerId,
+    service: task.service,
     requestSchema: task.requestSchema,
-    evidenceMode: "HISTORICAL_FIXTURE",
-    directCostUsd: "0.00",
-    walletRequired: false,
   };
   const requestJson = canonicalJson(persistedRequest);
   const result = await freshStore(env).createHire({
@@ -181,9 +259,17 @@ async function createFreshMarketplaceHire(request: Request, env: Env): Promise<R
     providerId: provider.providerId,
     hireId: crypto.randomUUID(),
     jobId: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
+    createdAt,
     requestJson,
-    requestHash: await sha256Commitment(persistedRequest),
+    requestHash: currentBlockPinned
+      ? canonicalHash(persistedRequest)
+      : await sha256Commitment(persistedRequest),
+    providerHash: await sha256Commitment(providerBinding),
+    evidenceMode,
+    evidenceJson: canonicalJson(evidence),
+    evidenceHash: await sha256Commitment(evidence),
+    service: task.service,
+    rateLimitKey: await freshMarketplaceRateLimitKey(request),
   });
   return json(result.chain, result.replayed ? 200 : 201);
 }
@@ -193,19 +279,28 @@ async function finishFreshMarketplaceJob(
   hireId: string,
   jobId: string,
   claimToken: string,
-  benchmarkSlug: keyof typeof FRESH_MARKETPLACE_TASKS,
+  hire: FreshMarketplaceChain["hire"],
   startedAtPerformance: number,
 ): Promise<void> {
   const store = freshStore(env);
   try {
-    const task = FRESH_MARKETPLACE_TASKS[benchmarkSlug];
-    const response = await runFrozenFixture(task.service);
+    const task = FRESH_MARKETPLACE_TASKS[hire.benchmarkSlug];
+    const response = hire.evidenceMode === "CURRENT_BLOCK_PINNED"
+      ? await runCurrentBlockPinnedLendingRequest(hire.request, new Date(hire.createdAt))
+      : await runFrozenFixture(task.service);
     if (
       response.result.request.service !== task.service ||
       response.result.job.state !== "COMPLETED" ||
       response.result.job.deliverable === null
     ) {
       throw new Error("Frozen provider response was not a completed result for the persisted service");
+    }
+    if (
+      hire.evidenceMode === "CURRENT_BLOCK_PINNED" &&
+      (response.evidenceMode !== "CURRENT_BLOCK_PINNED" ||
+        canonicalHash(response.result.request) !== hire.requestHash)
+    ) {
+      throw new Error("Current provider response did not match the persisted request commitment");
     }
     const deliverable = response.result.job.deliverable;
     const responseJson = canonicalJson(response);
@@ -252,7 +347,7 @@ async function runFreshMarketplaceHire(
     hireId,
     claimed.chain.job.jobId,
     claimed.claimToken,
-    claimed.chain.hire.benchmarkSlug,
+    claimed.chain.hire,
     startedAtPerformance,
   ));
   return json(claimed.chain, 202);
@@ -505,6 +600,12 @@ async function api(
   env: Env,
   context: WorkerExecutionContext,
 ): Promise<Response> {
+  const mutationOrPreflight = request.method === "OPTIONS" ||
+    request.method === "POST" || request.method === "PUT" ||
+    request.method === "PATCH" || request.method === "DELETE";
+  if (mutationOrPreflight && !isAllowedMutationOrigin(request)) {
+    return apiError(403, "ORIGIN_NOT_ALLOWED", ["Mutation origin is not permitted."]);
+  }
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: API_HEADERS });
 
   try {
@@ -786,7 +887,7 @@ export default {
       url.pathname === "/openapi.json" ||
       url.pathname === "/.well-known/positioncrew.json"
     ) {
-      return api(request, url, env, context);
+      return withApiCors(await api(request, url, env, context), request);
     }
 
     const appView = new Map([

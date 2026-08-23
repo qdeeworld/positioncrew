@@ -68,7 +68,7 @@ export const CLAIM_BOUNDARY = [
 
 export interface FixtureJobResponse {
   schemaVersion: "positioncrew.fixture-job-response.v1";
-  evidenceMode: "FROZEN_BSC_TEST_FIXTURE" | "CALLER_SUPPLIED_OBSERVATIONS";
+  evidenceMode: "FROZEN_BSC_TEST_FIXTURE" | "CALLER_SUPPLIED_OBSERVATIONS" | "CURRENT_BLOCK_PINNED";
   commerceMode: "IN_MEMORY_CONFORMANCE";
   advantageStatus: "PENDING_INDEPENDENT_BLIND_EVALUATION";
   generatedAt: string;
@@ -226,6 +226,33 @@ export async function runSuppliedLendingRequest(
 ): Promise<FixtureJobResponse> {
   const request = LendingRescueRequestSchema.parse(input);
   return runSuppliedProviderRequest(request, now);
+}
+
+export async function runCurrentBlockPinnedLendingRequest(
+  input: unknown,
+  now: Date,
+): Promise<FixtureJobResponse> {
+  const request = LendingRescueRequestSchema.parse(input);
+  const result = await runProviderJob(new MemoryCommerceAdapter(), request, now);
+  return {
+    schemaVersion: "positioncrew.fixture-job-response.v1",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    commerceMode: "IN_MEMORY_CONFORMANCE",
+    advantageStatus: "PENDING_INDEPENDENT_BLIND_EVALUATION",
+    generatedAt: now.toISOString(),
+    claimBoundary: [
+      "The exact block-pinned Venus request was persisted before this provider run and is committed by the durable hire receipt.",
+      "The provider evaluates the persisted observation without independently re-fetching BSC state and does not broadcast a transaction.",
+      "The run costs $0.00, requires no wallet, creates no settlement, and must be revalidated before any financial action.",
+    ],
+    benchmarkLock: null,
+    receipt: {
+      mode: "SESSION_EMBEDDED",
+      path: null,
+      evaluationHash: result.evaluation.evaluationHash,
+    },
+    result,
+  };
 }
 
 export async function runSuppliedProviderRequest(

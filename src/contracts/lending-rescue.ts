@@ -31,8 +31,8 @@ export const LendingRescueRequestSchema = z
     market: AddressSchema,
     position: z
       .object({
-        collateral: z.array(LendingCollateralSchema).min(1),
-        debt: z.array(LendingDebtSchema).min(1),
+        collateral: z.array(LendingCollateralSchema).max(32),
+        debt: z.array(LendingDebtSchema).max(32),
       })
       .strict(),
     availableAssets: z.array(AvailableAssetSchema),

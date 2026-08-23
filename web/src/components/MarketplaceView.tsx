@@ -47,7 +47,8 @@ export function MarketplaceView({
   const selectedTask = TASKS.find((task) => task.id === selectedService);
   const SelectedIcon = selectedTask?.icon;
   const catalogLoading = providers.length === 0;
-  const selectedSupportsPersistedHire = selectedService !== "YIELD_OPTIMIZATION";
+  const selectedIsCurrentLending = selectedService === "LENDING_RESCUE";
+  const selectedIsSimulation = selectedService === "YIELD_OPTIMIZATION";
 
   return (
     <main className="marketplace-page">
@@ -56,9 +57,9 @@ export function MarketplaceView({
           <div className="market-intro-copy">
             <span className="page-kicker">BSC capital operations</span>
             <h1>Hire a capital operator.</h1>
-            <p>Find, compare, and select a provider, then create a server-persisted $0 historical-fixture hire and inspect its public receipt.</p>
+            <p>Load a current, block-pinned Venus position and hire a provider to return either a bounded unsigned rescue plan or a provable refusal with a durable receipt.</p>
             <button className="market-intro-action" type="button" onClick={() => onCreateJob("LENDING_RESCUE")}>
-              Select lending rescue <ArrowRight size={17} aria-hidden="true" />
+              Check a current Venus position <ArrowRight size={17} aria-hidden="true" />
             </button>
           </div>
           <div className="market-system-panel" aria-label="Marketplace system status">
@@ -89,7 +90,7 @@ export function MarketplaceView({
               <span className="task-deck-top"><span>{task.index}</span><Icon size={19} aria-hidden="true" /></span>
               <strong>{task.title}</strong>
               <small>{task.description}</small>
-              <span className="task-deck-foot"><span><b>{task.id === "YIELD_OPTIMIZATION" ? "Simulation" : "$0 persisted hire"}</b><small>{task.id === "YIELD_OPTIMIZATION" ? "No frozen comparison task" : "Historical fixture · no wallet"}</small></span><ArrowUpRight size={15} aria-hidden="true" /></span>
+              <span className="task-deck-foot"><span><b>{task.id === "LENDING_RESCUE" ? "$0 current hire" : task.id === "YIELD_OPTIMIZATION" ? "Simulation" : "$0 evidence replay"}</b><small>{task.id === "LENDING_RESCUE" ? "Block-pinned Venus · no wallet" : task.id === "YIELD_OPTIMIZATION" ? "No frozen comparison task" : "Historical fixture · no wallet"}</small></span><ArrowUpRight size={15} aria-hidden="true" /></span>
             </button>
           );
         })}
@@ -182,13 +183,13 @@ export function MarketplaceView({
           <aside className="provider-detail" aria-label="Selected provider">
             {selected ? (
               <>
-                <div className="provider-detail-eyebrow"><span>Selected operator</span><span><BadgeCheck size={13} /> Fixture verified</span></div>
+                <div className="provider-detail-eyebrow"><span>Selected operator</span><span><BadgeCheck size={13} /> Contract verified</span></div>
                 <div className="provider-detail-title">
                   <span className="provider-icon large">{SelectedIcon && <SelectedIcon size={21} aria-hidden="true" />}</span>
                   <div><span>{selected.category}</span><h2>{selected.name}</h2></div>
                 </div>
                 <div className="provider-detail-meta">
-                  <strong>{selectedSupportsPersistedHire ? "$0.00" : "Free simulation"}<small>{selectedSupportsPersistedHire ? "historical fixture · no wallet" : "not marketplace evidence"}</small></strong>
+                  <strong>{selectedIsCurrentLending ? "$0.00" : selectedIsSimulation ? "Free simulation" : "$0 replay"}<small>{selectedIsCurrentLending ? "current block-pinned hire · no wallet" : selectedIsSimulation ? "not marketplace evidence" : "historical evidence · no wallet"}</small></strong>
                   <span className={`availability-label ${selectedResult ? "ready" : "pending"}`}><i /> {selectedResult ? "Reachable" : "Checking"}</span>
                 </div>
                 <p className="provider-summary">{selected.summary}</p>
@@ -202,21 +203,23 @@ export function MarketplaceView({
                   <div><dt><BadgeCheck size={14} /> Conformance</dt><dd>{selectedResult?.result.evaluation.score ?? "-"}/100 · {selectedResult?.result.job.state ?? "Checking"}</dd></div>
                 </dl>
                 <button className="primary-action" type="button" onClick={() => onCreateJob(selected.service)}>
-                  {selectedSupportsPersistedHire ? "Select and continue to Hire and run" : `Open ${serviceLabel(selected.service).toLowerCase()} simulation`}
+                  {selectedIsCurrentLending ? "Load current position and hire" : selectedIsSimulation ? `Open ${serviceLabel(selected.service).toLowerCase()} simulation` : `Open ${serviceLabel(selected.service).toLowerCase()} workspace`}
                   <ArrowRight size={16} aria-hidden="true" />
                 </button>
                 {selectedResult?.receipt.path ? (
                   <a className="provider-receipt-preview" href={selectedResult.receipt.path} target="_blank" rel="noreferrer">
                     <CheckCircle2 size={15} aria-hidden="true" />
-                    <span><strong>Open public receipt</strong><small>{shortHash(selectedResult.result.evaluation.evaluationHash)}</small></span>
+                    <span><strong>Open historical evidence receipt</strong><small>{shortHash(selectedResult.result.evaluation.evaluationHash)}</small></span>
                     <ExternalLink size={13} aria-hidden="true" />
                   </a>
                 ) : null}
                 <div className="provider-boundary">
                   <strong>Trial boundary</strong>
-                  <span>{selectedSupportsPersistedHire
-                    ? "$0 · no wallet · frozen historical task · D1 request/result receipt · no payment, external-demand, or live-advice claim"
-                    : "Interactive simulation only · no persisted marketplace-hire claim"}</span>
+                  <span>{selectedIsCurrentLending
+                    ? "$0 · no wallet · current block-pinned read · persisted request/result receipt · unsigned plan or refusal · no transaction execution or payment"
+                    : selectedIsSimulation
+                      ? "Interactive simulation only · no persisted marketplace-hire claim"
+                      : "$0 · no wallet · historical evidence replay · no current-action, payment, or external-demand claim"}</span>
                 </div>
               </>
             ) : (
