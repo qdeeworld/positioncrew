@@ -136,27 +136,54 @@ async function fetchText(name, input) {
   return body;
 }
 
-async function fetchJson(name, input) {
+async function fetchJson(
+  name,
+  input,
+  { retryWhen, retryDelaysMs = [] } = {},
+) {
   const url = localUrl(input);
   url.searchParams.set("positioncrew_monitor", monitorRunId);
   const startedAt = performance.now();
-  const { response, attempts } = await fetchReadOnly(url, {
-    headers: {
-      Accept: "application/json",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-      "User-Agent": "PositionCrew-Production-Monitor/1.0",
-    },
-  });
-  const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
-  const body = await response.json().catch(() => null);
-  checks.push({ name, url: url.toString(), status: response.status, latencyMs, attempts });
-  const failureDetail = body && typeof body === "object"
-    ? `: ${JSON.stringify(body).slice(0, 500)}`
-    : "";
-  assert(response.ok, `${name} returned HTTP ${response.status}${failureDetail}`);
-  assert(body && typeof body === "object", `${name} did not return a JSON object`);
-  return body;
+  let totalAttempts = 0;
+
+  for (let semanticAttempt = 0; ; semanticAttempt += 1) {
+    const { response, attempts } = await fetchReadOnly(url, {
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+        "User-Agent": "PositionCrew-Production-Monitor/1.0",
+      },
+    });
+    totalAttempts += attempts;
+    const body = await response.json().catch(() => null);
+    const retryDelayMs = retryDelaysMs[semanticAttempt];
+    if (
+      retryDelayMs !== undefined &&
+      response.ok &&
+      body &&
+      typeof body === "object" &&
+      retryWhen?.(body)
+    ) {
+      await sleep(retryDelayMs);
+      continue;
+    }
+
+    const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
+    checks.push({
+      name,
+      url: url.toString(),
+      status: response.status,
+      latencyMs,
+      attempts: totalAttempts,
+    });
+    const failureDetail = body && typeof body === "object"
+      ? `: ${JSON.stringify(body).slice(0, 500)}`
+      : "";
+    assert(response.ok, `${name} returned HTTP ${response.status}${failureDetail}`);
+    assert(body && typeof body === "object", `${name} did not return a JSON object`);
+    return body;
+  }
 }
 
 async function fetchGithubJson(name, input) {
@@ -381,6 +408,10 @@ try {
   const aacpReadiness = await fetchJson(
     "aacp-production-readiness",
     marketplace.aacpReadinessUrl,
+    {
+      retryWhen: (body) => body.state === "SOURCE_UNAVAILABLE",
+      retryDelaysMs: [65_000, 65_000],
+    },
   );
   assert(
     aacpReadiness.schemaVersion === "positioncrew.aacp-production-readiness.v1",
