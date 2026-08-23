@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "17,47 * * * *"
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Operation to run
+        required: true
+        default: verify-production
+        type: choice
+        options:
+          - verify-production
+          - attest-runtime-rotation-evidence
 
 permissions:
   contents: write
@@ -14,6 +23,7 @@ concurrency:
 
 jobs:
   verify-production:
+    if: github.event_name == 'schedule' || inputs.operation == 'verify-production'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -64,3 +74,26 @@ jobs:
         env:
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
         run: test "$VERIFY_OUTCOME" = "success"
+
+  attest-runtime-rotation-evidence:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'attest-runtime-rotation-evidence'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Authenticate preserved run-to-archive bindings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/attest-runtime-rotation-evidence.mjs
+      - name: Attest preserved runtime rotation archives
+        uses: actions/attest@v4
+        with:
+          subject-path: evidence/termix-runtime-rotation-artifacts/*.zip
