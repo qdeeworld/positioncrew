@@ -10,6 +10,7 @@ import {
 import termixIdentityEvidence from "../../evidence/termix-identities.mainnet.json" with { type: "json" };
 import termixListingEvidence from "../../evidence/termix-listings.mainnet.json" with { type: "json" };
 import dedicatedLendingEvidence from "../../evidence/termix-dedicated-lending.mainnet.json" with { type: "json" };
+import termixRuntimeRotationManifest from "../../evidence/termix-runtime-rotation-events.manifest.json" with { type: "json" };
 import termixRuntimeRotationEvidence from "../../evidence/termix-runtime-rotations.mainnet.json" with { type: "json" };
 import { AddressSchema, ServiceTypeSchema } from "../contracts/common.js";
 import {
@@ -521,6 +522,10 @@ const AacpRuntimeRotationEvidenceSchema = z
         event: z.literal("workflow_dispatch"),
         conclusion: z.literal("success"),
         runnerEnvironment: z.literal("github-hosted"),
+        rotationManifestPath: z.literal(
+          "evidence/termix-runtime-rotation-events.manifest.json",
+        ),
+        rotationManifestSha256: Sha256Schema,
         subjectCount: z.number().int().positive(),
       })
       .strict(),
@@ -606,7 +611,7 @@ const AacpRuntimeRotationEvidenceSchema = z
   .strict()
   .superRefine((value, context) => {
     if (
-      value.archiveAttestation.subjectCount !== value.rotations.length ||
+      value.archiveAttestation.subjectCount !== value.rotations.length + 1 ||
       value.archiveAttestation.runUrl !==
         `https://github.com/dolepee/positioncrew/actions/runs/${value.archiveAttestation.runId}`
     ) {
@@ -616,7 +621,41 @@ const AacpRuntimeRotationEvidenceSchema = z
         message: "archive attestation is not bound to every rotation and its run",
       });
     }
+    if (
+      termixRuntimeRotationManifest.schemaVersion !==
+        "positioncrew.termix-runtime-rotation-events.v1" ||
+      termixRuntimeRotationManifest.agentId !== value.agentId ||
+      termixRuntimeRotationManifest.agentTokenId !== value.agentTokenId ||
+      termixRuntimeRotationManifest.runtimeInstance !== value.runtimeInstance ||
+      termixRuntimeRotationManifest.eventName !== value.eventName ||
+      termixRuntimeRotationManifest.redactedJournalEventCanonicalization !==
+        value.redactedJournalEventCanonicalization ||
+      termixRuntimeRotationManifest.rotations.length !== value.rotations.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["archiveAttestation", "rotationManifestPath"],
+        message: "signed rotation-event manifest is missing or unbound",
+      });
+    }
     value.rotations.forEach((rotation, index) => {
+      const manifestRotation = termixRuntimeRotationManifest.rotations[index];
+      if (
+        !manifestRotation ||
+        manifestRotation.sequence !== rotation.sequence ||
+        manifestRotation.completedAt !== rotation.completedAt ||
+        manifestRotation.expiresAt !== rotation.expiresAt ||
+        manifestRotation.rotated !== rotation.rotated ||
+        manifestRotation.restarted !== rotation.restarted ||
+        manifestRotation.redactedJournalEventSha256 !==
+          rotation.redactedJournalEventSha256
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index],
+          message: "rotation does not match the signed event manifest",
+        });
+      }
       const computedJournalEventSha256 = redactedRuntimeRotationEventSha256({
         completedAt: rotation.completedAt,
         eventName: value.eventName,

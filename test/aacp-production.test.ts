@@ -294,12 +294,16 @@ describe("dedicated TermiX flagship evidence", () => {
         predicateType: "https://slsa.dev/provenance/v1",
         signerWorkflow:
           "dolepee/positioncrew/.github/workflows/production-smoke.yml",
-        sourceCommit: "03425effc575c6c754105fb867bf0136db7269a4",
-        runId: "32663075140",
+        sourceCommit: "e09c9bb2af256d01695d2109a552e8ed42f58832",
+        runId: "32664036259",
         event: "workflow_dispatch",
         conclusion: "success",
         runnerEnvironment: "github-hosted",
-        subjectCount: 3,
+        rotationManifestPath:
+          "evidence/termix-runtime-rotation-events.manifest.json",
+        rotationManifestSha256:
+          "df08fffd8d2a12b893cb7e843be5f7be74fe72ce72cadbaece939f063e16fcfb",
+        subjectCount: 4,
       },
     });
     expect(AACP_RUNTIME_ROTATION_EVIDENCE.rotations).toHaveLength(3);

@@ -17,17 +17,19 @@
     "provider": "GITHUB_ARTIFACT_ATTESTATIONS",
     "predicateType": "https://slsa.dev/provenance/v1",
     "bundlePath": "evidence/termix-runtime-rotation-attestation.bundle.jsonl",
-    "bundleSha256": "b5694773c33ab75abf081c3200a45b883da7ee69a4a91b9e547aa6fbe5732d70",
+    "bundleSha256": "b9a5c9f82323858911ea0eaddc7204fb2a1d9b3d761382f65a508a4f5c0a91e2",
     "signerWorkflow": "dolepee/positioncrew/.github/workflows/production-smoke.yml",
-    "sourceCommit": "03425effc575c6c754105fb867bf0136db7269a4",
+    "sourceCommit": "e09c9bb2af256d01695d2109a552e8ed42f58832",
     "sourceRef": "refs/heads/fix/runtime-rotation-evidence",
-    "runId": "32663075140",
+    "runId": "32664036259",
     "runAttempt": 1,
-    "runUrl": "https://github.com/dolepee/positioncrew/actions/runs/32663075140",
+    "runUrl": "https://github.com/dolepee/positioncrew/actions/runs/32664036259",
     "event": "workflow_dispatch",
     "conclusion": "success",
     "runnerEnvironment": "github-hosted",
-    "subjectCount": 3
+    "rotationManifestPath": "evidence/termix-runtime-rotation-events.manifest.json",
+    "rotationManifestSha256": "df08fffd8d2a12b893cb7e843be5f7be74fe72ce72cadbaece939f063e16fcfb",
+    "subjectCount": 4
   },
   "rotations": [
     {
@@ -193,7 +195,7 @@
       }
     }
   ],
-  "verifiedAt": "2026-08-23T20:03:53.000Z",
+  "verifiedAt": "2026-08-23T20:21:38.000Z",
   "boundaries": [
     "Each entry is a redacted completion event emitted by the dedicated root-only systemd renewal unit with rotated=true and restarted=true, followed by the earliest successful scheduled production observation that reported the dedicated listing online; the referenced GitHub run metadata, original artifact ZIP, GitHub-published archive digest, and extracted health-report digest are preserved for independent verification.",
     "A GitHub OIDC-backed SLSA provenance attestation from the pinned production-smoke workflow and source commit binds all three preserved ZIP digests after independently checking each original run-to-artifact relationship; the Sigstore bundle is retained in this repository and verified without the expiring Actions artifact API.",

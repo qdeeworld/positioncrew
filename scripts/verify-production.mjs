@@ -507,7 +507,7 @@ try {
       archiveAttestation.event === "workflow_dispatch" &&
       archiveAttestation.conclusion === "success" &&
       archiveAttestation.runnerEnvironment === "github-hosted" &&
-      archiveAttestation.subjectCount === rotations.length &&
+      archiveAttestation.subjectCount === rotations.length + 1 &&
       archiveAttestation.runUrl ===
         `https://github.com/dolepee/positioncrew/actions/runs/${archiveAttestation.runId}`,
     "Runtime archive attestation metadata is missing or unbound",
@@ -521,6 +521,41 @@ try {
     createHash("sha256").update(attestationBundle).digest("hex") ===
       archiveAttestation.bundleSha256,
     "Runtime archive attestation bundle failed digest verification",
+  );
+  const rotationManifestPath = resolve(
+    repositoryRoot,
+    archiveAttestation.rotationManifestPath,
+  );
+  const rotationManifestBytes = await readFile(rotationManifestPath);
+  assert(
+    createHash("sha256").update(rotationManifestBytes).digest("hex") ===
+      archiveAttestation.rotationManifestSha256,
+    "Runtime rotation-event manifest failed digest verification",
+  );
+  const rotationManifest = JSON.parse(rotationManifestBytes.toString("utf8"));
+  assert(
+    rotationManifest.schemaVersion ===
+      "positioncrew.termix-runtime-rotation-events.v1" &&
+      rotationManifest.agentId === runtimeEvidence.agentId &&
+      rotationManifest.agentTokenId === runtimeEvidence.agentTokenId &&
+      rotationManifest.runtimeInstance === runtimeEvidence.runtimeInstance &&
+      rotationManifest.eventName === runtimeEvidence.eventName &&
+      rotationManifest.redactedJournalEventCanonicalization ===
+        runtimeEvidence.redactedJournalEventCanonicalization &&
+      rotationManifest.rotations?.length === rotations.length &&
+      rotationManifest.rotations.every((manifestRotation, index) => {
+        const rotation = rotations[index];
+        return (
+          manifestRotation.sequence === rotation.sequence &&
+          manifestRotation.completedAt === rotation.completedAt &&
+          manifestRotation.expiresAt === rotation.expiresAt &&
+          manifestRotation.rotated === rotation.rotated &&
+          manifestRotation.restarted === rotation.restarted &&
+          manifestRotation.redactedJournalEventSha256 ===
+            rotation.redactedJournalEventSha256
+        );
+      }),
+    "Runtime rotations do not match the signed event manifest",
   );
   const attestationOutput = execFileSync(
     "gh",
@@ -560,11 +595,16 @@ try {
   const attestationResult = attestationResults[0].verificationResult;
   const attestationCertificate = attestationResult.signature?.certificate;
   const attestationStatement = attestationResult.statement;
-  const expectedSubjects = rotations
-    .map((rotation) => ({
+  const expectedSubjects = [
+    ...rotations.map((rotation) => ({
       name: basename(rotation.onlineObservation.artifact.archivePath),
       sha256: rotation.onlineObservation.artifact.archiveSha256,
-    }))
+    })),
+    {
+      name: basename(archiveAttestation.rotationManifestPath),
+      sha256: archiveAttestation.rotationManifestSha256,
+    },
+  ]
     .sort((left, right) => left.name.localeCompare(right.name));
   const attestedSubjects = (attestationStatement?.subject ?? [])
     .map((subject) => ({ name: subject.name, sha256: subject.digest?.sha256 }))

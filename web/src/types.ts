@@ -191,6 +191,8 @@ export interface AacpRuntimeRotationEvidence {
     event: "workflow_dispatch";
     conclusion: "success";
     runnerEnvironment: "github-hosted";
+    rotationManifestPath: "evidence/termix-runtime-rotation-events.manifest.json";
+    rotationManifestSha256: string;
     subjectCount: number;
   };
   rotations: Array<{
