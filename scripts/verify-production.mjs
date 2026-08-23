@@ -536,6 +536,10 @@ try {
   assert(
     rotationManifest.schemaVersion ===
       "positioncrew.termix-runtime-rotation-events.v1" &&
+      rotationManifest.network === runtimeEvidence.network &&
+      rotationManifest.chainId === runtimeEvidence.chainId &&
+      rotationManifest.service === runtimeEvidence.service &&
+      rotationManifest.role === runtimeEvidence.role &&
       rotationManifest.agentId === runtimeEvidence.agentId &&
       rotationManifest.agentTokenId === runtimeEvidence.agentTokenId &&
       rotationManifest.runtimeInstance === runtimeEvidence.runtimeInstance &&

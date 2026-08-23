@@ -624,6 +624,10 @@ const AacpRuntimeRotationEvidenceSchema = z
     if (
       termixRuntimeRotationManifest.schemaVersion !==
         "positioncrew.termix-runtime-rotation-events.v1" ||
+      termixRuntimeRotationManifest.network !== value.network ||
+      termixRuntimeRotationManifest.chainId !== value.chainId ||
+      termixRuntimeRotationManifest.service !== value.service ||
+      termixRuntimeRotationManifest.role !== value.role ||
       termixRuntimeRotationManifest.agentId !== value.agentId ||
       termixRuntimeRotationManifest.agentTokenId !== value.agentTokenId ||
       termixRuntimeRotationManifest.runtimeInstance !== value.runtimeInstance ||

@@ -85,6 +85,10 @@ assert(
 assert(
   rotationManifest.schemaVersion ===
     "positioncrew.termix-runtime-rotation-events.v1" &&
+    rotationManifest.network === evidence.network &&
+    rotationManifest.chainId === evidence.chainId &&
+    rotationManifest.service === evidence.service &&
+    rotationManifest.role === evidence.role &&
     rotationManifest.agentId === evidence.agentId &&
     rotationManifest.agentTokenId === evidence.agentTokenId &&
     rotationManifest.runtimeInstance === evidence.runtimeInstance &&
