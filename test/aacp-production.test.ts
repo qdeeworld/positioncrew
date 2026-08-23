@@ -4,6 +4,7 @@ import {
   AACP_MAINNET_IDENTITY_EVIDENCE,
   AACP_MAINNET_LISTING_EVIDENCE,
   AACP_DEDICATED_LENDING_EVIDENCE,
+  AACP_RUNTIME_ROTATION_EVIDENCE,
   AACP_PROVIDER_BLUEPRINTS,
   fetchAacpProductionConfig,
   getAacpProductionReadiness,
@@ -266,6 +267,49 @@ describe("dedicated TermiX flagship evidence", () => {
       liveListingVerified: true,
       onchainVerified: true,
     });
+    expect(readiness.state).toBe("LISTINGS_PUBLISHED_RUNTIME_PENDING");
+    expect(readiness.marketplace.onlineProviderCount).toBe(0);
+    expect(readiness.integration.runtime).toMatchObject({
+      automationScope: "DEDICATED_FLAGSHIP_ONLY",
+      signerIsolation: "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT",
+      pollerHasSigningMaterial: false,
+      originalProvidersAutoRenew: false,
+      rotationEvidence: {
+        verifiedRotationCount: 3,
+        agentId: readiness.marketplace.dedicatedFlagship.agentId,
+        agentTokenId: readiness.marketplace.dedicatedFlagship.agentTokenId,
+      },
+    });
+  });
+
+  it("binds three chronological production rotations to the dedicated identity", () => {
+    expect(AACP_RUNTIME_ROTATION_EVIDENCE).toMatchObject({
+      agentId: AACP_DEDICATED_LENDING_EVIDENCE.agentId,
+      agentTokenId: AACP_DEDICATED_LENDING_EVIDENCE.agentTokenId,
+      handle: AACP_DEDICATED_LENDING_EVIDENCE.handle,
+      owner: AACP_DEDICATED_LENDING_EVIDENCE.owner,
+    });
+    expect(AACP_RUNTIME_ROTATION_EVIDENCE.rotations).toHaveLength(3);
+    for (const [index, rotation] of AACP_RUNTIME_ROTATION_EVIDENCE.rotations.entries()) {
+      expect(rotation.sequence).toBe(index + 1);
+      expect(rotation.rotated).toBe(true);
+      expect(rotation.restarted).toBe(true);
+      expect(Date.parse(rotation.expiresAt)).toBeGreaterThan(
+        Date.parse(rotation.completedAt),
+      );
+      expect(Date.parse(rotation.onlineObservation.observedAt)).toBeGreaterThan(
+        Date.parse(rotation.completedAt),
+      );
+      expect(rotation.onlineObservation).toMatchObject({
+        productionStatus: "OPERATIONAL",
+        listingStatus: "PUBLISHED",
+        a2aStatus: "ONLINE",
+        status: "ONLINE_AND_LISTED",
+      });
+    }
+    expect(AACP_RUNTIME_ROTATION_EVIDENCE.boundaries.join(" ")).toContain(
+      "do not establish continuous uptime",
+    );
   });
 
   it("fails closed when the dedicated NFT owner or metadata URI changes on chain", async () => {
@@ -348,7 +392,13 @@ describe("TermiX production AACP readiness", () => {
           status: "PREISSUED_TOKEN_ADAPTER_IMPLEMENTED",
           ownerSignerOnHost: true,
           autoRenewsToken: true,
+          automationScope: "DEDICATED_FLAGSHIP_ONLY",
+          pollerHasSigningMaterial: false,
+          originalProvidersAutoRenew: false,
           tokenLifetimeHours: 12,
+          rotationEvidence: {
+            verifiedRotationCount: 3,
+          },
         },
         orderGuard: {
           status: "STRICT_LOCAL_LIFECYCLE_IMPLEMENTED",
@@ -464,6 +514,8 @@ describe("TermiX production AACP readiness", () => {
 
     expect(readiness.state).toBe("PROVIDERS_ONLINE");
     expect(readiness.marketplace.onlineProviderCount).toBe(4);
+    expect(readiness.marketplace.dedicatedFlagship.status).toBe("ONLINE_AND_LISTED");
+    expect(readiness.marketplace.requiredProviderCount).toBe(4);
     expect(readiness.boundaries.join(" ")).toContain("reported an online A2A runtime");
     expect(readiness.boundaries.join(" ")).toContain("not a durable uptime claim");
   });
@@ -479,6 +531,11 @@ describe("TermiX production AACP readiness", () => {
     expect(readiness.marketplace.registeredIdentityCount).toBe(0);
     expect(readiness.integration.runtime.ownerSignerOnHost).toBe(true);
     expect(readiness.integration.runtime.autoRenewsToken).toBe(true);
+    expect(readiness.integration.runtime.rotationEvidence.rotations).toHaveLength(3);
+    expect(readiness.marketplace.dedicatedFlagship.status).toBe("UPSTREAM_UNAVAILABLE");
+    expect(readiness.boundaries.join(" ")).toContain(
+      "current runtime presence is unavailable and is not inferred",
+    );
     expect(readiness.integration.orderGuard.guardedActions).toHaveLength(10);
     expect(readiness.marketplace.providers.every((provider) => provider.status === "UPSTREAM_UNAVAILABLE")).toBe(true);
     expect(readiness.boundaries.join(" ")).toContain("no cached deployment claim");

@@ -162,6 +162,49 @@ export interface ProviderCatalogResponse {
   providers: ProviderListing[];
 }
 
+export interface AacpRuntimeRotationEvidence {
+  schemaVersion: "positioncrew.termix-runtime-rotations.v1";
+  network: "bsc-mainnet";
+  chainId: 56;
+  service: "LENDING_RESCUE";
+  role: "DEDICATED_FLAGSHIP_RUNTIME";
+  owner: string;
+  handle: "positioncrew-rescue-adf9.agent";
+  agentId: string;
+  agentTokenId: "293111";
+  runtimeInstance: "dedicated-lending";
+  observationSource: "DEDICATED_VPS_SYSTEMD_JOURNAL";
+  eventName: "termix.runtime-token.renewal-complete";
+  renewalUnit: "positioncrew-runtime-renew@dedicated-lending.service";
+  redactedJournalEventCanonicalization: "UTF8_JSON_STRINGIFY_ORDERED_KEYS_NO_NEWLINE";
+  rotations: Array<{
+    sequence: number;
+    completedAt: string;
+    expiresAt: string;
+    rotated: true;
+    restarted: true;
+    redactedJournalEventSha256: string;
+    onlineObservation: {
+      observedAt: string;
+      source: "GITHUB_ACTIONS_PRODUCTION_SMOKE";
+      runId: string;
+      url: string;
+      productionStatus: "OPERATIONAL";
+      listingStatus: "PUBLISHED";
+      liveListingVerified: true;
+      a2aStatus: "ONLINE";
+      presence: "online";
+      status: "ONLINE_AND_LISTED";
+    };
+  }>;
+  verifiedAt: string;
+  boundaries: string[];
+  verifiedRotationCount: number;
+  firstCompletedAt: string;
+  latestCompletedAt: string;
+  latestTokenExpiresAt: string;
+}
+
 export interface AacpProductionReadiness {
   schemaVersion: "positioncrew.aacp-production-readiness.v1";
   generatedAt: string;
@@ -219,13 +262,18 @@ export interface AacpProductionReadiness {
     };
     runtime: {
       status: "PREISSUED_TOKEN_ADAPTER_IMPLEMENTED";
-      ownerSignerOnHost: boolean;
-      autoRenewsToken: boolean;
+      ownerSignerOnHost: true;
+      autoRenewsToken: true;
+      automationScope: "DEDICATED_FLAGSHIP_ONLY";
+      signerIsolation: "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT";
+      pollerHasSigningMaterial: false;
+      originalProvidersAutoRenew: false;
       tokenLifetimeHours: 12;
       expiryBufferSeconds: number;
       pollSeconds: number;
       automaticConversationKinds: string[];
       operatorRequiredConversationKinds: string[];
+      rotationEvidence: AacpRuntimeRotationEvidence;
     };
     orderGuard: {
       status: "STRICT_LOCAL_LIFECYCLE_IMPLEMENTED";

@@ -395,6 +395,53 @@ try {
       aacpReadiness.integration.runtime.tokenLifetimeHours === 12,
     "AACP runtime signing or expiry boundary changed",
   );
+  const runtimeEvidence = aacpReadiness.integration.runtime.rotationEvidence;
+  const rotations = runtimeEvidence?.rotations ?? [];
+  assert(
+    aacpReadiness.integration.runtime.automationScope === "DEDICATED_FLAGSHIP_ONLY" &&
+      aacpReadiness.integration.runtime.signerIsolation ===
+        "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT" &&
+      aacpReadiness.integration.runtime.pollerHasSigningMaterial === false &&
+      aacpReadiness.integration.runtime.originalProvidersAutoRenew === false,
+    "AACP runtime automation scope is overstated",
+  );
+  assert(
+    runtimeEvidence?.schemaVersion === "positioncrew.termix-runtime-rotations.v1" &&
+      runtimeEvidence.agentId ===
+        aacpReadiness.marketplace.dedicatedFlagship.agentId &&
+      runtimeEvidence.agentTokenId ===
+        aacpReadiness.marketplace.dedicatedFlagship.agentTokenId &&
+      runtimeEvidence.handle === aacpReadiness.marketplace.dedicatedFlagship.handle &&
+      runtimeEvidence.verifiedRotationCount === rotations.length &&
+      rotations.length >= 3,
+    "Dedicated runtime rotation evidence is missing or unbound",
+  );
+  assert(
+    rotations.every(
+      (rotation, index) =>
+        rotation.sequence === index + 1 &&
+        rotation.rotated === true &&
+        rotation.restarted === true &&
+        /^[0-9a-f]{64}$/.test(rotation.redactedJournalEventSha256) &&
+        Date.parse(rotation.expiresAt) > Date.parse(rotation.completedAt) &&
+        Date.parse(rotation.onlineObservation.observedAt) >
+          Date.parse(rotation.completedAt) &&
+        rotation.onlineObservation.a2aStatus === "ONLINE" &&
+        rotation.onlineObservation.status === "ONLINE_AND_LISTED" &&
+        (index === 0 ||
+          (Date.parse(rotation.completedAt) >
+            Date.parse(rotations[index - 1].completedAt) &&
+            Date.parse(rotation.expiresAt) >
+              Date.parse(rotations[index - 1].expiresAt))),
+    ),
+    "Dedicated runtime rotations are not ordered verified completion events",
+  );
+  assert(
+    runtimeEvidence.boundaries
+      .join(" ")
+      .includes("do not establish continuous uptime"),
+    "Rotation evidence overstates uptime",
+  );
   assert(
     aacpReadiness.integration?.orderGuard?.status ===
       "STRICT_LOCAL_LIFECYCLE_IMPLEMENTED" &&
@@ -430,6 +477,9 @@ try {
     status: onlineAacpProviders.length === 4 ? "ONLINE" : "RUNTIME_PENDING",
     onlineProviderCount: onlineAacpProviders.length,
     requiredProviderCount: 4,
+    dedicatedFlagshipStatus: aacpReadiness.marketplace.dedicatedFlagship.status,
+    verifiedAutomaticRotations: runtimeEvidence.verifiedRotationCount,
+    latestRotationAt: runtimeEvidence.latestCompletedAt,
     boundary:
       "TermiX integration is optional for the challenge. Expiring A2A presence is reported separately and never converted into continuous-uptime evidence.",
   };

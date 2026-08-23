@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "positioncrew.termix-runtime-rotations.v1",
+  "network": "bsc-mainnet",
+  "chainId": 56,
+  "service": "LENDING_RESCUE",
+  "role": "DEDICATED_FLAGSHIP_RUNTIME",
+  "owner": "0xADd748C416E8A7efd7d65D18Abb121dea268ddF9",
+  "handle": "positioncrew-rescue-adf9.agent",
+  "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+  "agentTokenId": "293111",
+  "runtimeInstance": "dedicated-lending",
+  "observationSource": "DEDICATED_VPS_SYSTEMD_JOURNAL",
+  "eventName": "termix.runtime-token.renewal-complete",
+  "renewalUnit": "positioncrew-runtime-renew@dedicated-lending.service",
+  "redactedJournalEventCanonicalization": "UTF8_JSON_STRINGIFY_ORDERED_KEYS_NO_NEWLINE",
+  "rotations": [
+    {
+      "sequence": 1,
+      "completedAt": "2026-08-22T22:38:32.041Z",
+      "expiresAt": "2026-08-23T10:38:31.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "7e4ed6092fc8627db8f2f5ffe863c0fb280bdef5034147f57fa6f2a8c5a3cc37",
+      "onlineObservation": {
+        "observedAt": "2026-08-22T22:58:08.818Z",
+        "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
+        "runId": "32603904267",
+        "url": "https://github.com/dolepee/positioncrew/actions/runs/32603904267",
+        "productionStatus": "OPERATIONAL",
+        "listingStatus": "PUBLISHED",
+        "liveListingVerified": true,
+        "a2aStatus": "ONLINE",
+        "presence": "online",
+        "status": "ONLINE_AND_LISTED"
+      }
+    },
+    {
+      "sequence": 2,
+      "completedAt": "2026-08-23T07:45:02.147Z",
+      "expiresAt": "2026-08-23T19:45:01.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "667b8b7476e7c3ce5d94394dd387ed0b28bfd15ea0921bd9f28ee958a0bab982",
+      "onlineObservation": {
+        "observedAt": "2026-08-23T07:46:57.023Z",
+        "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
+        "runId": "32626467898",
+        "url": "https://github.com/dolepee/positioncrew/actions/runs/32626467898",
+        "productionStatus": "OPERATIONAL",
+        "listingStatus": "PUBLISHED",
+        "liveListingVerified": true,
+        "a2aStatus": "ONLINE",
+        "presence": "online",
+        "status": "ONLINE_AND_LISTED"
+      }
+    },
+    {
+      "sequence": 3,
+      "completedAt": "2026-08-23T16:54:45.832Z",
+      "expiresAt": "2026-08-24T04:54:45.000Z",
+      "rotated": true,
+      "restarted": true,
+      "redactedJournalEventSha256": "23c84b96d89ded6f98f8807447f25d9b5def93de6a2f1a63ae4f344f67176040",
+      "onlineObservation": {
+        "observedAt": "2026-08-23T17:00:57.930Z",
+        "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
+        "runId": "32653452771",
+        "url": "https://github.com/dolepee/positioncrew/actions/runs/32653452771",
+        "productionStatus": "OPERATIONAL",
+        "listingStatus": "PUBLISHED",
+        "liveListingVerified": true,
+        "a2aStatus": "ONLINE",
+        "presence": "online",
+        "status": "ONLINE_AND_LISTED"
+      }
+    }
+  ],
+  "verifiedAt": "2026-08-23T18:42:28.974Z",
+  "boundaries": [
+    "Each entry is a redacted completion event emitted by the dedicated root-only systemd renewal unit with rotated=true and restarted=true, followed by the earliest scheduled production observation that reported the dedicated listing online.",
+    "These entries establish discrete host-observed automatic scoped-token rotations; they do not establish continuous uptime, availability between observations, or future renewal success.",
+    "No runtime token, owner key, wallet signature, or other signing material is recorded."
+  ]
+}
