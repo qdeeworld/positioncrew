@@ -1,7 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+import { fileURLToPath } from "node:url";
+import { inflateRawSync } from "node:zlib";
 import {
   createPublicClient,
   defineChain,
@@ -18,6 +20,7 @@ const baseUrl = new URL(
 const outputPath = resolve(
   process.env.POSITIONCREW_HEALTH_OUTPUT ?? "/tmp/positioncrew-production-health.json",
 );
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedServices = new Set([
   "LENDING_RESCUE",
   "LP_REBALANCE",
@@ -153,6 +156,84 @@ async function fetchJson(name, input) {
   assert(response.ok, `${name} returned HTTP ${response.status}${failureDetail}`);
   assert(body && typeof body === "object", `${name} did not return a JSON object`);
   return body;
+}
+
+async function fetchGithubJson(name, input) {
+  const url = new URL(input);
+  assert(url.origin === "https://api.github.com", `Refusing non-GitHub API URL: ${url}`);
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const startedAt = performance.now();
+  const { response, attempts } = await fetchReadOnly(url, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "Cache-Control": "no-cache",
+      "User-Agent": "PositionCrew-Production-Monitor/1.0",
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
+  const body = await response.json().catch(() => null);
+  checks.push({ name, url: url.toString(), status: response.status, latencyMs, attempts });
+  assert(response.ok, `${name} returned HTTP ${response.status}`);
+  assert(body && typeof body === "object", `${name} did not return a JSON object`);
+  return body;
+}
+
+function extractZipEntry(archive, expectedName) {
+  const endSearchStart = Math.max(0, archive.length - 65_557);
+  let endOffset = -1;
+  for (let offset = archive.length - 22; offset >= endSearchStart; offset -= 1) {
+    if (archive.readUInt32LE(offset) === 0x06054b50) {
+      endOffset = offset;
+      break;
+    }
+  }
+  assert(endOffset >= 0, "Artifact ZIP end-of-central-directory record is missing");
+  const entryCount = archive.readUInt16LE(endOffset + 10);
+  let cursor = archive.readUInt32LE(endOffset + 16);
+  for (let index = 0; index < entryCount; index += 1) {
+    assert(
+      archive.readUInt32LE(cursor) === 0x02014b50,
+      "Artifact ZIP central-directory entry is malformed",
+    );
+    const compressionMethod = archive.readUInt16LE(cursor + 10);
+    const compressedSize = archive.readUInt32LE(cursor + 20);
+    const uncompressedSize = archive.readUInt32LE(cursor + 24);
+    const fileNameLength = archive.readUInt16LE(cursor + 28);
+    const extraLength = archive.readUInt16LE(cursor + 30);
+    const commentLength = archive.readUInt16LE(cursor + 32);
+    const localHeaderOffset = archive.readUInt32LE(cursor + 42);
+    const fileName = archive.toString(
+      "utf8",
+      cursor + 46,
+      cursor + 46 + fileNameLength,
+    );
+    if (fileName === expectedName) {
+      assert(
+        archive.readUInt32LE(localHeaderOffset) === 0x04034b50,
+        "Artifact ZIP local entry is malformed",
+      );
+      const localFileNameLength = archive.readUInt16LE(localHeaderOffset + 26);
+      const localExtraLength = archive.readUInt16LE(localHeaderOffset + 28);
+      const dataStart =
+        localHeaderOffset + 30 + localFileNameLength + localExtraLength;
+      const compressed = archive.subarray(dataStart, dataStart + compressedSize);
+      const content = compressionMethod === 0
+        ? Buffer.from(compressed)
+        : compressionMethod === 8
+          ? inflateRawSync(compressed)
+          : null;
+      assert(content, `Unsupported artifact ZIP compression method: ${compressionMethod}`);
+      assert(
+        content.length === uncompressedSize,
+        "Artifact ZIP report size does not match its central directory",
+      );
+      return content;
+    }
+    cursor += 46 + fileNameLength + extraLength + commentLength;
+  }
+  throw new Error(`Artifact ZIP is missing ${expectedName}`);
 }
 
 async function postJson(name, input, payload) {
@@ -446,6 +527,22 @@ try {
             Date.parse(rotations[index + 1].completedAt)) &&
         rotation.onlineObservation.a2aStatus === "ONLINE" &&
         rotation.onlineObservation.status === "ONLINE_AND_LISTED" &&
+        rotation.onlineObservation.githubRun.event === "schedule" &&
+        rotation.onlineObservation.githubRun.status === "completed" &&
+        rotation.onlineObservation.githubRun.conclusion === "success" &&
+        rotation.onlineObservation.githubRun.headBranch === "main" &&
+        rotation.onlineObservation.url ===
+          `https://github.com/dolepee/positioncrew/actions/runs/${rotation.onlineObservation.runId}` &&
+        rotation.onlineObservation.artifact.name ===
+          `positioncrew-production-health-${rotation.onlineObservation.runId}` &&
+        rotation.onlineObservation.artifact.archivePath ===
+          `evidence/termix-runtime-rotation-artifacts/${rotation.onlineObservation.runId}.zip` &&
+        rotation.onlineObservation.healthReport.aacpGeneratedAt ===
+          rotation.onlineObservation.observedAt &&
+        Date.parse(rotation.onlineObservation.healthReport.checkedAt) <=
+          Date.parse(rotation.onlineObservation.observedAt) &&
+        Date.parse(rotation.onlineObservation.healthReport.completedAt) >=
+          Date.parse(rotation.onlineObservation.observedAt) &&
         (index === 0 ||
           (Date.parse(rotation.completedAt) >
             Date.parse(rotations[index - 1].completedAt) &&
@@ -454,12 +551,82 @@ try {
     ),
     "Dedicated runtime rotations are not ordered verified completion events",
   );
+  for (const rotation of rotations) {
+    const observation = rotation.onlineObservation;
+    const runEvidence = observation.githubRun;
+    const artifactEvidence = observation.artifact;
+    const reportEvidence = observation.healthReport;
+    const githubRun = await fetchGithubJson(
+      `github-run-${observation.runId}`,
+      `https://api.github.com/repos/dolepee/positioncrew/actions/runs/${observation.runId}`,
+    );
+    assert(
+      String(githubRun.id) === observation.runId &&
+        String(githubRun.workflow_id) === runEvidence.workflowId &&
+        githubRun.path === runEvidence.workflowPath &&
+        githubRun.event === runEvidence.event &&
+        githubRun.status === runEvidence.status &&
+        githubRun.conclusion === runEvidence.conclusion &&
+        githubRun.head_branch === runEvidence.headBranch &&
+        githubRun.head_sha === runEvidence.headSha &&
+        githubRun.run_attempt === runEvidence.runAttempt &&
+        githubRun.html_url === observation.url,
+      `GitHub run ${observation.runId} does not match its scheduled-success evidence`,
+    );
+    const githubArtifacts = await fetchGithubJson(
+      `github-artifacts-${observation.runId}`,
+      `https://api.github.com/repos/dolepee/positioncrew/actions/runs/${observation.runId}/artifacts`,
+    );
+    const githubArtifact = githubArtifacts.artifacts?.find(
+      (artifact) => String(artifact.id) === artifactEvidence.id,
+    );
+    assert(
+      githubArtifact &&
+        githubArtifact.name === artifactEvidence.name &&
+        githubArtifact.digest === `sha256:${artifactEvidence.archiveSha256}` &&
+        githubArtifact.size_in_bytes === artifactEvidence.sizeBytes &&
+        String(githubArtifact.workflow_run?.id) === observation.runId &&
+        githubArtifact.workflow_run?.head_sha === runEvidence.headSha,
+      `GitHub artifact for run ${observation.runId} does not match its digest evidence`,
+    );
+    const archive = await readFile(resolve(repositoryRoot, artifactEvidence.archivePath));
+    assert(
+      archive.length === artifactEvidence.sizeBytes &&
+        createHash("sha256").update(archive).digest("hex") ===
+          artifactEvidence.archiveSha256,
+      `Preserved artifact ZIP for run ${observation.runId} failed digest verification`,
+    );
+    const reportBuffer = extractZipEntry(archive, artifactEvidence.reportFileName);
+    assert(
+      createHash("sha256").update(reportBuffer).digest("hex") ===
+        artifactEvidence.reportSha256,
+      `Health report for run ${observation.runId} failed digest verification`,
+    );
+    const report = JSON.parse(reportBuffer.toString("utf8"));
+    const dedicatedFlagship = report.aacpReadiness?.marketplace?.dedicatedFlagship;
+    assert(
+      report.schemaVersion === reportEvidence.schemaVersion &&
+        report.baseUrl === reportEvidence.baseUrl &&
+        report.checkedAt === reportEvidence.checkedAt &&
+        report.completedAt === reportEvidence.completedAt &&
+        report.status === reportEvidence.status &&
+        report.error === null &&
+        report.aacpReadiness?.generatedAt === reportEvidence.aacpGeneratedAt &&
+        report.aacpReadiness.generatedAt === observation.observedAt &&
+        dedicatedFlagship?.agentId === runtimeEvidence.agentId &&
+        dedicatedFlagship?.agentTokenId === runtimeEvidence.agentTokenId &&
+        dedicatedFlagship?.listingStatus === observation.listingStatus &&
+        dedicatedFlagship?.a2aStatus === observation.a2aStatus &&
+        dedicatedFlagship?.status === observation.status,
+      `Health report for run ${observation.runId} does not prove the dedicated runtime observation`,
+    );
+  }
   const latestRotation = rotations.at(-1);
   assert(
     latestRotation &&
       Date.parse(runtimeEvidence.verifiedAt) >=
-        Date.parse(latestRotation.onlineObservation.observedAt),
-    "Runtime rotation verification predates the latest online observation",
+        Date.parse(latestRotation.onlineObservation.healthReport.completedAt),
+    "Runtime rotation verification predates the latest health report",
   );
   assert(
     runtimeEvidence.boundaries

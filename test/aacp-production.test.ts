@@ -327,10 +327,43 @@ describe("dedicated TermiX flagship evidence", () => {
         a2aStatus: "ONLINE",
         status: "ONLINE_AND_LISTED",
       });
+      expect(rotation.onlineObservation.githubRun).toMatchObject({
+        workflowId: "333142188",
+        workflowPath: ".github/workflows/production-smoke.yml",
+        event: "schedule",
+        status: "completed",
+        conclusion: "success",
+        headBranch: "main",
+      });
+      expect(rotation.onlineObservation.artifact).toMatchObject({
+        name: `positioncrew-production-health-${rotation.onlineObservation.runId}`,
+        archivePath:
+          `evidence/termix-runtime-rotation-artifacts/${rotation.onlineObservation.runId}.zip`,
+        reportFileName: "positioncrew-production-health.json",
+      });
+      expect(rotation.onlineObservation.healthReport).toMatchObject({
+        schemaVersion: "positioncrew.production-health-report.v1",
+        baseUrl: "https://positioncrew.dolepee.com",
+        status: "OPERATIONAL",
+        aacpGeneratedAt: rotation.onlineObservation.observedAt,
+        dedicatedFlagship: {
+          agentId: AACP_RUNTIME_ROTATION_EVIDENCE.agentId,
+          agentTokenId: AACP_RUNTIME_ROTATION_EVIDENCE.agentTokenId,
+          listingStatus: "PUBLISHED",
+          a2aStatus: "ONLINE",
+          status: "ONLINE_AND_LISTED",
+        },
+      });
+      expect(
+        Date.parse(rotation.onlineObservation.healthReport.checkedAt),
+      ).toBeLessThanOrEqual(Date.parse(rotation.onlineObservation.observedAt));
+      expect(
+        Date.parse(rotation.onlineObservation.healthReport.completedAt),
+      ).toBeGreaterThanOrEqual(Date.parse(rotation.onlineObservation.observedAt));
     }
     const latestRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations.at(-1)!;
     expect(Date.parse(AACP_RUNTIME_ROTATION_EVIDENCE.verifiedAt)).toBeGreaterThanOrEqual(
-      Date.parse(latestRotation.onlineObservation.observedAt),
+      Date.parse(latestRotation.onlineObservation.healthReport.completedAt),
     );
     const firstRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations[0]!;
     expect(

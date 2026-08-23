@@ -26,6 +26,40 @@
         "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
         "runId": "32603904267",
         "url": "https://github.com/dolepee/positioncrew/actions/runs/32603904267",
+        "githubRun": {
+          "workflowId": "333142188",
+          "workflowPath": ".github/workflows/production-smoke.yml",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "success",
+          "headBranch": "main",
+          "headSha": "cb167361eb39ea4917058e37901501ae8252309c",
+          "runAttempt": 1
+        },
+        "artifact": {
+          "id": "9483624689",
+          "name": "positioncrew-production-health-32603904267",
+          "archivePath": "evidence/termix-runtime-rotation-artifacts/32603904267.zip",
+          "archiveSha256": "aeff9a1b837b2b3b91c141f99c14248b4d7790fa59437cb48349cbb504b4a7aa",
+          "sizeBytes": 14564,
+          "reportFileName": "positioncrew-production-health.json",
+          "reportSha256": "935f000b4ab3d9cf99fb10181d1111270282d3bbcefac5d46b2f667cb9ad1066"
+        },
+        "healthReport": {
+          "schemaVersion": "positioncrew.production-health-report.v1",
+          "baseUrl": "https://positioncrew.dolepee.com",
+          "checkedAt": "2026-08-22T22:58:07.135Z",
+          "completedAt": "2026-08-22T22:58:23.473Z",
+          "status": "OPERATIONAL",
+          "aacpGeneratedAt": "2026-08-22T22:58:08.818Z",
+          "dedicatedFlagship": {
+            "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+            "agentTokenId": "293111",
+            "listingStatus": "PUBLISHED",
+            "a2aStatus": "ONLINE",
+            "status": "ONLINE_AND_LISTED"
+          }
+        },
         "productionStatus": "OPERATIONAL",
         "listingStatus": "PUBLISHED",
         "liveListingVerified": true,
@@ -46,6 +80,40 @@
         "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
         "runId": "32626467898",
         "url": "https://github.com/dolepee/positioncrew/actions/runs/32626467898",
+        "githubRun": {
+          "workflowId": "333142188",
+          "workflowPath": ".github/workflows/production-smoke.yml",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "success",
+          "headBranch": "main",
+          "headSha": "cb167361eb39ea4917058e37901501ae8252309c",
+          "runAttempt": 1
+        },
+        "artifact": {
+          "id": "9489822987",
+          "name": "positioncrew-production-health-32626467898",
+          "archivePath": "evidence/termix-runtime-rotation-artifacts/32626467898.zip",
+          "archiveSha256": "1c39017bea24dd31d12cfbef37cdaacf3d0b8e21737eb537be2d4ffea25e84f1",
+          "sizeBytes": 14554,
+          "reportFileName": "positioncrew-production-health.json",
+          "reportSha256": "11ecb58236ddf8a507b7a72e7ad3a8342481b4713dabc283095732f647d6eb6c"
+        },
+        "healthReport": {
+          "schemaVersion": "positioncrew.production-health-report.v1",
+          "baseUrl": "https://positioncrew.dolepee.com",
+          "checkedAt": "2026-08-23T07:46:55.602Z",
+          "completedAt": "2026-08-23T07:47:09.209Z",
+          "status": "OPERATIONAL",
+          "aacpGeneratedAt": "2026-08-23T07:46:57.023Z",
+          "dedicatedFlagship": {
+            "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+            "agentTokenId": "293111",
+            "listingStatus": "PUBLISHED",
+            "a2aStatus": "ONLINE",
+            "status": "ONLINE_AND_LISTED"
+          }
+        },
         "productionStatus": "OPERATIONAL",
         "listingStatus": "PUBLISHED",
         "liveListingVerified": true,
@@ -66,6 +134,40 @@
         "source": "GITHUB_ACTIONS_PRODUCTION_SMOKE",
         "runId": "32653452771",
         "url": "https://github.com/dolepee/positioncrew/actions/runs/32653452771",
+        "githubRun": {
+          "workflowId": "333142188",
+          "workflowPath": ".github/workflows/production-smoke.yml",
+          "event": "schedule",
+          "status": "completed",
+          "conclusion": "success",
+          "headBranch": "main",
+          "headSha": "cb167361eb39ea4917058e37901501ae8252309c",
+          "runAttempt": 1
+        },
+        "artifact": {
+          "id": "9496813609",
+          "name": "positioncrew-production-health-32653452771",
+          "archivePath": "evidence/termix-runtime-rotation-artifacts/32653452771.zip",
+          "archiveSha256": "66725fa251ea1b91ae387fc12d9ecd6e3ba0e7bfc9c52fbc09a276f7cd3a3768",
+          "sizeBytes": 14484,
+          "reportFileName": "positioncrew-production-health.json",
+          "reportSha256": "9f99254beffd00ea9c63a458616091f5fd39da250321b2da2c5c05601a2bbb0f"
+        },
+        "healthReport": {
+          "schemaVersion": "positioncrew.production-health-report.v1",
+          "baseUrl": "https://positioncrew.dolepee.com",
+          "checkedAt": "2026-08-23T17:00:56.571Z",
+          "completedAt": "2026-08-23T17:01:07.054Z",
+          "status": "OPERATIONAL",
+          "aacpGeneratedAt": "2026-08-23T17:00:57.930Z",
+          "dedicatedFlagship": {
+            "agentId": "cmt4dzxvcli4tw70125nd5ra8",
+            "agentTokenId": "293111",
+            "listingStatus": "PUBLISHED",
+            "a2aStatus": "ONLINE",
+            "status": "ONLINE_AND_LISTED"
+          }
+        },
         "productionStatus": "OPERATIONAL",
         "listingStatus": "PUBLISHED",
         "liveListingVerified": true,
@@ -77,7 +179,7 @@
   ],
   "verifiedAt": "2026-08-23T18:42:28.974Z",
   "boundaries": [
-    "Each entry is a redacted completion event emitted by the dedicated root-only systemd renewal unit with rotated=true and restarted=true, followed by the earliest scheduled production observation that reported the dedicated listing online.",
+    "Each entry is a redacted completion event emitted by the dedicated root-only systemd renewal unit with rotated=true and restarted=true, followed by the earliest successful scheduled production observation that reported the dedicated listing online; the referenced GitHub run metadata, original artifact ZIP, GitHub-published archive digest, and extracted health-report digest are preserved for independent verification.",
     "These entries establish discrete host-observed automatic scoped-token rotations; they do not establish continuous uptime, availability between observations, or future renewal success.",
     "No runtime token, owner key, wallet signature, or other signing material is recorded."
   ]

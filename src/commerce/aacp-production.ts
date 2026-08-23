@@ -518,6 +518,54 @@ const AacpRuntimeRotationEvidenceSchema = z
                 source: z.literal("GITHUB_ACTIONS_PRODUCTION_SMOKE"),
                 runId: z.string().regex(/^\d+$/),
                 url: z.string().url(),
+                githubRun: z
+                  .object({
+                    workflowId: z.literal("333142188"),
+                    workflowPath: z.literal(
+                      ".github/workflows/production-smoke.yml",
+                    ),
+                    event: z.literal("schedule"),
+                    status: z.literal("completed"),
+                    conclusion: z.literal("success"),
+                    headBranch: z.literal("main"),
+                    headSha: z.string().regex(/^[0-9a-f]{40}$/),
+                    runAttempt: z.number().int().positive(),
+                  })
+                  .strict(),
+                artifact: z
+                  .object({
+                    id: z.string().regex(/^\d+$/),
+                    name: z.string().min(1),
+                    archivePath: z.string().min(1),
+                    archiveSha256: Sha256Schema,
+                    sizeBytes: z.number().int().positive(),
+                    reportFileName: z.literal(
+                      "positioncrew-production-health.json",
+                    ),
+                    reportSha256: Sha256Schema,
+                  })
+                  .strict(),
+                healthReport: z
+                  .object({
+                    schemaVersion: z.literal(
+                      "positioncrew.production-health-report.v1",
+                    ),
+                    baseUrl: z.literal("https://positioncrew.dolepee.com"),
+                    checkedAt: z.string().datetime(),
+                    completedAt: z.string().datetime(),
+                    status: z.literal("OPERATIONAL"),
+                    aacpGeneratedAt: z.string().datetime(),
+                    dedicatedFlagship: z
+                      .object({
+                        agentId: z.string().min(1),
+                        agentTokenId: z.string().regex(/^\d+$/),
+                        listingStatus: z.literal("PUBLISHED"),
+                        a2aStatus: z.literal("ONLINE"),
+                        status: z.literal("ONLINE_AND_LISTED"),
+                      })
+                      .strict(),
+                  })
+                  .strict(),
                 productionStatus: z.literal("OPERATIONAL"),
                 listingStatus: z.literal("PUBLISHED"),
                 liveListingVerified: z.literal(true),
@@ -557,6 +605,37 @@ const AacpRuntimeRotationEvidenceSchema = z
           code: "custom",
           path: ["rotations", index, "sequence"],
           message: "rotation sequence must be contiguous",
+        });
+      }
+      const observation = rotation.onlineObservation;
+      if (
+        observation.url !==
+          `https://github.com/dolepee/positioncrew/actions/runs/${observation.runId}` ||
+        observation.artifact.name !==
+          `positioncrew-production-health-${observation.runId}` ||
+        observation.artifact.archivePath !==
+          `evidence/termix-runtime-rotation-artifacts/${observation.runId}.zip` ||
+        observation.healthReport.aacpGeneratedAt !== observation.observedAt ||
+        observation.healthReport.dedicatedFlagship.agentId !== value.agentId ||
+        observation.healthReport.dedicatedFlagship.agentTokenId !==
+          value.agentTokenId
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation"],
+          message: "online observation is not bound to its run, artifact, and identity",
+        });
+      }
+      if (
+        Date.parse(observation.healthReport.checkedAt) >
+          Date.parse(observation.observedAt) ||
+        Date.parse(observation.healthReport.completedAt) <
+          Date.parse(observation.observedAt)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation", "healthReport"],
+          message: "online observation is outside its health-report window",
         });
       }
       if (Date.parse(rotation.expiresAt) <= Date.parse(rotation.completedAt)) {
@@ -615,12 +694,12 @@ const AacpRuntimeRotationEvidenceSchema = z
     if (
       latest &&
       Date.parse(value.verifiedAt) <
-        Date.parse(latest.onlineObservation.observedAt)
+        Date.parse(latest.onlineObservation.healthReport.completedAt)
     ) {
       context.addIssue({
         code: "custom",
         path: ["verifiedAt"],
-        message: "verification cannot predate the latest online observation",
+        message: "verification cannot predate the latest health report",
       });
     }
   });

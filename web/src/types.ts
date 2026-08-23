@@ -189,6 +189,40 @@ export interface AacpRuntimeRotationEvidence {
       source: "GITHUB_ACTIONS_PRODUCTION_SMOKE";
       runId: string;
       url: string;
+      githubRun: {
+        workflowId: "333142188";
+        workflowPath: ".github/workflows/production-smoke.yml";
+        event: "schedule";
+        status: "completed";
+        conclusion: "success";
+        headBranch: "main";
+        headSha: string;
+        runAttempt: number;
+      };
+      artifact: {
+        id: string;
+        name: string;
+        archivePath: string;
+        archiveSha256: string;
+        sizeBytes: number;
+        reportFileName: "positioncrew-production-health.json";
+        reportSha256: string;
+      };
+      healthReport: {
+        schemaVersion: "positioncrew.production-health-report.v1";
+        baseUrl: "https://positioncrew.dolepee.com";
+        checkedAt: string;
+        completedAt: string;
+        status: "OPERATIONAL";
+        aacpGeneratedAt: string;
+        dedicatedFlagship: {
+          agentId: string;
+          agentTokenId: string;
+          listingStatus: "PUBLISHED";
+          a2aStatus: "ONLINE";
+          status: "ONLINE_AND_LISTED";
+        };
+      };
       productionStatus: "OPERATIONAL";
       listingStatus: "PUBLISHED";
       liveListingVerified: true;
