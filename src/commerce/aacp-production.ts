@@ -612,11 +612,15 @@ const AacpRuntimeRotationEvidenceSchema = z
       }
     });
     const latest = value.rotations.at(-1);
-    if (latest && Date.parse(value.verifiedAt) < Date.parse(latest.completedAt)) {
+    if (
+      latest &&
+      Date.parse(value.verifiedAt) <
+        Date.parse(latest.onlineObservation.observedAt)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["verifiedAt"],
-        message: "verification cannot predate the latest rotation",
+        message: "verification cannot predate the latest online observation",
       });
     }
   });

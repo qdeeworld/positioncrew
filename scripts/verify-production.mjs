@@ -454,6 +454,13 @@ try {
     ),
     "Dedicated runtime rotations are not ordered verified completion events",
   );
+  const latestRotation = rotations.at(-1);
+  assert(
+    latestRotation &&
+      Date.parse(runtimeEvidence.verifiedAt) >=
+        Date.parse(latestRotation.onlineObservation.observedAt),
+    "Runtime rotation verification predates the latest online observation",
+  );
   assert(
     runtimeEvidence.boundaries
       .join(" ")

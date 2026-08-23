@@ -328,6 +328,10 @@ describe("dedicated TermiX flagship evidence", () => {
         status: "ONLINE_AND_LISTED",
       });
     }
+    const latestRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations.at(-1)!;
+    expect(Date.parse(AACP_RUNTIME_ROTATION_EVIDENCE.verifiedAt)).toBeGreaterThanOrEqual(
+      Date.parse(latestRotation.onlineObservation.observedAt),
+    );
     const firstRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations[0]!;
     expect(
       redactedRuntimeRotationEventSha256({
