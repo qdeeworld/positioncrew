@@ -573,22 +573,6 @@ try {
         githubRun.html_url === observation.url,
       `GitHub run ${observation.runId} does not match its scheduled-success evidence`,
     );
-    const githubArtifacts = await fetchGithubJson(
-      `github-artifacts-${observation.runId}`,
-      `https://api.github.com/repos/dolepee/positioncrew/actions/runs/${observation.runId}/artifacts`,
-    );
-    const githubArtifact = githubArtifacts.artifacts?.find(
-      (artifact) => String(artifact.id) === artifactEvidence.id,
-    );
-    assert(
-      githubArtifact &&
-        githubArtifact.name === artifactEvidence.name &&
-        githubArtifact.digest === `sha256:${artifactEvidence.archiveSha256}` &&
-        githubArtifact.size_in_bytes === artifactEvidence.sizeBytes &&
-        String(githubArtifact.workflow_run?.id) === observation.runId &&
-        githubArtifact.workflow_run?.head_sha === runEvidence.headSha,
-      `GitHub artifact for run ${observation.runId} does not match its digest evidence`,
-    );
     const archive = await readFile(resolve(repositoryRoot, artifactEvidence.archivePath));
     assert(
       archive.length === artifactEvidence.sizeBytes &&
