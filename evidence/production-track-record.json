@@ -1,6 +1,6 @@
 {
   "schemaVersion": "positioncrew.production-track-record.v1",
-  "generatedAt": "2026-08-23T06:02:46.419Z",
+  "generatedAt": "2026-08-23T07:00:34.995Z",
   "status": "DEGRADED",
   "epoch": {
     "schemaVersion": "positioncrew.production-monitor-epoch.v1",
@@ -41,17 +41,26 @@
     "sourceStatus": "AVAILABLE"
   },
   "summary": {
-    "totalScheduledRunsSinceEpoch": 281,
+    "totalScheduledRunsSinceEpoch": 282,
     "observedRunCount": 100,
     "completedRuns": 100,
-    "successfulRuns": 78,
-    "unsuccessfulRuns": 22,
+    "successfulRuns": 79,
+    "unsuccessfulRuns": 21,
     "pendingRuns": 0,
-    "rollingPassRatePct": 78,
-    "rollingWindowStartedAt": "2026-08-20T08:55:42Z",
-    "rollingWindowEndedAt": "2026-08-23T06:02:13Z"
+    "rollingPassRatePct": 79,
+    "rollingWindowStartedAt": "2026-08-20T09:49:28Z",
+    "rollingWindowEndedAt": "2026-08-23T07:00:04Z"
   },
   "runs": [
+    {
+      "runId": 32624389325,
+      "status": "completed",
+      "conclusion": "success",
+      "createdAt": "2026-08-23T07:00:04Z",
+      "completedAt": "2026-08-23T07:00:34.995Z",
+      "headSha": "cb167361eb39ea4917058e37901501ae8252309c",
+      "url": "https://github.com/dolepee/positioncrew/actions/runs/32624389325"
+    },
     {
       "runId": 32621875888,
       "status": "completed",
@@ -942,15 +951,6 @@
       "completedAt": "2026-08-20T09:49:54.850Z",
       "headSha": "8a8a6201f5f4a4037c98bcbf81df9adcb47a46bf",
       "url": "https://github.com/dolepee/positioncrew/actions/runs/32355841536"
-    },
-    {
-      "runId": 32351253614,
-      "status": "completed",
-      "conclusion": "failure",
-      "createdAt": "2026-08-20T08:55:42Z",
-      "completedAt": "2026-08-20T08:56:06.089Z",
-      "headSha": "8a8a6201f5f4a4037c98bcbf81df9adcb47a46bf",
-      "url": "https://github.com/dolepee/positioncrew/actions/runs/32351253614"
     }
   ],
   "boundary": "This record measures scheduled production verification outcomes after the fixed epoch. It is not external demand, investment performance, mainnet execution, or an Agent Advantage result."
