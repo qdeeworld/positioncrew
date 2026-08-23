@@ -94,7 +94,41 @@ function sleep(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
-async function fetchReadOnly(url, init) {
+function isTransientBscRpcExhaustion(response, body) {
+  if (
+    response.status !== 500 ||
+    body?.schemaVersion !== "positioncrew.api-error.v1" ||
+    body.error !== "REQUEST_FAILED" ||
+    !Array.isArray(body.details) ||
+    body.details.length !== 1 ||
+    typeof body.details[0] !== "string"
+  ) {
+    return false;
+  }
+
+  const detail = body.details[0];
+  const providers = [
+    "bsc-rpc.publicnode.com",
+    "bsc-dataseed-public.bnbchain.org",
+    "bsc-dataseed.bnbchain.org",
+  ];
+  const exhaustedEveryAttempt = providers.every((provider) =>
+    [1, 2].every((attempt) =>
+      detail.includes(`attempt ${attempt} ${provider}:`),
+    ),
+  );
+  const hasRateLimitSignal =
+    detail.includes("BSC RPC returned HTTP 429") ||
+    detail.includes("BSC RPC -32005: limit exceeded");
+
+  return (
+    detail.startsWith("BSC RPC providers unavailable (attempt 1 ") &&
+    exhaustedEveryAttempt &&
+    hasRateLimitSignal
+  );
+}
+
+async function fetchReadOnly(url, init, { retryDelayForResponse } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
@@ -102,9 +136,18 @@ async function fetchReadOnly(url, init) {
         ...init,
         signal: AbortSignal.timeout(monitorRequestTimeoutMs),
       });
-      if (attempt === 1 && (response.status === 429 || response.status >= 500)) {
+      const defaultRetryDelayMs = response.status === 429 || response.status >= 500
+        ? 250
+        : undefined;
+      const responseBody = attempt === 1 && retryDelayForResponse
+        ? await response.clone().json().catch(() => null)
+        : null;
+      const retryDelayMs = attempt === 1
+        ? retryDelayForResponse?.(response, responseBody) ?? defaultRetryDelayMs
+        : undefined;
+      if (retryDelayMs !== undefined) {
         await response.body?.cancel();
-        await sleep(250);
+        await sleep(retryDelayMs);
         continue;
       }
       return { response, attempts: attempt };
@@ -139,7 +182,7 @@ async function fetchText(name, input) {
 async function fetchJson(
   name,
   input,
-  { retryWhen, retryDelaysMs = [] } = {},
+  { retryWhen, retryDelaysMs = [], retryDelayForResponse } = {},
 ) {
   const url = localUrl(input);
   url.searchParams.set("positioncrew_monitor", monitorRunId);
@@ -147,14 +190,18 @@ async function fetchJson(
   let totalAttempts = 0;
 
   for (let semanticAttempt = 0; ; semanticAttempt += 1) {
-    const { response, attempts } = await fetchReadOnly(url, {
-      headers: {
-        Accept: "application/json",
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-        "User-Agent": "PositionCrew-Production-Monitor/1.0",
+    const { response, attempts } = await fetchReadOnly(
+      url,
+      {
+        headers: {
+          Accept: "application/json",
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+          "User-Agent": "PositionCrew-Production-Monitor/1.0",
+        },
       },
-    });
+      { retryDelayForResponse },
+    );
     totalAttempts += attempts;
     const body = await response.json().catch(() => null);
     const retryDelayMs = retryDelaysMs[semanticAttempt];
@@ -1355,6 +1402,10 @@ try {
   const pancakePosition = await fetchJson(
     "pancake-lp-position",
     `/api/positions/pancake/${referencePancakePositionId}`,
+    {
+      retryDelayForResponse: (response, body) =>
+        isTransientBscRpcExhaustion(response, body) ? 20_000 : undefined,
+    },
   );
   assert(
     pancakePosition.schemaVersion === "positioncrew.pancake-position-probe.v1",
