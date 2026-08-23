@@ -439,6 +439,11 @@ try {
         Date.parse(rotation.expiresAt) > Date.parse(rotation.completedAt) &&
         Date.parse(rotation.onlineObservation.observedAt) >
           Date.parse(rotation.completedAt) &&
+        Date.parse(rotation.onlineObservation.observedAt) <
+          Date.parse(rotation.expiresAt) &&
+        (index === rotations.length - 1 ||
+          Date.parse(rotation.onlineObservation.observedAt) <
+            Date.parse(rotations[index + 1].completedAt)) &&
         rotation.onlineObservation.a2aStatus === "ONLINE" &&
         rotation.onlineObservation.status === "ONLINE_AND_LISTED" &&
         (index === 0 ||

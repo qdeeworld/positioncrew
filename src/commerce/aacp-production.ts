@@ -576,6 +576,28 @@ const AacpRuntimeRotationEvidenceSchema = z
           message: "online observation must follow rotation completion",
         });
       }
+      if (
+        Date.parse(rotation.onlineObservation.observedAt) >=
+        Date.parse(rotation.expiresAt)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation", "observedAt"],
+          message: "online observation must precede rotation expiry",
+        });
+      }
+      const next = value.rotations[index + 1];
+      if (
+        next &&
+        Date.parse(rotation.onlineObservation.observedAt) >=
+          Date.parse(next.completedAt)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rotations", index, "onlineObservation", "observedAt"],
+          message: "online observation must precede the next rotation",
+        });
+      }
       const previous = value.rotations[index - 1];
       if (
         previous &&

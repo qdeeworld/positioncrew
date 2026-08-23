@@ -312,6 +312,15 @@ describe("dedicated TermiX flagship evidence", () => {
       expect(Date.parse(rotation.onlineObservation.observedAt)).toBeGreaterThan(
         Date.parse(rotation.completedAt),
       );
+      expect(Date.parse(rotation.onlineObservation.observedAt)).toBeLessThan(
+        Date.parse(rotation.expiresAt),
+      );
+      const nextRotation = AACP_RUNTIME_ROTATION_EVIDENCE.rotations[index + 1];
+      if (nextRotation) {
+        expect(Date.parse(rotation.onlineObservation.observedAt)).toBeLessThan(
+          Date.parse(nextRotation.completedAt),
+        );
+      }
       expect(rotation.onlineObservation).toMatchObject({
         productionStatus: "OPERATIONAL",
         listingStatus: "PUBLISHED",
