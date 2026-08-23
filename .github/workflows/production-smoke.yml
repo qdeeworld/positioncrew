@@ -15,6 +15,7 @@ on:
           - attest-runtime-rotation-evidence
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
