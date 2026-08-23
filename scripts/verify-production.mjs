@@ -410,7 +410,7 @@ try {
     marketplace.aacpReadinessUrl,
     {
       retryWhen: (body) => body.state === "SOURCE_UNAVAILABLE",
-      retryDelaysMs: [1_000, 2_000],
+      retryDelaysMs: [65_000, 65_000],
     },
   );
   assert(
