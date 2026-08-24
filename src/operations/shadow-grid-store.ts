@@ -300,6 +300,21 @@ export class ShadowGridLedgerStore {
     return result.results.map(rowToEvent);
   }
 
+  async listOldestNonterminalEpochs(limit = 50): Promise<readonly ShadowGridEvent[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("Shadow-grid cleanup limit must be between 1 and 500");
+    }
+    const result = await queryable(this.db.prepare([
+      "SELECT epoch.* FROM shadow_grid_events epoch",
+      "WHERE epoch.event_type = 'EPOCH_STARTED' AND NOT EXISTS (",
+      "SELECT 1 FROM shadow_grid_events terminal WHERE terminal.run_id = epoch.run_id",
+      "AND terminal.event_type IN ('REFUSED', 'CLOSED', 'VOID_SOURCE_GAP', 'RISK_EXIT')",
+      ") ORDER BY epoch.epoch_started_at ASC, epoch.event_id ASC LIMIT ?",
+    ].join(" ")).bind(limit)).all<ShadowGridEventRow>();
+    if (!result.success) throw new Error(result.error ?? "D1 nonterminal shadow-grid epoch read failed");
+    return result.results.map(rowToEvent);
+  }
+
   async listTerminalEvents(limit = 500): Promise<readonly ShadowGridEvent[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
       throw new Error("Shadow-grid terminal limit must be between 1 and 500");

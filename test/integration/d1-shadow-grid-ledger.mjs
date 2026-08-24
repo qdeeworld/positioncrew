@@ -39,6 +39,30 @@ function finiteDate(milliseconds, label) {
   return date;
 }
 
+function canonicalJson(value) {
+  const canonicalize = (candidate) => {
+    if (Array.isArray(candidate)) return candidate.map(canonicalize);
+    if (candidate !== null && typeof candidate === "object") {
+      return Object.fromEntries(
+        Object.keys(candidate).sort().map((key) => [key, canonicalize(candidate[key])]),
+      );
+    }
+    return candidate;
+  };
+  return JSON.stringify(canonicalize(value));
+}
+
+function rehashPublicShadowEvent(event) {
+  const body = structuredClone(event);
+  delete body.eventHash;
+  const eventHash = `sha256:${createHash("sha256").update(canonicalJson(body)).digest("hex")}`;
+  return { eventHash, eventJson: canonicalJson({ ...body, eventHash }) };
+}
+
+function sqlLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 function normalizeLoopbackUrlOrigins(value) {
   if (Array.isArray(value)) return value.map(normalizeLoopbackUrlOrigins);
   if (value !== null && typeof value === "object") {
@@ -861,6 +885,272 @@ try {
     recoveredGenesisSummary.body.summary.precommittedWindowCount,
     precommittedCountBeforeGenesisOnlyRecovery + 1,
     "Genesis-only void was counted as precommitted or the normal replacement was omitted",
+  );
+
+  const legacyOpeningNow = finiteDate(
+    genesisRecoveryNow.getTime() + 2 * 60 * 60_000,
+    "legacy-provenance opening hour",
+  );
+  const legacyRunId = shadowGridRunId(legacyOpeningNow);
+  const legacyOriginHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "4001",
+    "X-GitHub-Sha": "7".repeat(40),
+  };
+
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, legacyOpeningNow);
+  const legacyOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: legacyOriginHeaders },
+  );
+  assert.equal(legacyOpen.response.status, 200);
+  assert.equal(legacyOpen.body.runId, legacyRunId);
+  assert.equal(legacyOpen.body.state, "PRECOMMITTED");
+  const legacyWindowBeforeRewrite = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(legacyRunId)}`,
+  );
+  assert.equal(legacyWindowBeforeRewrite.response.status, 200);
+  const legacyGenesis = structuredClone(
+    legacyWindowBeforeRewrite.body.events.find((event) => event.eventType === "EPOCH_STARTED"),
+  );
+  assert(legacyGenesis);
+  legacyGenesis.payload.schedule.workflowPath =
+    ".github/workflows/bounded-grid-shadow-ledger.yml";
+  legacyGenesis.payload.schedule.workflowRef =
+    "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main";
+  const rewrittenLegacyGenesis = rehashPublicShadowEvent(legacyGenesis);
+
+  await stopWorker(worker);
+  worker = undefined;
+  executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_no_delete");
+  executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_no_update");
+  executeD1SetupMutation(
+    `DELETE FROM shadow_grid_events WHERE run_id = ${sqlLiteral(legacyRunId)} AND event_type = 'PRECOMMITTED'`,
+  );
+  executeD1SetupMutation(
+    [
+      "UPDATE shadow_grid_events SET",
+      `event_json = ${sqlLiteral(rewrittenLegacyGenesis.eventJson)},`,
+      `event_hash = ${sqlLiteral(rewrittenLegacyGenesis.eventHash)}`,
+      `WHERE run_id = ${sqlLiteral(legacyRunId)} AND event_type = 'EPOCH_STARTED'`,
+    ].join(" "),
+  );
+
+  const legacyRecoveryNow = finiteDate(
+    legacyOpeningNow.getTime() + 60 * 60_000,
+    "legacy-provenance recovery hour",
+  );
+  const legacyReplacementRunId = shadowGridRunId(legacyRecoveryNow);
+  const rejectedLegacyHeaders = {
+    ...legacyOriginHeaders,
+    "X-GitHub-Workflow-Ref":
+      "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+  };
+  const legacyReplacementHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "4002",
+    "X-GitHub-Sha": "8".repeat(40),
+  };
+
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, legacyRecoveryNow);
+  const rejectedIncomingLegacy = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: rejectedLegacyHeaders },
+  );
+  assert.equal(rejectedIncomingLegacy.response.status, 400);
+  const legacyReplacementOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: legacyReplacementHeaders },
+  );
+  assert.equal(legacyReplacementOpen.response.status, 200);
+  assert.equal(legacyReplacementOpen.body.runId, legacyReplacementRunId);
+  assert.equal(legacyReplacementOpen.body.state, "PRECOMMITTED");
+
+  const recoveredLegacyWindow = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(legacyRunId)}`,
+  );
+  assert.equal(recoveredLegacyWindow.response.status, 200);
+  assert.equal(recoveredLegacyWindow.body.window.state, "VOID_SOURCE_GAP");
+  assert.equal(recoveredLegacyWindow.body.integrity.valid, true);
+  assert.equal(recoveredLegacyWindow.body.events.length, 2);
+  assert.equal(recoveredLegacyWindow.body.events[0].eventType, "EPOCH_STARTED");
+  assert.equal(
+    recoveredLegacyWindow.body.events[0].payload.schedule.workflowPath,
+    ".github/workflows/bounded-grid-shadow-ledger.yml",
+  );
+  assert.equal(
+    recoveredLegacyWindow.body.events[0].payload.schedule.workflowRef,
+    "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+  );
+  assert.equal(recoveredLegacyWindow.body.events[0].payload.schedule.runId, "4001");
+  assert.equal(recoveredLegacyWindow.body.events.at(-1).eventType, "VOID_SOURCE_GAP");
+  assert.equal(
+    recoveredLegacyWindow.body.events.filter((event) =>
+      ["PRECOMMITTED", "OBSERVED", "SHADOW_FILL", "CLOSED", "RISK_EXIT"].includes(event.eventType)
+    ).length,
+    0,
+    "Legacy stored provenance was sampled or completed by the replacement session",
+  );
+
+  const secondExpiredNow = finiteDate(
+    legacyRecoveryNow.getTime() + 60 * 60_000,
+    "second expired-run opening",
+  );
+  const secondExpiredRunId = shadowGridRunId(secondExpiredNow);
+  const secondExpiredHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "4003",
+    "X-GitHub-Sha": "9".repeat(40),
+  };
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, secondExpiredNow);
+  const secondExpiredOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: secondExpiredHeaders },
+  );
+  assert.equal(secondExpiredOpen.response.status, 200);
+  assert.equal(secondExpiredOpen.body.runId, secondExpiredRunId);
+  assert.equal(secondExpiredOpen.body.state, "PRECOMMITTED");
+
+  const thirdExpiredNow = finiteDate(
+    secondExpiredNow.getTime() + 60 * 60_000,
+    "third expired-run opening",
+  );
+  const thirdExpiredRunId = shadowGridRunId(thirdExpiredNow);
+  const thirdExpiredHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "4004",
+    "X-GitHub-Sha": "a".repeat(40),
+  };
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, thirdExpiredNow);
+  const thirdExpiredOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: thirdExpiredHeaders },
+  );
+  assert.equal(thirdExpiredOpen.response.status, 200);
+  assert.equal(thirdExpiredOpen.body.runId, thirdExpiredRunId);
+  assert.equal(thirdExpiredOpen.body.state, "PRECOMMITTED");
+
+  await stopWorker(worker);
+  worker = undefined;
+  executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_no_delete");
+  executeD1SetupMutation(
+    [legacyReplacementRunId, secondExpiredRunId]
+      .map((expiredRunId) =>
+        `DELETE FROM shadow_grid_events WHERE run_id = ${sqlLiteral(expiredRunId)} AND event_type = 'VOID_SOURCE_GAP'`
+      )
+      .join("; "),
+  );
+
+  const sweepNow = finiteDate(
+    thirdExpiredNow.getTime() + 3 * 60 * 60_000,
+    "multi-run expiry sweep",
+  );
+  const sweepRunId = shadowGridRunId(sweepNow);
+  const sweepHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "4005",
+    "X-GitHub-Sha": "b".repeat(40),
+  };
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, sweepNow);
+  const sweepOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: sweepHeaders },
+  );
+  assert.equal(sweepOpen.response.status, 200);
+  assert.equal(sweepOpen.body.runId, sweepRunId);
+  assert.equal(sweepOpen.body.state, "PRECOMMITTED");
+
+  for (const expiredRunId of [legacyReplacementRunId, secondExpiredRunId, thirdExpiredRunId]) {
+    const expiredWindow = await requestJson(
+      baseUrl,
+      `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(expiredRunId)}`,
+    );
+    assert.equal(expiredWindow.response.status, 200);
+    assert.equal(expiredWindow.body.window.state, "VOID_SOURCE_GAP");
+    assert.equal(expiredWindow.body.integrity.valid, true);
+    assert.equal(
+      expiredWindow.body.events.filter((event) =>
+        ["OBSERVED", "SHADOW_FILL", "CLOSED", "RISK_EXIT"].includes(event.eventType)
+      ).length,
+      0,
+      `Expired run ${expiredRunId} was sampled or closed during the sweep`,
+    );
+  }
+
+  const sweepWindowBeforeNonexpiredRetry = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(sweepRunId)}`,
+  );
+  assert.equal(sweepWindowBeforeNonexpiredRetry.response.status, 200);
+  assert.equal(sweepWindowBeforeNonexpiredRetry.body.window.state, "PRECOMMITTED");
+  const sweepHeadBeforeNonexpiredRetry = sweepWindowBeforeNonexpiredRetry.body.events.at(-1).eventHash;
+  const sweepCountBeforeNonexpiredRetry = sweepWindowBeforeNonexpiredRetry.body.events.length;
+
+  await stopWorker(worker);
+  worker = undefined;
+  executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_no_update");
+  const nonexpiredEpochStartedAt = sweepNow.toISOString();
+  const nonexpiredHorizonEndsAt = finiteDate(
+    sweepNow.getTime() + 15 * 60_000,
+    "nonexpired current horizon",
+  ).toISOString();
+  executeD1SetupMutation(
+    [
+      "UPDATE shadow_grid_events SET",
+      `epoch_started_at = ${sqlLiteral(nonexpiredEpochStartedAt)},`,
+      `horizon_ends_at = ${sqlLiteral(nonexpiredHorizonEndsAt)}`,
+      `WHERE run_id = ${sqlLiteral(sweepRunId)}`,
+    ].join(" "),
+  );
+
+  const nonexpiredRetryNow = finiteDate(
+    sweepNow.getTime() + 30_000,
+    "nonexpired current retry",
+  );
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, nonexpiredRetryNow);
+  const nonexpiredRetry = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: sweepHeaders },
+  );
+  assert.equal(nonexpiredRetry.response.status, 200);
+  assert.equal(nonexpiredRetry.body.runId, sweepRunId);
+  assert.equal(nonexpiredRetry.body.state, "PRECOMMITTED");
+  assert.equal(nonexpiredRetry.body.headHash, sweepHeadBeforeNonexpiredRetry);
+  assert.equal(nonexpiredRetry.body.eventCount, sweepCountBeforeNonexpiredRetry);
+  const nonexpiredWindowAfterRetry = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(sweepRunId)}`,
+  );
+  assert.equal(nonexpiredWindowAfterRetry.response.status, 200);
+  assert.equal(nonexpiredWindowAfterRetry.body.window.state, "PRECOMMITTED");
+  assert.equal(
+    nonexpiredWindowAfterRetry.body.events.at(-1).eventHash,
+    sweepHeadBeforeNonexpiredRetry,
+    "Nonexpired current epoch was cleaned",
   );
 
   await stopWorker(worker);
