@@ -168,6 +168,60 @@ export interface ProviderCatalogResponse {
   providers: ProviderListing[];
 }
 
+export interface ExternalComparisonCandidate {
+  agentTokenId: string;
+  name: string;
+  relationship: "THIRD_PARTY_COMPARISON_ONLY";
+  verdict: "PASS_FOR_COMPARISON_ONLY" | "LISTED_ONLY";
+  identity: {
+    protocol: "ERC-8004";
+    chainId: 56;
+    registry: string;
+    owner: string;
+    verification: "DIRECT_OWNER_OF" | "REGISTRY_INDEXER_RECORD";
+    checkedAt: string;
+    blockNumber: string;
+    sourceUrl: string;
+    explorerUrl: string;
+  };
+  category: {
+    service: ServiceId;
+    label: string;
+    mappingBasis: "PUBLIC_NAME_AND_METADATA";
+    sourceUrl: string;
+  };
+  serviceReachability: {
+    status: "REACHABLE" | "LISTED_ONLY";
+    checkedAt: string;
+    endpointUrl: string | null;
+    httpStatus: number | null;
+    sourceUrl: string;
+  };
+  pricing: {
+    mode: "QUOTE_REQUIRED" | "NOT_PUBLISHED" | "UNVERIFIED_MARKETPLACE_ASSERTION";
+    amount: null;
+    token: null;
+    chainId: null;
+    sourceUrl: string;
+  };
+  feedback: { recordCount: number; aggregateScore: null; sourceUrl: string };
+  validation: { recordCount: number; successfulCount: number; summary: null; sourceUrl: string };
+  positionCrewCertified: false;
+  positionCrewActivation: "NOT_SUPPORTED";
+  claimBoundary: string[];
+}
+
+export interface ExternalComparisonSnapshot {
+  schemaVersion: "positioncrew.external-comparison-snapshot.v1";
+  snapshotId: "bsc-mainnet-2026-08-24";
+  checkedAt: string;
+  chain: { name: "BNB Smart Chain"; chainId: 56; blockNumber: string; registry: string };
+  selectedAgentTokenIds: ["269228", "265375", "265876", "267697"];
+  candidates: ExternalComparisonCandidate[];
+  claimBoundary: string[];
+  snapshotHash: string;
+}
+
 export interface AacpRuntimeRotationEvidence {
   schemaVersion: "positioncrew.termix-runtime-rotations.v1";
   network: "bsc-mainnet";

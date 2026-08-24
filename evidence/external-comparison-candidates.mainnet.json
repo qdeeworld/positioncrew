@@ -1,0 +1,246 @@
+{
+  "schemaVersion": "positioncrew.external-comparison-snapshot.v1",
+  "snapshotId": "bsc-mainnet-2026-08-24",
+  "checkedAt": "2026-08-24T01:01:18Z",
+  "chain": {
+    "name": "BNB Smart Chain",
+    "chainId": 56,
+    "blockNumber": "117716382",
+    "registry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+  },
+  "selectedAgentTokenIds": [
+    "269228",
+    "265375",
+    "265876",
+    "267697"
+  ],
+  "candidates": [
+    {
+      "agentTokenId": "269228",
+      "name": "Health Factor Monitor",
+      "relationship": "THIRD_PARTY_COMPARISON_ONLY",
+      "verdict": "PASS_FOR_COMPARISON_ONLY",
+      "identity": {
+        "protocol": "ERC-8004",
+        "chainId": 56,
+        "registry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+        "owner": "0x91F4602760e1627007BFc16F78A74cF8B9De8Da2",
+        "verification": "DIRECT_OWNER_OF",
+        "checkedAt": "2026-08-24T00:49:26.647Z",
+        "blockNumber": "117714924",
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/269228",
+        "explorerUrl": "https://bscscan.com/tx/0x346415eff7d71e416b3a797caa2ab590cf9bae9cdd862cbd7fec7bff533ac86f"
+      },
+      "category": {
+        "service": "LENDING_RESCUE",
+        "label": "Health-factor monitoring",
+        "mappingBasis": "PUBLIC_NAME_AND_METADATA",
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/269228"
+      },
+      "serviceReachability": {
+        "status": "REACHABLE",
+        "checkedAt": "2026-08-24T00:49:52Z",
+        "endpointUrl": "https://agents.chainhelix.io/healthmon/",
+        "httpStatus": 200,
+        "sourceUrl": "https://agents.chainhelix.io/healthmon/.well-known/agent-card.json"
+      },
+      "pricing": {
+        "mode": "QUOTE_REQUIRED",
+        "amount": null,
+        "token": null,
+        "chainId": null,
+        "sourceUrl": "https://agents.chainhelix.io/healthmon/.well-known/agent-card.json"
+      },
+      "feedback": {
+        "recordCount": 0,
+        "aggregateScore": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/269228"
+      },
+      "validation": {
+        "recordCount": 0,
+        "successfulCount": 0,
+        "summary": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/269228"
+      },
+      "positionCrewCertified": false,
+      "positionCrewActivation": "NOT_SUPPORTED",
+      "claimBoundary": [
+        "Distinct on-chain owner wallet; unrelated-human control is not independently proven.",
+        "Comparison only; the AgentCard advertises a loopback runtime URL and its domain is not verified.",
+        "No fixed public price or verified performance record was found."
+      ]
+    },
+    {
+      "agentTokenId": "265375",
+      "name": "BNB LP Range Rebalancer",
+      "relationship": "THIRD_PARTY_COMPARISON_ONLY",
+      "verdict": "LISTED_ONLY",
+      "identity": {
+        "protocol": "ERC-8004",
+        "chainId": 56,
+        "registry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+        "owner": "0x20f1cA5d1e5A3Ee94C29DbF95e6BF6ceA6a8d64b",
+        "verification": "DIRECT_OWNER_OF",
+        "checkedAt": "2026-08-24T01:00:34Z",
+        "blockNumber": "117716290",
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265375",
+        "explorerUrl": "https://bscscan.com/tx/0x5b9a412ad3157f54ca94c18a547bb5c69bfaeee4c96fdd11dedf949c586c40fb"
+      },
+      "category": {
+        "service": "LP_REBALANCE",
+        "label": "LP range rebalancing",
+        "mappingBasis": "PUBLIC_NAME_AND_METADATA",
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265375"
+      },
+      "serviceReachability": {
+        "status": "REACHABLE",
+        "checkedAt": "2026-08-24T01:00:34Z",
+        "endpointUrl": "https://bnb-lp.172-104-171-139.nip.io/",
+        "httpStatus": 200,
+        "sourceUrl": "https://bnb-lp.172-104-171-139.nip.io/.well-known/agent-card.json"
+      },
+      "pricing": {
+        "mode": "QUOTE_REQUIRED",
+        "amount": null,
+        "token": null,
+        "chainId": null,
+        "sourceUrl": "https://bnb-lp.172-104-171-139.nip.io/.well-known/agent-card.json"
+      },
+      "feedback": {
+        "recordCount": 0,
+        "aggregateScore": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265375"
+      },
+      "validation": {
+        "recordCount": 0,
+        "successfulCount": 0,
+        "summary": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265375"
+      },
+      "positionCrewCertified": false,
+      "positionCrewActivation": "NOT_SUPPORTED",
+      "claimBoundary": [
+        "Category and execution capabilities are provider-declared, not independently validated.",
+        "No public fixed price, completed-job performance, feedback, or validation evidence was found.",
+        "On-chain ownership is verified; legal or organizational independence is not certified."
+      ]
+    },
+    {
+      "agentTokenId": "265876",
+      "name": "BNB Yield Optimizer",
+      "relationship": "THIRD_PARTY_COMPARISON_ONLY",
+      "verdict": "LISTED_ONLY",
+      "identity": {
+        "protocol": "ERC-8004",
+        "chainId": 56,
+        "registry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+        "owner": "0xd16faAa91F77397Bb84c69FBb89D11011bE11212",
+        "verification": "DIRECT_OWNER_OF",
+        "checkedAt": "2026-08-24T01:00:34Z",
+        "blockNumber": "117716290",
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265876",
+        "explorerUrl": "https://bscscan.com/tx/0x3ef25311b32b8f5b5a418c959f5ab2dae03de7dd2050cb43afbc7f0623d6b2b6"
+      },
+      "category": {
+        "service": "YIELD_OPTIMIZATION",
+        "label": "Yield optimisation",
+        "mappingBasis": "PUBLIC_NAME_AND_METADATA",
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265876"
+      },
+      "serviceReachability": {
+        "status": "REACHABLE",
+        "checkedAt": "2026-08-24T01:00:34Z",
+        "endpointUrl": "https://bnb-yield.172-104-171-139.nip.io/a2a",
+        "httpStatus": 200,
+        "sourceUrl": "https://bnb-yield.172-104-171-139.nip.io/a2a"
+      },
+      "pricing": {
+        "mode": "NOT_PUBLISHED",
+        "amount": null,
+        "token": null,
+        "chainId": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265876"
+      },
+      "feedback": {
+        "recordCount": 0,
+        "aggregateScore": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265876"
+      },
+      "validation": {
+        "recordCount": 0,
+        "successfulCount": 0,
+        "summary": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/265876"
+      },
+      "positionCrewCertified": false,
+      "positionCrewActivation": "NOT_SUPPORTED",
+      "claimBoundary": [
+        "The A2A runtime responded, but the declared ERC-8183 URL returned HTTP 404 on GET.",
+        "Yield and execution capabilities are provider-declared and have no public performance proof.",
+        "No public price, feedback, validation, or completed-job record was found."
+      ]
+    },
+    {
+      "agentTokenId": "267697",
+      "name": "GridMaster Ops",
+      "relationship": "THIRD_PARTY_COMPARISON_ONLY",
+      "verdict": "LISTED_ONLY",
+      "identity": {
+        "protocol": "ERC-8004",
+        "chainId": 56,
+        "registry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+        "owner": "0x16ec3C811bC03eb57B1519263803e4a22Caae154",
+        "verification": "REGISTRY_INDEXER_RECORD",
+        "checkedAt": "2026-08-24T01:01:18Z",
+        "blockNumber": "117716382",
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/267697",
+        "explorerUrl": "https://bscscan.com/tx/0x765124e433f8c7147b4fbc6b867bf854c11f554d707dd737c25926747ab41f61"
+      },
+      "category": {
+        "service": "BOUNDED_GRID",
+        "label": "Grid trading",
+        "mappingBasis": "PUBLIC_NAME_AND_METADATA",
+        "sourceUrl": "https://bsc-hackathon-ia-marketplace.vercel.app/api/meta/gridmaster"
+      },
+      "serviceReachability": {
+        "status": "LISTED_ONLY",
+        "checkedAt": "2026-08-24T01:01:18Z",
+        "endpointUrl": null,
+        "httpStatus": null,
+        "sourceUrl": "https://bsc-hackathon-ia-marketplace.vercel.app/agents/267697"
+      },
+      "pricing": {
+        "mode": "UNVERIFIED_MARKETPLACE_ASSERTION",
+        "amount": null,
+        "token": null,
+        "chainId": null,
+        "sourceUrl": "https://bsc-hackathon-ia-marketplace.vercel.app/agents/267697"
+      },
+      "feedback": {
+        "recordCount": 0,
+        "aggregateScore": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/267697"
+      },
+      "validation": {
+        "recordCount": 0,
+        "successfulCount": 0,
+        "summary": null,
+        "sourceUrl": "https://8004scan.io/api/v1/public/agents/56/267697"
+      },
+      "positionCrewCertified": false,
+      "positionCrewActivation": "NOT_SUPPORTED",
+      "claimBoundary": [
+        "The registry metadata maps directly to grid trading, but exposes no callable A2A, MCP, or agent API endpoint.",
+        "Marketplace pricing and uptime statements were not independently verified.",
+        "Zero indexed feedback and validations provide no public execution-performance record."
+      ]
+    }
+  ],
+  "claimBoundary": [
+    "These are externally owned ERC-8004 comparison candidates, not PositionCrew providers.",
+    "Reachability records one timestamped probe; it is not an uptime, quality, or performance score.",
+    "Zero indexed feedback or validations means no public record was found, not proof of zero completed work.",
+    "Hiring, activation, payment, certification, and performance claims are not supported by this snapshot."
+  ],
+  "snapshotHash": "sha256:09ec3e4be5571a1125a66f975dde187c8de3f265d7516e2630b7d22f42f59958"
+}

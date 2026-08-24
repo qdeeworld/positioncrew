@@ -15,6 +15,10 @@ import {
 } from "../src/api/fixture-jobs.js";
 import { PROVIDER_CATALOG } from "../src/marketplace/catalog.js";
 import {
+  EXTERNAL_COMPARISON_SNAPSHOT,
+  EXTERNAL_COMPARISON_SNAPSHOT_ROUTE,
+} from "../src/marketplace/external-comparisons.js";
+import {
   buildMarketplaceManifest,
   buildOpenApiDocument,
   buildProviderManifest,
@@ -105,6 +109,33 @@ describe("public fixture job boundary", () => {
     ).toBe(true);
   });
 
+  it("freezes exactly one evidence-only external candidate per category", () => {
+    expect(EXTERNAL_COMPARISON_SNAPSHOT.candidates.map((candidate) => ({
+      service: candidate.category.service,
+      name: candidate.name,
+      agentTokenId: candidate.agentTokenId,
+      owner: candidate.identity.owner,
+      status: candidate.serviceReachability.status,
+    }))).toEqual([
+      { service: "LENDING_RESCUE", name: "Health Factor Monitor", agentTokenId: "269228", owner: "0x91F4602760e1627007BFc16F78A74cF8B9De8Da2", status: "REACHABLE" },
+      { service: "LP_REBALANCE", name: "BNB LP Range Rebalancer", agentTokenId: "265375", owner: "0x20f1cA5d1e5A3Ee94C29DbF95e6BF6ceA6a8d64b", status: "REACHABLE" },
+      { service: "YIELD_OPTIMIZATION", name: "BNB Yield Optimizer", agentTokenId: "265876", owner: "0xd16faAa91F77397Bb84c69FBb89D11011bE11212", status: "REACHABLE" },
+      { service: "BOUNDED_GRID", name: "GridMaster Ops", agentTokenId: "267697", owner: "0x16ec3C811bC03eb57B1519263803e4a22Caae154", status: "LISTED_ONLY" },
+    ]);
+    expect(EXTERNAL_COMPARISON_SNAPSHOT.snapshotHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(new Set(EXTERNAL_COMPARISON_SNAPSHOT.candidates.map((candidate) => candidate.category.service)).size).toBe(4);
+    for (const candidate of EXTERNAL_COMPARISON_SNAPSHOT.candidates) {
+      expect(candidate.identity.registry).toBe("0x8004A169FB4a3325136EB29fA0ceB6D2e539a432");
+      expect(candidate.identity.owner.toLowerCase()).not.toBe("0xadd748c416e8a7efd7d65d18abb121dea268ddf9");
+      expect(candidate.pricing.amount).toBeNull();
+      expect(candidate.feedback.aggregateScore).toBeNull();
+      expect(candidate.positionCrewCertified).toBe(false);
+      expect(candidate.positionCrewActivation).toBe("NOT_SUPPORTED");
+      expect("activationUrl" in candidate).toBe(false);
+      expect("activationMethod" in candidate).toBe(false);
+    }
+  });
+
   it("keeps the public ERC-8004 receipts aligned with the provider catalog", () => {
     const path = fileURLToPath(
       new URL("../evidence/bsc-identities.testnet.json", import.meta.url),
@@ -184,6 +215,7 @@ describe("public fixture job boundary", () => {
     expect(marketplace).toMatchObject({
       schemaVersion: "positioncrew.marketplace-manifest.v1",
       aacpReadinessUrl: `${origin}/api/commerce/aacp`,
+      externalComparisonSnapshotUrl: `${origin}${EXTERNAL_COMPARISON_SNAPSHOT_ROUTE}`,
       claims: {
         categoryCoverage: "4_OF_4",
         providerIdentity: "ERC8004_BSC_TESTNET_VERIFIED",
@@ -192,8 +224,11 @@ describe("public fixture job boundary", () => {
       },
     });
     expect(openApi).toMatchObject({ openapi: "3.1.0", servers: [{ url: origin }] });
-    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(18);
+    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(19);
     expect(openApi.paths).toMatchObject({
+      [EXTERNAL_COMPARISON_SNAPSHOT_ROUTE]: {
+        get: { operationId: "getExternalComparisonSnapshot" },
+      },
       "/api/status": { get: { operationId: "getSystemTelemetry" } },
       "/api/operations/production": {
         get: { operationId: "getProductionTrackRecord" },
@@ -221,6 +256,7 @@ describe("public fixture job boundary", () => {
         get: { operationId: "inspectVenusStableYields" },
       },
     });
+    expect(Object.keys((openApi.paths as Record<string, object>)[EXTERNAL_COMPARISON_SNAPSHOT_ROUTE] ?? {})).toEqual(["get"]);
     expect(
       ((openApi.paths as Record<string, { post: { requestBody: { content: { "application/json": { schema: { properties: { mode: { default: string } } } } } } } }>)[provider.endpoint]
         ?.post.requestBody.content["application/json"].schema.properties.mode.default),

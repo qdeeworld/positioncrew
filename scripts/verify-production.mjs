@@ -451,6 +451,43 @@ try {
     new URL(marketplace.aacpReadinessUrl).origin === baseUrl.origin,
     "Marketplace AACP readiness record is not canonical",
   );
+  assert(
+    new URL(marketplace.externalComparisonSnapshotUrl).origin === baseUrl.origin,
+    "Marketplace external comparison snapshot is not canonical",
+  );
+  const externalComparisons = await fetchJson(
+    "external-comparison-snapshot",
+    marketplace.externalComparisonSnapshotUrl,
+  );
+  assert(
+    externalComparisons.schemaVersion === "positioncrew.external-comparison-snapshot.v1",
+    "Unexpected external comparison snapshot schema",
+  );
+  const { snapshotHash: _externalComparisonSnapshotHash, ...externalComparisonSnapshotBody } = externalComparisons;
+  assert(
+    canonicalSha256(externalComparisonSnapshotBody) === externalComparisons.snapshotHash,
+    "External comparison snapshot commitment is invalid",
+  );
+  assert(externalComparisons.candidates?.length === 4, "External comparison snapshot must contain four candidates");
+  const externalComparisonServices = new Set(
+    externalComparisons.candidates.map((candidate) => candidate.category?.service),
+  );
+  assert(
+    externalComparisonServices.size === expectedServices.size &&
+      [...expectedServices].every((service) => externalComparisonServices.has(service)),
+    "External comparison snapshot does not cover the exact required services",
+  );
+  assert(
+    externalComparisons.candidates.every(
+      (candidate) => candidate.positionCrewCertified === false && candidate.positionCrewActivation === "NOT_SUPPORTED",
+    ),
+    "External comparison snapshot overstates certification or activation",
+  );
+  report.externalComparisons = {
+    snapshotId: externalComparisons.snapshotId,
+    snapshotHash: externalComparisons.snapshotHash,
+    candidateCount: externalComparisons.candidates.length,
+  };
 
   const aacpReadiness = await fetchJson(
     "aacp-production-readiness",
@@ -1144,6 +1181,11 @@ try {
   const openApi = await fetchJson("openapi", marketplace.openApiUrl);
   assert(openApi.openapi === "3.1.0", "OpenAPI version is not 3.1.0");
   const requiredOpenApiOperations = [
+    [
+      "/api/evidence/external-comparisons/2026-08-24",
+      "get",
+      "getExternalComparisonSnapshot",
+    ],
     ["/api/status", "get", "getSystemTelemetry"],
     ["/api/commerce/aacp", "get", "getAacpProductionReadiness"],
     ["/api/operations/production", "get", "getProductionTrackRecord"],

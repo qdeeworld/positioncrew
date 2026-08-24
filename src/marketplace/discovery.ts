@@ -12,6 +12,10 @@ import {
 } from "../contracts/index.js";
 import { PROVIDER_CATALOG, type ProviderListing } from "./catalog.js";
 import {
+  EXTERNAL_COMPARISON_SNAPSHOT_ROUTE,
+  ExternalComparisonSnapshotSchema,
+} from "./external-comparisons.js";
+import {
   FreshMarketplaceChainSchema,
   FreshMarketplaceHireRequestSchema,
 } from "../commerce/fresh-hire-schema.js";
@@ -146,6 +150,7 @@ export function buildMarketplaceManifest(
     openApiUrl: absolute(origin, "/openapi.json"),
     operatingRecordUrl: absolute(origin, "/api/operations/production"),
     marketplaceDeliveryEvidenceUrl: absolute(origin, "/api/benchmarks/marketplace-provenance"),
+    externalComparisonSnapshotUrl: absolute(origin, EXTERNAL_COMPARISON_SNAPSHOT_ROUTE),
     aacpReadinessUrl: absolute(origin, "/api/commerce/aacp"),
     freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
     providers: PROVIDER_CATALOG.map((provider) => ({
@@ -162,6 +167,7 @@ export function buildMarketplaceManifest(
       aacp: "PRODUCTION_RUNTIME_PENDING",
       judgeTrial: "NO_WALLET_PROVIDER_CALL",
       freshHistoricalHire: "D1_PERSISTED_ZERO_COST_HISTORICAL_FIXTURE",
+      externalComparisons: "FOUR_THIRD_PARTY_EVIDENCE_ONLY_NON_ACTIVATABLE",
       agentAdvantage: "PENDING_INDEPENDENT_BLIND_EVALUATION",
     },
   };
@@ -180,6 +186,10 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
   );
   schemas.FreshMarketplaceChain = z.toJSONSchema(
     FreshMarketplaceChainSchema,
+    { target: "draft-2020-12" },
+  );
+  schemas.ExternalComparisonSnapshot = z.toJSONSchema(
+    ExternalComparisonSnapshotSchema,
     { target: "draft-2020-12" },
   );
   const providerPaths = Object.fromEntries(
@@ -231,6 +241,22 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
   );
   const paths = {
     ...providerPaths,
+    [EXTERNAL_COMPARISON_SNAPSHOT_ROUTE]: {
+      get: {
+        summary: "Read the immutable third-party comparison-candidate evidence snapshot",
+        operationId: "getExternalComparisonSnapshot",
+        responses: {
+          "200": {
+            description: "Four externally owned evidence-only candidates with no activation or certification",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ExternalComparisonSnapshot" },
+              },
+            },
+          },
+        },
+      },
+    },
     "/api/benchmark-hires": {
       post: {
         summary: "Persist a $0 no-wallet historical-fixture hire before provider computation",

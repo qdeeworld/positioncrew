@@ -42,6 +42,10 @@ import { PositionCrewRequestSchema } from "../src/contracts/index.js";
 import { canonicalHash } from "../src/core/canonical.js";
 import { PROVIDER_CATALOG } from "../src/marketplace/catalog.js";
 import {
+  EXTERNAL_COMPARISON_SNAPSHOT,
+  EXTERNAL_COMPARISON_SNAPSHOT_ROUTE,
+} from "../src/marketplace/external-comparisons.js";
+import {
   buildMarketplaceManifest,
   buildOpenApiDocument,
   buildProviderManifest,
@@ -640,6 +644,11 @@ async function api(
         200,
         "public, max-age=0, s-maxage=300",
       );
+    }
+
+    if (url.pathname === EXTERNAL_COMPARISON_SNAPSHOT_ROUTE) {
+      if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
+      return json(EXTERNAL_COMPARISON_SNAPSHOT, 200, "public, max-age=31536000, immutable");
     }
 
     if (url.pathname === "/api/benchmark-hires") {

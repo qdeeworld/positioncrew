@@ -43,6 +43,13 @@ const yieldFixture = JSON.parse(
   ),
 ) as Record<string, unknown>;
 
+const externalComparisonSnapshot = JSON.parse(
+  readFileSync(
+    new URL("../evidence/external-comparison-candidates.mainnet.json", import.meta.url),
+    "utf8",
+  ),
+) as Record<string, unknown>;
+
 function freshProbeRequest(
   fixture: Record<string, unknown>,
   now: Date,
@@ -560,13 +567,47 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
-test("a current lending hire does not depend on the historical fixture matrix", async ({ page }) => {
+test("serves and renders four evidence-only external comparison candidates", async ({ page, request }) => {
+  const response = await getWithTransportRetry(request, "/api/evidence/external-comparisons/2026-08-24");
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toContain("immutable");
+  expect(await response.json()).toEqual(externalComparisonSnapshot);
+  const postResponse = await request.post("/api/evidence/external-comparisons/2026-08-24");
+  expect(postResponse.status()).toBe(405);
+
+  await page.goto("/#marketplace");
+  const region = page.getByRole("region", { name: "External comparison candidates" });
+  await expect(region).toBeVisible();
+  await expect(region.locator(".external-candidate-card")).toHaveCount(4);
+  for (const name of ["Health Factor Monitor", "BNB LP Range Rebalancer", "BNB Yield Optimizer", "GridMaster Ops"]) {
+    await expect(region.getByRole("heading", { name })).toBeVisible();
+  }
+  await expect(region.getByText("Service: Endpoint reachable", { exact: true })).toHaveCount(3);
+  await expect(region.getByText("Service: Listed only", { exact: true })).toHaveCount(1);
+  await expect(region.getByText("Quote required", { exact: true })).toHaveCount(2);
+  await expect(region.getByText("Not published", { exact: true })).toHaveCount(1);
+  await expect(region.getByText("Not verified", { exact: true })).toHaveCount(1);
+  await expect(region.getByText("Unverified", { exact: true })).toHaveCount(4);
+  await expect(region.locator('time[datetime="2026-08-24T00:49:52Z"]')).toHaveCount(1);
+  await expect(region.getByRole("button")).toHaveCount(0);
+  await expect(region).not.toContainText("$0");
+  await expect(region.getByRole("link", { name: /Identity/ })).toHaveCount(4);
+});
+
+test("a current lending hire does not depend on historical fixtures or external comparisons", async ({ page }) => {
   const mockedHire = await installCurrentLendingHireRoutes(page);
   await page.route("**/api/matrix", async (route) => {
     await route.fulfill({
       status: 503,
       contentType: "application/json",
       body: JSON.stringify({ error: "Historical fixture matrix unavailable" }),
+    });
+  });
+  await page.route("**/api/evidence/external-comparisons/2026-08-24", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "External comparison snapshot unavailable" }),
     });
   });
 
