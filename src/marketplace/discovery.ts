@@ -16,6 +16,13 @@ import {
   ExternalComparisonSnapshotSchema,
 } from "./external-comparisons.js";
 import {
+  PROVIDER_CONTRACT_PREFLIGHT_BOUNDARY,
+  PROVIDER_CONTRACT_PREFLIGHT_ROUTE,
+  ProviderContractPacketSchema,
+  ProviderContractPreflightResultSchema,
+  ProviderContractTemplateResponseSchema,
+} from "./provider-compatibility.js";
+import {
   FreshMarketplaceChainSchema,
   FreshMarketplaceHireRequestSchema,
 } from "../commerce/fresh-hire-schema.js";
@@ -157,6 +164,7 @@ export function buildMarketplaceManifest(
     operatingRecordUrl: absolute(origin, "/api/operations/production"),
     marketplaceDeliveryEvidenceUrl: absolute(origin, "/api/benchmarks/marketplace-provenance"),
     externalComparisonSnapshotUrl: absolute(origin, EXTERNAL_COMPARISON_SNAPSHOT_ROUTE),
+    providerContractPreflightUrl: absolute(origin, PROVIDER_CONTRACT_PREFLIGHT_ROUTE),
     venusTestnetNativeSupplyEvidenceUrl: absolute(origin, VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE),
     aacpReadinessUrl: absolute(origin, "/api/commerce/aacp"),
     freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
@@ -177,6 +185,7 @@ export function buildMarketplaceManifest(
       freshHistoricalHire: "D1_PERSISTED_ZERO_COST_HISTORICAL_FIXTURE",
       freshCurrentHire: "D1_PERSISTED_ZERO_COST_CURRENT_BLOCK_PINNED",
       externalComparisons: "FOUR_THIRD_PARTY_EVIDENCE_ONLY_NON_ACTIVATABLE",
+      providerContractPreflight: "CALLER_SUPPLIED_JSON_CONTRACT_ONLY",
       venusTestnetNativeSupply: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
       agentAdvantage: "PENDING_INDEPENDENT_BLIND_EVALUATION",
     },
@@ -200,6 +209,18 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
   );
   schemas.ExternalComparisonSnapshot = z.toJSONSchema(
     ExternalComparisonSnapshotSchema,
+    { target: "draft-2020-12" },
+  );
+  schemas.ProviderContractPacket = z.toJSONSchema(
+    ProviderContractPacketSchema,
+    { target: "draft-2020-12" },
+  );
+  schemas.ProviderContractPreflightResult = z.toJSONSchema(
+    ProviderContractPreflightResultSchema,
+    { target: "draft-2020-12" },
+  );
+  schemas.ProviderContractTemplateResponse = z.toJSONSchema(
+    ProviderContractTemplateResponseSchema,
     { target: "draft-2020-12" },
   );
   schemas.VenusTestnetNativeSupplyEvidence = z.toJSONSchema(
@@ -268,6 +289,36 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
               },
             },
           },
+        },
+      },
+    },
+    [PROVIDER_CONTRACT_PREFLIGHT_ROUTE]: {
+      get: {
+        summary: "Load one reference provider-contract packet per capital category",
+        operationId: "getProviderContractPreflightTemplates",
+        description: PROVIDER_CONTRACT_PREFLIGHT_BOUNDARY,
+        responses: {
+          "200": {
+            description: "Four caller-editable reference packets with no external activation or certification",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/ProviderContractTemplateResponse" } } },
+          },
+        },
+      },
+      post: {
+        summary: "Check a caller-supplied provider packet against one frozen capital-service contract",
+        operationId: "runProviderContractPreflight",
+        description: PROVIDER_CONTRACT_PREFLIGHT_BOUNDARY,
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/ProviderContractPacket" } } },
+        },
+        responses: {
+          "200": {
+            description: "Deterministic CONTRACT_PASS or CONTRACT_FAIL with explicit NOT_PROVEN checks",
+            content: { "application/json": { schema: { $ref: "#/components/schemas/ProviderContractPreflightResult" } } },
+          },
+          "400": { description: "Body is not valid JSON" },
+          "413": { description: "Body exceeds the bounded request size" },
         },
       },
     },

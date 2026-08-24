@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { TASKS } from "../task-config";
 import { serviceLabel, shortHash } from "../presentation";
+import { ProviderCompatibilityPanel } from "./ProviderCompatibilityPanel";
 import type {
   ExternalComparisonSnapshot,
   FixtureJobResponse,
@@ -301,6 +302,7 @@ export function MarketplaceView({
             <div className="external-candidate-loading" role="status">External comparison evidence is unavailable. First-party hiring remains available.</div>
           )}
         </section>
+        <ProviderCompatibilityPanel />
       </div>
     </main>
   );

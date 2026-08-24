@@ -705,6 +705,45 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
+test("an operator can preflight a provider packet without external activation", async ({ page, request }) => {
+  const templatesResponse = await request.get("/api/provider-contract-preflight");
+  expect(templatesResponse.status()).toBe(200);
+  const templates = await templatesResponse.json() as { templates: Record<string, unknown> };
+  expect(Object.keys(templates.templates)).toEqual([
+    "LENDING_RESCUE",
+    "LP_REBALANCE",
+    "YIELD_OPTIMIZATION",
+    "BOUNDED_GRID",
+  ]);
+  const directPass = await request.post("/api/provider-contract-preflight", {
+    data: templates.templates.LENDING_RESCUE,
+  });
+  expect(directPass.status()).toBe(200);
+  expect((await directPass.json()).outcome).toBe("CONTRACT_PASS");
+
+  await page.goto("/#marketplace");
+  const region = page.getByRole("region", { name: "Check a provider packet against the contract." });
+  await expect(region.getByRole("button", { name: "Check a provider packet" })).toBeVisible();
+  await region.getByRole("button", { name: "Check a provider packet" }).click();
+  const editor = region.getByLabel("Provider packet JSON");
+  await expect(editor).toContainText("positioncrew.provider-contract-packet.v1");
+  await region.getByRole("button", { name: "Run contract check" }).click();
+  await expect(region.getByText("Packet conformance passed", { exact: true })).toBeVisible();
+  await expect(region.getByText("Provider not verified; activation unavailable.", { exact: true })).toBeVisible();
+  await expect(region.getByText("NOT_PROVEN", { exact: true })).toHaveCount(11);
+  await expect(region).toContainText("does not prove ownership");
+  await expect(region).not.toContainText("Certified");
+  await expect(region).not.toContainText("Hireable");
+
+  const tampered = JSON.parse(await editor.inputValue()) as { refusalDeliverable: { status: string } };
+  tampered.refusalDeliverable.status = "NO_ACTION";
+  await editor.fill(JSON.stringify(tampered, null, 2));
+  await region.getByRole("button", { name: "Run contract check" }).click();
+  await expect(region.getByText("Packet conformance failed", { exact: true })).toBeVisible();
+  await expect(region).toContainText("Refusal example must use an explicit REFUSED_* status.");
+  await expect(page.getByRole("button", { name: "Load current position and hire" })).toBeVisible();
+});
+
 test("serves and renders four evidence-only external comparison candidates", async ({ page, request }) => {
   const response = await getWithTransportRetry(request, "/api/evidence/external-comparisons/2026-08-24");
   expect(response.status()).toBe(200);
