@@ -10,6 +10,9 @@ const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const config = resolve(root, "dist/server/wrangler.local.json");
 const persistence = await mkdtemp(join(tmpdir(), "positioncrew-shadow-grid-d1-"));
 const token = "positioncrew-shadow-grid-integration-token";
+const testNow = new Date();
+testNow.setUTCMinutes(2, 0, 0);
+if (testNow.getTime() > Date.now()) testNow.setUTCHours(testNow.getUTCHours() - 1);
 
 async function availablePort() {
   const server = createServer();
@@ -49,6 +52,8 @@ async function startWorker(port) {
       persistence,
       "--var",
       `SHADOW_GRID_TICK_TOKEN:${token}`,
+      "--var",
+      `SHADOW_GRID_TEST_NOW:${testNow.toISOString()}`,
     ],
     { cwd: root, stdio: "ignore" },
   );

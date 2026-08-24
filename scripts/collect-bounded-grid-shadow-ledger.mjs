@@ -46,15 +46,22 @@ if (!response.ok) {
     `Forward-shadow tick returned HTTP ${response.status}: ${JSON.stringify(body)}`,
   );
 }
+const lateStartSkipped = body?.state === "LATE_START_SKIPPED";
 if (
   body?.schemaVersion !== "positioncrew.bounded-grid-forward-shadow-tick.v1" ||
   body.accepted !== true ||
   typeof body.runId !== "string" ||
-  !/^sha256:[a-f0-9]{64}$/u.test(body.headHash ?? "")
+  (lateStartSkipped
+    ? body.headHash !== null
+    : !/^sha256:[a-f0-9]{64}$/u.test(body.headHash ?? ""))
 ) {
   throw new Error("Forward-shadow tick returned an invalid response");
 }
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(body, null, 2)}\n`, "utf8");
-console.log(`Recorded protected forward-shadow tick ${body.runId}: ${body.state}`);
+console.log(
+  lateStartSkipped
+    ? `Skipped late forward-shadow opening ${body.runId}; no retrospective window was created`
+    : `Recorded protected forward-shadow tick ${body.runId}: ${body.state}`,
+);
