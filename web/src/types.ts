@@ -965,6 +965,234 @@ export function isVerifiedFounderAgentAdvantagePublication(
   );
 }
 
+export interface FounderAgentAdvantageTaskAtAGlance {
+  service: TermixBenchmarkService;
+  benchmarkSlug: TermixBenchmarkSlug;
+  taskId: string;
+  title: string;
+  category: string;
+  agentElapsedMilliseconds: number;
+  manualElapsedMilliseconds: number;
+  agentDirectCostUsd: "0.00";
+  manualDirectCostUsd: "0";
+  receiptUrl: string;
+  exactCanonicalParity: true;
+}
+
+export interface FounderAgentAdvantageAtAGlance {
+  reportHash: string;
+  evidenceManifestHash: string;
+  reportUrl: "/evidence/agent-advantage-founder/";
+  tasks: FounderAgentAdvantageTaskAtAGlance[];
+}
+
+export type FounderAgentAdvantageAtAGlanceLoadState = "IDLE" | PublicationLoadState;
+
+const FOUNDER_GLANCE_TASKS = [
+  {
+    benchmarkSlug: "lending-rescue",
+    service: "LENDING_RESCUE",
+    taskId: "venus-stressed-position-20260812-001",
+    title: "Bounded lending-position rescue",
+    category: "Lending risk",
+  },
+  {
+    benchmarkSlug: "lp-rebalance",
+    service: "LP_REBALANCE",
+    taskId: "v3-out-of-range-20260812-001",
+    title: "Bounded concentrated-liquidity rebalance",
+    category: "Liquidity management",
+  },
+  {
+    benchmarkSlug: "bounded-grid",
+    service: "BOUNDED_GRID",
+    taskId: "bounded-grid-20260812-001",
+    title: "Bounded BNB-USDT grid construction",
+    category: "Trading controls",
+  },
+] as const satisfies ReadonlyArray<{
+  benchmarkSlug: TermixBenchmarkSlug;
+  service: TermixBenchmarkService;
+  taskId: string;
+  title: string;
+  category: string;
+}>;
+
+function founderObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function positiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function founderCanonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(founderCanonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${founderCanonicalJson(child)}`)
+      .join(",")}}`;
+  }
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return JSON.stringify(value);
+  }
+  throw new TypeError(`Unsupported canonical value type: ${typeof value}`);
+}
+
+async function founderCanonicalSha256(value: unknown): Promise<string | null> {
+  try {
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(founderCanonicalJson(value)),
+    );
+    const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `sha256:${hex}`;
+  } catch {
+    return null;
+  }
+}
+
+export async function projectFounderAgentAdvantageAtAGlance(
+  value: unknown,
+  publication: FounderAgentAdvantagePublicationStatus,
+): Promise<FounderAgentAdvantageAtAGlance | null> {
+  if (!isVerifiedFounderAgentAdvantagePublication(publication)) return null;
+  const report = founderObject(value);
+  if (!report) return null;
+  if (
+    report.schemaVersion !== "positioncrew.founder-agent-advantage-report.v2" ||
+    report.reportHash !== publication.reportHash ||
+    report.evidenceManifestHash !== publication.evidenceManifestHash ||
+    report.comparisonMode !== "FOUNDER_OPERATED_NON_INDEPENDENT_NON_BLIND" ||
+    report.qualityMethod !== "CANONICAL_EXACT_OUTPUT_PARITY" ||
+    report.qualityScore !== null
+  ) return null;
+
+  const evidenceManifest = founderObject(report.evidenceManifest);
+  if (!evidenceManifest) return null;
+  const { reportHash: _declaredReportHash, ...reportBody } = report;
+  const [computedReportHash, computedEvidenceManifestHash] = await Promise.all([
+    founderCanonicalSha256(reportBody),
+    founderCanonicalSha256(evidenceManifest),
+  ]);
+  if (
+    computedReportHash !== publication.reportHash ||
+    computedEvidenceManifestHash !== publication.evidenceManifestHash
+  ) return null;
+
+  const summary = founderObject(report.summary);
+  const boundaries = Array.isArray(report.claimBoundary)
+    ? report.claimBoundary.filter((item): item is string => typeof item === "string")
+    : [];
+  const boundary = boundaries.join(" ").toLowerCase();
+  if (
+    !summary ||
+    summary.taskCount !== 3 ||
+    summary.exactOutputParityCount !== 3 ||
+    summary.recordedSpeedAdvantageCount !== 3 ||
+    summary.directCostUsd !== "0" ||
+    summary.marketplaceEvidenceStatus !== "E3_SERVER_PERSISTED" ||
+    !boundary.includes("founder-operated") ||
+    !boundary.includes("non-independent") ||
+    !boundary.includes("non-blind") ||
+    !boundary.includes("historical fixtures") ||
+    !boundary.includes("different execution contexts")
+  ) return null;
+
+  if (!Array.isArray(report.tasks) || report.tasks.length !== FOUNDER_GLANCE_TASKS.length) {
+    return null;
+  }
+
+  const tasks: FounderAgentAdvantageTaskAtAGlance[] = [];
+  const receiptUrls = new Set<string>();
+  for (const [index, spec] of FOUNDER_GLANCE_TASKS.entries()) {
+    const task = founderObject(report.tasks[index]);
+    const quality = founderObject(task?.quality);
+    const agent = founderObject(task?.agent);
+    const manual = founderObject(task?.manual);
+    const marketplace = founderObject(task?.marketplace);
+    if (!task || !quality || !agent || !manual || !marketplace) return null;
+
+    const agentElapsed = agent.officialElapsedMilliseconds;
+    const manualElapsed = manual.elapsedMilliseconds;
+    const receiptId = marketplace.receiptId;
+    const receiptUrl = marketplace.receiptUrl;
+    const deliverableHash = marketplace.deliverableHash;
+    if (
+      task.benchmarkSlug !== spec.benchmarkSlug ||
+      task.taskId !== spec.taskId ||
+      task.title !== spec.title ||
+      task.category !== spec.category ||
+      quality.method !== "CANONICAL_EXACT_OUTPUT_PARITY" ||
+      quality.exactCanonicalParity !== true ||
+      quality.qualityScore !== null ||
+      quality.verdict !== "IDENTICAL_CANONICAL_OUTPUT" ||
+      agent.officialTimingSource !== "POSITIONCREW_D1_HIRE_API_DURATION" ||
+      !positiveInteger(agentElapsed) ||
+      !positiveInteger(manualElapsed) ||
+      manualElapsed <= agentElapsed ||
+      marketplace.apiDurationMilliseconds !== agentElapsed ||
+      agent.directCostUsd !== "0.00" ||
+      manual.directCostUsd !== "0" ||
+      marketplace.evidenceStatus !== "E3_SERVER_PERSISTED" ||
+      marketplace.journey !== "FOUNDER_PUBLIC_WORKSPACE_COMPARISON" ||
+      marketplace.evidenceMode !== "FRESH_SERVER_PERSISTED_HISTORICAL_FIXTURE_HIRE" ||
+      marketplace.serverEvidenceMode !== "HISTORICAL_FIXTURE" ||
+      marketplace.state !== "COMPLETED" ||
+      marketplace.status !== "COMPLETED" ||
+      marketplace.hireProven !== true ||
+      marketplace.externalBuyer !== false ||
+      marketplace.uniqueServerHire !== true ||
+      marketplace.paid !== false ||
+      marketplace.freshServerPersistenceProven !== true ||
+      marketplace.freshUnderlyingAnalysisProven !== false ||
+      typeof receiptId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(receiptId) ||
+      typeof receiptUrl !== "string" ||
+      receiptUrl !== `https://positioncrew.dolepee.com/api/benchmark-receipts/${receiptId}` ||
+      agent.receiptId !== receiptId ||
+      agent.receiptUrl !== receiptUrl ||
+      typeof deliverableHash !== "string" ||
+      !SHA256_COMMITMENT.test(deliverableHash) ||
+      agent.deliverableHash !== deliverableHash ||
+      manual.outputHash !== deliverableHash
+    ) return null;
+
+    receiptUrls.add(receiptUrl);
+    tasks.push({
+      service: spec.service,
+      benchmarkSlug: spec.benchmarkSlug,
+      taskId: spec.taskId,
+      title: spec.title,
+      category: spec.category,
+      agentElapsedMilliseconds: agentElapsed,
+      manualElapsedMilliseconds: manualElapsed,
+      agentDirectCostUsd: "0.00",
+      manualDirectCostUsd: "0",
+      receiptUrl,
+      exactCanonicalParity: true,
+    });
+  }
+  if (receiptUrls.size !== tasks.length) return null;
+
+  return {
+    reportHash: publication.reportHash,
+    evidenceManifestHash: publication.evidenceManifestHash,
+    reportUrl: publication.reportUrl,
+    tasks,
+  };
+}
+
 export interface BenchmarkRepeatabilityResponse {
   schemaVersion: "positioncrew.benchmark-repeatability.v1";
   generatedAt: string;

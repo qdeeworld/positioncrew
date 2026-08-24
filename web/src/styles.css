@@ -704,6 +704,10 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .result-advantage-band.neutral .result-advantage-state { color: #4b5b54; }
 .result-advantage-copy strong { margin-top: 5px; color: var(--ink); font-size: 11px; line-height: 1.35; }
 .result-advantage-copy small { max-width: 690px; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.result-advantage-metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.result-advantage-metrics > span { display: flex; min-width: 110px; flex-direction: column; padding: 7px 9px; border: 1px solid #cfe1d6; border-radius: 4px; background: rgb(255 255 255 / 68%); }
+.result-advantage-metrics small { margin: 0; color: var(--muted); font-size: 8px; font-weight: 750; text-transform: uppercase; }
+.result-advantage-metrics b { margin-top: 2px; color: var(--ink); font-size: 11px; }
 .result-advantage-band > a { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; min-height: 30px; padding: 0 9px; border: 1px solid currentColor; border-radius: 4px; color: #67531f; background: rgb(255 255 255 / 70%); font-size: 9px; font-weight: 800; text-decoration: none; }
 .result-advantage-band.published > a { color: var(--green-dark); }
 .result-advantage-band.neutral > a { color: #42524a; }
@@ -831,13 +835,30 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .evidence-table td:first-child strong, .evidence-table td:first-child small { display: block; }
 .evidence-table td:first-child small { margin-top: 4px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
 .evidence-table td:first-child .receipt-table-link { margin-top: 6px; font-size: 10px; }
-.evidence-columns { display: grid; grid-template-columns: 1.18fr 0.82fr; gap: 18px; }
+.evidence-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.evidence-columns .evidence-section + .evidence-section { margin-top: 18px; }
 .benchmark-table > div { display: grid; grid-template-columns: 100px 1fr 1.2fr; align-items: center; gap: 13px; min-height: 64px; padding: 10px 15px; border-bottom: 1px solid #e6ebe7; }
 .benchmark-table > div:last-child { border-bottom: 0; }
 .benchmark-table > div > span:nth-child(2) { display: flex; flex-direction: column; }
 .benchmark-table strong { font-size: 11px; }
 .benchmark-table small { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .benchmark-table > div > span:last-child { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.advantage-task-list { display: grid; }
+.advantage-task-list article { display: grid; grid-template-columns: minmax(190px, 0.8fr) minmax(270px, 1.15fr) minmax(180px, 0.75fr) auto; align-items: center; gap: 14px; min-height: 92px; padding: 13px 15px; border-bottom: 1px solid #e6ebe7; }
+.advantage-task-list article:last-child { border-bottom: 0; }
+.advantage-task-heading { display: flex; align-items: center; gap: 9px; }
+.advantage-task-heading > span:last-child { display: flex; min-width: 0; flex-direction: column; }
+.advantage-task-heading strong { font-size: 11px; line-height: 1.35; }
+.advantage-task-heading small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.advantage-task-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.advantage-task-metrics span { display: flex; min-height: 50px; flex-direction: column; justify-content: center; padding: 6px 8px; border: 1px solid #dbe6df; border-radius: 4px; background: #f8faf8; }
+.advantage-task-metrics small { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.advantage-task-metrics strong { margin-top: 3px; font-size: 11px; }
+.advantage-task-list p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.advantage-task-list article > a { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 0 10px; border: 1px solid #b8ddd1; border-radius: 4px; color: var(--green-dark); font-size: 9px; font-weight: 800; text-decoration: none; }
+.independent-programme-note { display: flex; align-items: flex-start; gap: 8px; padding: 11px 15px; border-top: 1px solid var(--line); color: var(--muted); background: #fafbf9; font-size: 10px; line-height: 1.45; }
+.independent-programme-note svg { flex: 0 0 14px; margin-top: 1px; color: var(--amber); }
+.independent-programme-note strong { color: var(--ink-soft); }
 .benchmark-status { display: inline-flex; align-items: center; justify-content: center; gap: 5px; width: max-content; min-height: 23px; padding: 0 7px; border: 1px solid var(--line); border-radius: 12px; font-size: 9px; font-weight: 800; }
 .benchmark-status.locked, .benchmark-status.captured { color: #19604e; border-color: #b8ddd1; background: var(--green-soft); }
 .benchmark-status.planned { color: #7b5b1d; border-color: #e6d5ae; background: #fff8e8; }
@@ -914,8 +935,7 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .market-layout, .job-layout { grid-template-columns: 1fr; }
   .registry-panel, .job-composer { border-right: 0; border-bottom: 1px solid var(--line); }
   .provider-detail { min-height: 0; }
-  .evidence-columns { grid-template-columns: 1fr; gap: 0; }
-  .evidence-columns .evidence-section + .evidence-section { margin-top: 18px; }
+  .advantage-task-list article { grid-template-columns: minmax(190px, 0.8fr) minmax(270px, 1.15fr); }
 }
 
 @media (max-width: 680px) {
@@ -997,11 +1017,14 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .decision-detail-grid { grid-template-columns: 1fr; }
   .alternative-action { align-items: flex-start; flex-direction: column; }
   .result-advantage-band { align-items: flex-start; flex-direction: column; }
+  .result-advantage-band.task-detail > a { min-height: 44px; }
   .receipt-view { padding: 15px; }
   .receipt-actions { align-items: flex-start; flex-direction: column; }
   .vertical-timeline li { grid-template-columns: 24px 1fr; }
   .vertical-timeline code { display: none; }
   .benchmark-table > div { grid-template-columns: 100px 1fr; }
+  .advantage-task-list article { grid-template-columns: 1fr; gap: 10px; }
+  .advantage-task-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .infrastructure-grid { grid-template-columns: 1fr; }
   .infrastructure-grid > a { min-height: 91px; border-right: 0; border-bottom: 1px solid var(--line); }
   .infrastructure-grid > a:last-child { border-bottom: 0; }

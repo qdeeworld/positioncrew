@@ -5,11 +5,17 @@ import { EvidenceView } from "./components/EvidenceView";
 import { JobWorkspace } from "./components/JobWorkspace";
 import { MarketplaceView } from "./components/MarketplaceView";
 import { ShellHeader, type AppView } from "./components/ShellHeader";
+import {
+  isVerifiedFounderAgentAdvantagePublication,
+  projectFounderAgentAdvantageAtAGlance,
+} from "./types";
 import type {
   AacpProductionReadiness,
   AgentCaptureManifestResponse,
   AgentAdvantagePublicationStatus,
   FounderAgentAdvantagePublicationStatus,
+  FounderAgentAdvantageAtAGlance,
+  FounderAgentAdvantageAtAGlanceLoadState,
   PublicationLoadState,
   BenchmarkRepeatabilityMatrixResponse,
   BenchmarkRepeatabilityResponse,
@@ -69,6 +75,8 @@ export default function App() {
   const [marketplaceProvenance, setMarketplaceProvenance] = useState<MarketplaceInvocationEvidence | null>(null);
   const [advantagePublication, setAdvantagePublication] = useState<AgentAdvantagePublicationStatus | null>(null);
   const [founderAdvantagePublication, setFounderAdvantagePublication] = useState<FounderAgentAdvantagePublicationStatus | null>(null);
+  const [founderAdvantageAtAGlance, setFounderAdvantageAtAGlance] = useState<FounderAgentAdvantageAtAGlance | null>(null);
+  const [founderAdvantageAtAGlanceLoadState, setFounderAdvantageAtAGlanceLoadState] = useState<FounderAgentAdvantageAtAGlanceLoadState>("IDLE");
   const [advantagePublicationLoadState, setAdvantagePublicationLoadState] = useState<PublicationLoadState>("LOADING");
   const [founderAdvantagePublicationLoadState, setFounderAdvantagePublicationLoadState] = useState<PublicationLoadState>("LOADING");
   const [commerceLedger, setCommerceLedger] = useState<Erc8183TestnetLedger | null>(null);
@@ -87,6 +95,10 @@ export default function App() {
     idempotencyKey: string;
     requestKey: string;
     chain?: FreshMarketplaceChain;
+  } | null>(null);
+  const loadedFounderAdvantageCommitment = useRef<{
+    reportHash: string;
+    evidenceManifestHash: string;
   } | null>(null);
   const provider = providers.find((candidate) => candidate.service === selectedService);
   const fixture = matrix.get(selectedService);
@@ -175,6 +187,77 @@ export default function App() {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
+
+  useEffect(() => {
+    const completedService = activeJob?.response.result.deliverable.service;
+    const shouldLoad = view === "evidence" || Boolean(
+      view === "jobs" && completedService && HISTORICAL_HIRE_SLUG_BY_SERVICE[completedService],
+    );
+    if (!shouldLoad) return;
+
+    if (founderAdvantagePublicationLoadState === "LOADING") {
+      setFounderAdvantageAtAGlanceLoadState("LOADING");
+      return;
+    }
+    const founderPublicationClaimsPublished = founderAdvantagePublication?.status === "PUBLISHED";
+    if (!isVerifiedFounderAgentAdvantagePublication(founderAdvantagePublication)) {
+      loadedFounderAdvantageCommitment.current = null;
+      setFounderAdvantageAtAGlance(null);
+      setFounderAdvantageAtAGlanceLoadState(
+        founderPublicationClaimsPublished ||
+          founderAdvantagePublicationLoadState === "UNAVAILABLE"
+          ? "UNAVAILABLE"
+          : "IDLE",
+      );
+      return;
+    }
+    if (
+      loadedFounderAdvantageCommitment.current?.reportHash === founderAdvantagePublication.reportHash &&
+      loadedFounderAdvantageCommitment.current.evidenceManifestHash === founderAdvantagePublication.evidenceManifestHash
+    ) {
+      setFounderAdvantageAtAGlanceLoadState("AVAILABLE");
+      return;
+    }
+
+    const controller = new AbortController();
+    let active = true;
+    setFounderAdvantageAtAGlance(null);
+    setFounderAdvantageAtAGlanceLoadState("LOADING");
+    void fetch(
+      `${founderAdvantagePublication.reportUrl}founder-agent-advantage-report.json`,
+      { cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal },
+    )
+      .then((response) => jsonResponse<unknown>(response))
+      .then(async (report) => {
+        const projection = await projectFounderAgentAdvantageAtAGlance(
+          report,
+          founderAdvantagePublication,
+        );
+        if (!active) return;
+        if (!projection) throw new Error("Founder Agent Advantage report failed projection");
+        loadedFounderAdvantageCommitment.current = {
+          reportHash: founderAdvantagePublication.reportHash,
+          evidenceManifestHash: founderAdvantagePublication.evidenceManifestHash,
+        };
+        setFounderAdvantageAtAGlance(projection);
+        setFounderAdvantageAtAGlanceLoadState("AVAILABLE");
+      })
+      .catch((loadError: unknown) => {
+        if (!active || (loadError instanceof DOMException && loadError.name === "AbortError")) return;
+        loadedFounderAdvantageCommitment.current = null;
+        setFounderAdvantageAtAGlance(null);
+        setFounderAdvantageAtAGlanceLoadState("UNAVAILABLE");
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [
+    view,
+    activeJob,
+    founderAdvantagePublication,
+    founderAdvantagePublicationLoadState,
+  ]);
 
   function navigate(next: AppView) {
     if (window.location.hash !== `#${next}`) window.location.hash = next;
@@ -349,6 +432,8 @@ export default function App() {
           marketplaceProvenance={marketplaceProvenance}
           advantagePublication={advantagePublication}
           founderAdvantagePublication={founderAdvantagePublication}
+          founderAdvantageAtAGlance={founderAdvantageAtAGlance}
+          founderAdvantageAtAGlanceLoadState={founderAdvantageAtAGlanceLoadState}
           advantagePublicationLoadState={advantagePublicationLoadState}
           founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState}
           forwardShadowLedger={forwardShadowLedger}
@@ -359,7 +444,7 @@ export default function App() {
         />
       );
     }
-    if (view === "evidence") return <EvidenceView providers={providers} matrix={matrix} telemetry={telemetry} benchmarks={benchmarks} captureManifest={captureManifest} marketplaceProvenance={marketplaceProvenance} commerceLedger={commerceLedger} aacpReadiness={aacpReadiness} advantagePublication={advantagePublication} founderAdvantagePublication={founderAdvantagePublication} advantagePublicationLoadState={advantagePublicationLoadState} founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState} productionTrackRecord={productionTrackRecord} forwardShadowLedger={forwardShadowLedger} />;
+    if (view === "evidence") return <EvidenceView providers={providers} matrix={matrix} telemetry={telemetry} benchmarks={benchmarks} captureManifest={captureManifest} marketplaceProvenance={marketplaceProvenance} commerceLedger={commerceLedger} aacpReadiness={aacpReadiness} advantagePublication={advantagePublication} founderAdvantagePublication={founderAdvantagePublication} founderAdvantageAtAGlance={founderAdvantageAtAGlance} founderAdvantageAtAGlanceLoadState={founderAdvantageAtAGlanceLoadState} advantagePublicationLoadState={advantagePublicationLoadState} founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState} productionTrackRecord={productionTrackRecord} forwardShadowLedger={forwardShadowLedger} />;
     return (
       <MarketplaceView
         providers={providers}
@@ -371,7 +456,7 @@ export default function App() {
         externalComparisons={externalComparisons}
       />
     );
-  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, providers, matrix, selectedService, telemetry, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord, forwardShadowLedger]);
+  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, providers, matrix, selectedService, telemetry, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, founderAdvantageAtAGlance, founderAdvantageAtAGlanceLoadState, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord, forwardShadowLedger]);
 
   return (
     <div className="app-shell">

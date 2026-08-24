@@ -18,6 +18,8 @@ import type {
   AgentCaptureManifestResponse,
   AgentAdvantagePublicationStatus,
   FounderAgentAdvantagePublicationStatus,
+  FounderAgentAdvantageAtAGlance,
+  FounderAgentAdvantageAtAGlanceLoadState,
   PublicationLoadState,
   BenchmarkRepeatabilityResponse,
   BoundedGridForwardShadowLedger,
@@ -72,6 +74,8 @@ export function EvidenceView({
   aacpReadiness,
   advantagePublication,
   founderAdvantagePublication,
+  founderAdvantageAtAGlance,
+  founderAdvantageAtAGlanceLoadState,
   advantagePublicationLoadState,
   founderAdvantagePublicationLoadState,
   productionTrackRecord,
@@ -87,6 +91,8 @@ export function EvidenceView({
   aacpReadiness: AacpProductionReadiness | null;
   advantagePublication: AgentAdvantagePublicationStatus | null;
   founderAdvantagePublication: FounderAgentAdvantagePublicationStatus | null;
+  founderAdvantageAtAGlance: FounderAgentAdvantageAtAGlance | null;
+  founderAdvantageAtAGlanceLoadState: FounderAgentAdvantageAtAGlanceLoadState;
   advantagePublicationLoadState: PublicationLoadState;
   founderAdvantagePublicationLoadState: PublicationLoadState;
   productionTrackRecord: ProductionTrackRecord | null;
@@ -127,7 +133,9 @@ export function EvidenceView({
       status: delivery?.successCount === 2 ? "OBSERVED" : record ? "REPEATABLE" : lock ? "LOCKED" : "PENDING",
       tone: delivery?.successCount === 2 || record ? "captured" : lock ? "locked" : "planned",
       detail: publishedFounderAdvantage
-        ? `${publishedFounderAdvantage.exactOutputParityCount}/3 exact canonical output pairs across the founder report`
+        ? founderAdvantageAtAGlanceLoadState === "LOADING"
+          ? "Published task details loading"
+          : "Published task details unavailable; no task metrics inferred"
         : delivery?.successCount === 2
         ? `2/2 controlled Provider endpoint observations · ${delivery.medianElapsedMilliseconds} ms median`
         : record
@@ -609,22 +617,52 @@ export function EvidenceView({
       <div className="evidence-columns">
         <section className="evidence-section benchmark-section" aria-labelledby="advantage-title">
           <div className="section-bar">
-            <div><span className="section-kicker">TermiX evidence</span><h2 id="advantage-title">Independent/blind Agent Advantage programme</h2></div>
-            <span className={`state-label ${publishedAdvantage ? "good" : advantagePublicationLoadState === "LOADING" ? "neutral" : "warn"}`}>{publishedAdvantage ? <Check size={13} /> : <Clock3 size={13} />} {strictPublicationLabel}</span>
+            <div><span className="section-kicker">TermiX evidence</span><h2 id="advantage-title">Agent Advantage evidence</h2></div>
+            <span className={`state-label ${publishedFounderAdvantage ? "good" : founderAdvantagePublicationLoadState === "LOADING" ? "neutral" : "warn"}`}>{publishedFounderAdvantage ? <BadgeCheck size={13} /> : <Clock3 size={13} />} {publishedFounderAdvantage ? "Founder comparison published" : founderAdvantagePublicationLoadState === "LOADING" ? "Loading" : "Unavailable"}</span>
           </div>
-          <div className="benchmark-table">
-            {benchmarkRows.map((row) => (
-              <div key={row.task}>
-                <span className={`benchmark-status ${row.tone}`}>{row.status === "LOCKED" || row.status === "REPEATABLE" ? <LockKeyhole size={13} /> : <Clock3 size={13} />}{row.status}</span>
-                <span><strong>{row.task}</strong><small>{row.category}</small></span>
-                <span>{row.detail}</span>
-              </div>
-            ))}
-          </div>
+          {founderAdvantageAtAGlance && founderAdvantageAtAGlanceLoadState === "AVAILABLE" ? (
+            <div className="advantage-task-list" role="list" aria-label="Founder Agent Advantage task comparisons">
+              {founderAdvantageAtAGlance.tasks.map((task) => (
+                <article key={task.benchmarkSlug} role="listitem">
+                  <div className="advantage-task-heading">
+                    <span className="benchmark-status captured"><BadgeCheck size={13} /> Exact match</span>
+                    <span><strong>{task.title}</strong><small>{task.category}</small></span>
+                  </div>
+                  <div className="advantage-task-metrics">
+                    <span><small>Agent D1 API</small><strong>{task.agentElapsedMilliseconds.toLocaleString("en-US")} ms</strong></span>
+                    <span><small>Manual wall clock</small><strong>{task.manualElapsedMilliseconds.toLocaleString("en-US")} ms</strong></span>
+                    <span><small>Direct cost</small><strong>$0 / $0</strong></span>
+                  </div>
+                  <p>Quality was evaluated by exact canonical output parity; no separate numeric rating exists.</p>
+                  <a href={task.receiptUrl} target="_blank" rel="noreferrer">Open D1 receipt <ExternalLink size={13} /></a>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="benchmark-table" aria-label="Agent Advantage task detail status">
+              {benchmarkRows.map((row) => (
+                <div key={row.task}>
+                  <span className={`benchmark-status ${row.tone}`}>{row.status === "LOCKED" || row.status === "REPEATABLE" ? <LockKeyhole size={13} /> : <Clock3 size={13} />}{row.status}</span>
+                  <span><strong>{row.task}</strong><small>{row.category}</small></span>
+                  <span>{row.detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {publishedFounderAdvantage && founderAdvantageAtAGlanceLoadState === "UNAVAILABLE" && (
+            <div className="claim-warning" role="status" aria-label="Founder comparison task details unavailable">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span><strong>Founder task details unavailable.</strong>The publication remains linked, but no task timing, cost, quality, or receipt detail is inferred from an invalid or commitment-mismatched report.</span>
+            </div>
+          )}
           <div className="method-grid">
             <div><strong>{committedCandidateCount || repeatCount}</strong><span>source-committed agent runs</span><small>{captureManifest ? `3 matching pairs · source ${captureManifest.source.commitSha.slice(0, 7)}` : "capture manifest loading"}</small></div>
             <div><strong>{lockedCount}</strong><span>frozen task rubrics</span><small>300 total quality points · safety-critical gates</small></div>
-            <div><strong>{publishedAdvantage ? 3 : 0}</strong><span>blind scorecards</span><small>{publishedAdvantage ? `${publishedAdvantage.agentBlindQualityScore}/300 agent quality · independently scored` : "manual baseline and evaluator pending"}</small></div>
+            <div><strong>{publishedFounderAdvantage ? "3/3" : "0/3"}</strong><span>founder comparison tasks</span><small>{publishedFounderAdvantage ? "exact canonical output parity · recorded time and cost" : "founder comparison pending"}</small></div>
+          </div>
+          <div className="independent-programme-note" role="status">
+            {publishedAdvantage ? <Check size={14} /> : <Clock3 size={14} />}
+            <span><strong>Independent/blind extension: {strictPublicationLabel.toLowerCase()}.</strong> {publishedAdvantage ? "Its separately scoped report is available below." : "No independent/blind result is claimed; the published founder comparison above remains non-independent and non-blind."}</span>
           </div>
           <a className="benchmark-data-link" href="/api/benchmarks/captures" target="_blank" rel="noreferrer">Open source-bound capture manifest <ExternalLink size={13} /></a>
           <a className="benchmark-data-link" href="/api/benchmarks/marketplace-provenance" target="_blank" rel="noreferrer">Open controlled endpoint observation record <ExternalLink size={13} /></a>
