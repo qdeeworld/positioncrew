@@ -105,6 +105,7 @@ interface Env {
   DB: D1Database;
   SHADOW_GRID_TICK_TOKEN?: string;
   SHADOW_GRID_TEST_NOW?: string;
+  SHADOW_GRID_TEST_CHECKPOINT_NOW?: string;
 }
 
 interface WorkerExecutionContext {
@@ -295,6 +296,19 @@ function shadowGridCollectorNow(request: Request, env: Env): Date {
   return new Date();
 }
 
+function shadowGridCollectorCheckpointNow(request: Request, env: Env): Date {
+  const hostname = new URL(request.url).hostname;
+  const testNow = env.SHADOW_GRID_TEST_CHECKPOINT_NOW ?? env.SHADOW_GRID_TEST_NOW;
+  if (testNow && (hostname === "127.0.0.1" || hostname === "localhost")) {
+    const checkpointNow = new Date(testNow);
+    if (!Number.isFinite(checkpointNow.getTime())) {
+      throw new Error("Invalid loopback shadow-grid checkpoint clock");
+    }
+    return checkpointNow;
+  }
+  return new Date();
+}
+
 function scheduleEvidence(request: Request, now: Date): ShadowGridScheduleEvidence {
   const event = request.headers.get("X-GitHub-Event");
   const repository = request.headers.get("X-GitHub-Repository");
@@ -343,7 +357,11 @@ async function createCurrentGridHireForShadowRun(
   env: Env,
   runId: string,
 ): Promise<FreshMarketplaceChain> {
-  const idempotencyKey = await deterministicUuid(`positioncrew:${runId}:current-grid-hire`);
+  const namespaceSecret = env.SHADOW_GRID_TICK_TOKEN;
+  if (!namespaceSecret) throw new Error("Shadow-grid scheduler credential is unavailable");
+  const idempotencyKey = await deterministicUuid(
+    `positioncrew:shadow-grid-source:v2:${runId}:${namespaceSecret}`,
+  );
   const existingReference = await env.DB.prepare(
     "SELECT hire_id FROM fresh_marketplace_hires WHERE idempotency_key = ? LIMIT 1",
   ).bind(idempotencyKey).first<{ hire_id: string }>();
@@ -553,10 +571,15 @@ async function startShadowGridRun(
   env: Env,
   runId: string,
   schedule: ShadowGridScheduleEvidence,
-): Promise<readonly ShadowGridEvent[]> {
+  collectorRequest: Request,
+  openingDeadline: number,
+): Promise<
+  | { state: "STARTED"; events: readonly ShadowGridEvent[] }
+  | { state: "LATE_START_SKIPPED"; recordedAt: Date }
+> {
   const store = shadowGridStore(env);
   const existing = await store.getRun(runId);
-  if (existing.length > 0) return existing;
+  if (existing.length > 0) return { state: "STARTED", events: existing };
   const chain = await createCurrentGridHireForShadowRun(env, runId);
   const { request, deliverable } = gridReceiptPayload(chain);
   const receipt = chain.receipt!;
@@ -589,6 +612,10 @@ async function startShadowGridRun(
       capitalMode: "ZERO_FUND_SHADOW",
     },
   });
+  const persistenceCheckpoint = shadowGridCollectorCheckpointNow(collectorRequest, env);
+  if (persistenceCheckpoint.getTime() >= openingDeadline) {
+    return { state: "LATE_START_SKIPPED", recordedAt: persistenceCheckpoint };
+  }
   const persistedGenesis = await store.appendEvent(genesis);
   let events: readonly ShadowGridEvent[] = [persistedGenesis.event];
   const precommitPayload = {
@@ -624,7 +651,7 @@ async function startShadowGridRun(
       },
     });
   }
-  return events;
+  return { state: "STARTED", events };
 }
 
 async function voidShadowGridRun(
@@ -652,6 +679,7 @@ async function processOpenShadowGridRun(
   env: Env,
   eventsInput: readonly ShadowGridEvent[],
   now: Date,
+  request: Request,
 ): Promise<readonly ShadowGridEvent[]> {
   if (eventsInput.length === 0 || shadowGridRunIsTerminal(eventsInput)) return eventsInput;
   let events = await resumeShadowGridInitialization(env, eventsInput);
@@ -678,6 +706,20 @@ async function processOpenShadowGridRun(
       events,
       new Date(),
       `The live block-pinned sample was unavailable: ${error instanceof Error ? error.message.slice(0, 240) : "unknown source failure"}`,
+    );
+  }
+  const sampleCompletedAt = shadowGridCollectorCheckpointNow(request, env);
+  const sampledAt = Date.parse(sample.sampledAt);
+  const sampleDeadline = Math.min(nextDue, horizon) + SHADOW_GRID_SAMPLE_GRACE_MILLISECONDS;
+  if (
+    !Number.isFinite(sampledAt) ||
+    Math.max(sampledAt, sampleCompletedAt.getTime()) > sampleDeadline
+  ) {
+    return voidShadowGridRun(
+      store,
+      events,
+      sampleCompletedAt,
+      "The actual forward sample completed outside its fixed grace window",
     );
   }
   const priorSamples = events.filter((event) => event.eventType === "OBSERVED")
@@ -749,6 +791,7 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   const schedule = scheduleEvidence(request, now);
   const currentHour = new Date(now);
   currentHour.setUTCMinutes(0, 0, 0);
+  const openingDeadline = currentHour.getTime() + SHADOW_GRID_OPENING_CUTOFF_MINUTE * 60_000;
   const previousHour = new Date(currentHour.getTime() - 60 * 60_000);
   const store = shadowGridStore(env);
   let previousHourCleanup: {
@@ -763,7 +806,7 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   const previousRun = await store.getRun(shadowGridRunId(previousHour));
   if (previousRun.length > 0 && !shadowGridRunIsTerminal(previousRun)) {
     try {
-      await processOpenShadowGridRun(env, previousRun, now);
+      await processOpenShadowGridRun(env, previousRun, now, request);
       previousHourCleanup = { ...previousHourCleanup, status: "PROCESSED" };
     } catch (error) {
       previousHourCleanup = {
@@ -775,11 +818,12 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   }
   const runId = shadowGridRunId(currentHour);
   let events = await store.getRun(runId);
-  if (events.length === 0 && now.getUTCMinutes() >= SHADOW_GRID_OPENING_CUTOFF_MINUTE) {
+  const openingCheckpoint = shadowGridCollectorNow(request, env);
+  if (events.length === 0 && openingCheckpoint.getTime() >= openingDeadline) {
     return json({
       schemaVersion: "positioncrew.bounded-grid-forward-shadow-tick.v1",
       accepted: true,
-      recordedAt: now.toISOString(),
+      recordedAt: openingCheckpoint.toISOString(),
       runId,
       state: "LATE_START_SKIPPED",
       headHash: null,
@@ -788,9 +832,25 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
       claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
     });
   }
-  events = events.length === 0
-    ? await startShadowGridRun(env, runId, schedule)
-    : await processOpenShadowGridRun(env, events, now);
+  if (events.length === 0) {
+    const started = await startShadowGridRun(env, runId, schedule, request, openingDeadline);
+    if (started.state === "LATE_START_SKIPPED") {
+      return json({
+        schemaVersion: "positioncrew.bounded-grid-forward-shadow-tick.v1",
+        accepted: true,
+        recordedAt: started.recordedAt.toISOString(),
+        runId,
+        state: "LATE_START_SKIPPED",
+        headHash: null,
+        eventCount: 0,
+        previousHourCleanup,
+        claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
+      });
+    }
+    events = started.events;
+  } else {
+    events = await processOpenShadowGridRun(env, events, now, request);
+  }
   const latest = events.at(-1);
   if (!latest) throw new Error("Shadow-grid collector produced no event");
   return json({

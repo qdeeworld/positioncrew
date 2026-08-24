@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,11 +9,63 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const config = resolve(root, "dist/server/wrangler.local.json");
+const boundedGridFixture = JSON.parse(
+  await readFile(resolve(root, "fixtures/bounded-grid/bnb-usdt-grid.v1.json"), "utf8"),
+);
 const persistence = await mkdtemp(join(tmpdir(), "positioncrew-shadow-grid-d1-"));
 const token = "positioncrew-shadow-grid-integration-token";
 const testNow = new Date();
 testNow.setUTCMinutes(2, 0, 0);
 if (testNow.getTime() > Date.now()) testNow.setUTCHours(testNow.getUTCHours() - 1);
+
+function shadowGridRunId(date) {
+  const iso = date.toISOString();
+  return `bg-${iso.slice(0, 10).replaceAll("-", "")}-${iso.slice(11, 13)}`;
+}
+
+function deterministicUuid(seed) {
+  const digest = Buffer.from(createHash("sha256").update(seed).digest().subarray(0, 16));
+  digest[6] = (digest[6] & 0x0f) | 0x40;
+  digest[8] = (digest[8] & 0x3f) | 0x80;
+  const hex = digest.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function finiteDate(milliseconds, label) {
+  assert(Number.isFinite(milliseconds), `${label} timestamp is not finite`);
+  const date = new Date(milliseconds);
+  assert(Number.isFinite(date.getTime()), `${label} date is invalid`);
+  return date;
+}
+
+function adversarialGridHire(idempotencyKey) {
+  const observedAt = new Date().toISOString();
+  const blockNumber = "71009999";
+  const sourceId = `pancake-v3-mainnet-block-${blockNumber}`;
+  const explorerUrl = `https://bscscan.com/block/${blockNumber}`;
+  const request = structuredClone(boundedGridFixture);
+  request.requestId = `pancake-grid-${blockNumber}`;
+  request.protocol = "PancakeSwap V3 bounded grid policy";
+  request.requestedAt = observedAt;
+  request.deadline = new Date(Date.parse(observedAt) + 10 * 60_000).toISOString();
+  request.sources = [{
+    sourceId,
+    label: "Adversarial public idempotency-key preseed",
+    uri: explorerUrl,
+    observedAt,
+  }];
+  request.marketState.observedAt = observedAt;
+  request.marketState.sourceId = sourceId;
+  return {
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    idempotencyKey,
+    benchmarkSlug: "bounded-grid",
+    providerSlug: "bounded-grid",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    observation: { blockNumber, observedAt, explorerUrl },
+    request,
+  };
+}
 
 async function availablePort() {
   const server = createServer();
@@ -37,24 +90,31 @@ async function waitForWorker(baseUrl) {
   assert.fail("Local Worker did not become ready");
 }
 
-async function startWorker(port) {
+async function startWorker(port, entryNow = testNow, checkpointNow = null) {
+  const args = [
+    "wrangler",
+    "dev",
+    "--local",
+    "--config",
+    config,
+    "--port",
+    String(port),
+    "--persist-to",
+    persistence,
+    "--var",
+    `SHADOW_GRID_TICK_TOKEN:${token}`,
+    "--var",
+    `SHADOW_GRID_TEST_NOW:${entryNow.toISOString()}`,
+  ];
+  if (checkpointNow) {
+    args.push(
+      "--var",
+      `SHADOW_GRID_TEST_CHECKPOINT_NOW:${checkpointNow.toISOString()}`,
+    );
+  }
   const child = spawn(
     "npx",
-    [
-      "wrangler",
-      "dev",
-      "--local",
-      "--config",
-      config,
-      "--port",
-      String(port),
-      "--persist-to",
-      persistence,
-      "--var",
-      `SHADOW_GRID_TICK_TOKEN:${token}`,
-      "--var",
-      `SHADOW_GRID_TEST_NOW:${testNow.toISOString()}`,
-    ],
+    args,
     { cwd: root, stdio: "ignore" },
   );
   await waitForWorker(`http://127.0.0.1:${port}`);
@@ -148,6 +208,22 @@ try {
     "X-GitHub-Workflow-Ref":
       "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
   };
+  const expectedRunId = shadowGridRunId(testNow);
+  const legacyPublicKey = deterministicUuid(
+    `positioncrew:${expectedRunId}:current-grid-hire`,
+  );
+  const adversarial = await requestJson(baseUrl, "/api/benchmark-hires", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: baseUrl },
+    body: JSON.stringify(adversarialGridHire(legacyPublicKey)),
+  });
+  assert.equal(
+    adversarial.response.status,
+    201,
+    `Adversarial preseed was not created: ${JSON.stringify(adversarial.body)}`,
+  );
+  assert.equal(adversarial.body.job.state, "CREATED");
+
   const first = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
@@ -188,6 +264,31 @@ try {
   assert.equal(windowBeforeRestart.response.status, 200);
   assert.equal(windowBeforeRestart.body.window.windowId, runId);
   assert(windowBeforeRestart.body.events.length >= 1);
+  const precommitStored = windowBeforeRestart.body.events.find(
+    (event) => event.eventType === "PRECOMMITTED",
+  );
+  assert(precommitStored, "Forward window did not retain a PRECOMMITTED event");
+  assert.equal(typeof precommitStored.payload, "object");
+  assert.equal(
+    windowBeforeRestart.body.window.sourceHireId,
+    precommitStored.payload.sourceHireId,
+    "Public window source hire differs from its persisted PRECOMMITTED event",
+  );
+  assert.equal(
+    windowBeforeRestart.body.window.sourceRequestHash,
+    precommitStored.payload.sourceRequestHash,
+    "Public window request hash differs from its persisted PRECOMMITTED event",
+  );
+  assert.notEqual(
+    precommitStored.payload.sourceHireId,
+    adversarial.body.hire.hireId,
+    "Collector reused a publicly preseeded source hire",
+  );
+  assert.notEqual(
+    precommitStored.payload.sourceRequestHash,
+    adversarial.body.hire.requestHash,
+    "Collector committed the publicly preseeded request hash",
+  );
 
   await stopWorker(worker);
   worker = await startWorker(port);
@@ -213,6 +314,76 @@ try {
   const { generatedAt: _windowBeforeGeneratedAt, ...windowBeforeDurable } = windowBeforeRestart.body;
   const { generatedAt: _windowAfterGeneratedAt, ...windowAfterDurable } = windowAfterRestart.body;
   assert.deepEqual(windowAfterDurable, windowBeforeDurable);
+
+  const epochStartedAt = Date.parse(windowAfterRestart.body.window.startedAt);
+  assert(Number.isFinite(epochStartedAt), "Public window startedAt is invalid");
+  const nextDue = epochStartedAt + 5 * 60_000;
+  const beforeSampleGrace = finiteDate(
+    nextDue + 3 * 60_000 - 1_000,
+    "pre-grace sample checkpoint",
+  );
+  const afterSampleGrace = finiteDate(
+    nextDue + 3 * 60_000 + 1_000,
+    "post-grace sample checkpoint",
+  );
+
+  await stopWorker(worker);
+  worker = await startWorker(port, beforeSampleGrace, afterSampleGrace);
+  const lateSampleTick = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers },
+  );
+  assert.equal(lateSampleTick.response.status, 200);
+  const lateSampleWindow = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(runId)}`,
+  );
+  assert.equal(lateSampleWindow.response.status, 200);
+  assert.equal(
+    lateSampleWindow.body.events.filter((event) => event.eventType === "OBSERVED").length,
+    0,
+    "A sample completed after the grace deadline was retained",
+  );
+  const lateSampleTerminal = lateSampleWindow.body.events.at(-1);
+  assert.equal(lateSampleTerminal.eventType, "VOID_SOURCE_GAP");
+  const lateSampleTerminalPayload = lateSampleTerminal.payload;
+  assert.match(
+    lateSampleTerminalPayload.reason,
+    /(?:after|outside).*(?:grace|deadline)|(?:grace|deadline).*after/iu,
+  );
+
+  const cutoffHour = finiteDate(beforeSampleGrace.getTime(), "opening-cutoff hour");
+  cutoffHour.setUTCMinutes(0, 0, 0);
+  cutoffHour.setUTCHours(cutoffHour.getUTCHours() + 2);
+  assert(Number.isFinite(cutoffHour.getTime()), "Opening-cutoff hour became invalid");
+  const beforeOpeningCutoff = finiteDate(
+    cutoffHour.getTime() + 7 * 60_000 + 59_000,
+    "pre-opening-cutoff checkpoint",
+  );
+  const afterOpeningCutoff = finiteDate(
+    cutoffHour.getTime() + 8 * 60_000 + 1_000,
+    "post-opening-cutoff checkpoint",
+  );
+  const cutoffRunId = shadowGridRunId(beforeOpeningCutoff);
+
+  await stopWorker(worker);
+  worker = await startWorker(port, beforeOpeningCutoff, afterOpeningCutoff);
+  const cutoffTick = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers },
+  );
+  assert.equal(cutoffTick.response.status, 200);
+  assert.equal(cutoffTick.body.runId, cutoffRunId);
+  assert.equal(cutoffTick.body.state, "LATE_START_SKIPPED");
+  assert.equal(cutoffTick.body.headHash, null);
+  assert.equal(cutoffTick.body.eventCount, 0);
+  const skippedWindow = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(cutoffRunId)}`,
+  );
+  assert.equal(skippedWindow.response.status, 404);
 
   await stopWorker(worker);
   worker = undefined;
