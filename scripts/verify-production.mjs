@@ -469,9 +469,13 @@ try {
     "External comparison snapshot commitment is invalid",
   );
   assert(externalComparisons.candidates?.length === 4, "External comparison snapshot must contain four candidates");
+  const externalComparisonServices = new Set(
+    externalComparisons.candidates.map((candidate) => candidate.category?.service),
+  );
   assert(
-    new Set(externalComparisons.candidates.map((candidate) => candidate.category?.service)).size === 4,
-    "External comparison snapshot does not cover four distinct categories",
+    externalComparisonServices.size === expectedServices.size &&
+      [...expectedServices].every((service) => externalComparisonServices.has(service)),
+    "External comparison snapshot does not cover the exact required services",
   );
   assert(
     externalComparisons.candidates.every(
