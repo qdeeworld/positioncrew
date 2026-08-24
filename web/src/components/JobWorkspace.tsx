@@ -465,7 +465,7 @@ function ResultAdvantageBand({
         <div className="result-advantage-copy">
           <span className="result-advantage-state"><BadgeCheck size={13} /> Founder comparison published</span>
           <strong>{publishedFounder.exactOutputParityCount}/3 frozen tasks record exact canonical output parity.</strong>
-          <small>{publishedFounder.recordedSpeedAdvantageCount}/3 record lower agent time. Quality score: not assigned (null). This founder-operated comparison is non-independent and non-blind and does not establish external demand, payment, live execution, or investment performance.</small>
+          <small>{publishedFounder.recordedSpeedAdvantageCount}/3 record lower agent time. Quality evidence here is exact canonical output parity, not a numeric rating. No separate numeric quality score was assigned. This founder-operated comparison is non-independent and non-blind and does not establish external demand, payment, live execution, or investment performance.</small>
         </div>
         <a href={publishedFounder.reportUrl}>Open founder report <ArrowRight size={13} /></a>
       </section>
