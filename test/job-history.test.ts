@@ -117,6 +117,7 @@ describe("recent job device index", () => {
           service: "LP_REBALANCE",
           providerId,
           evidenceMode,
+          request: structuredClone(response.result.request),
           requestHash: response.result.evaluation.requestHash,
         },
         job: {
@@ -159,6 +160,30 @@ describe("recent job device index", () => {
     const copiedResponse = structuredClone(chain);
     (copiedResponse.hire as Record<string, unknown>).requestHash = `sha256:${"a".repeat(64)}`;
     expect(isFreshMarketplaceChainForReference(copiedResponse, saved)).toBe(false);
+
+    const requestHashLocations = [
+      ["job", "envelope"],
+      ["job", "deliverable"],
+      ["job", "evaluation"],
+      ["evaluation"],
+    ] as const;
+    for (const location of requestHashLocations) {
+      const alteredHash = structuredClone(chain);
+      const alteredResponse = (alteredHash.receipt as Record<string, unknown>).response as Record<string, unknown>;
+      const alteredResult = alteredResponse.result as Record<string, unknown>;
+      let target = alteredResult;
+      for (const key of location) {
+        target = target[key] as Record<string, unknown>;
+      }
+      target.requestHash = `sha256:${"b".repeat(64)}`;
+      expect(isFreshMarketplaceChainForReference(alteredHash, saved)).toBe(false);
+    }
+
+    const alteredRequestBody = structuredClone(chain);
+    const alteredBodyResponse = (alteredRequestBody.receipt as Record<string, unknown>).response as Record<string, unknown>;
+    const alteredBodyResult = alteredBodyResponse.result as Record<string, unknown>;
+    (alteredBodyResult.request as Record<string, unknown>).account = "0x2222222222222222222222222222222222222222";
+    expect(isFreshMarketplaceChainForReference(alteredRequestBody, saved)).toBe(false);
 
     expect(isFreshMarketplaceChainForReference({ ...chain, receipt: null }, saved)).toBe(false);
 

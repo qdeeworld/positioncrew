@@ -1,5 +1,6 @@
 import type { FixtureJobResponse, FreshMarketplaceChain, ServiceId, SessionJob } from "./types.js";
 import { FixtureJobResponseSchema } from "../../src/api/fixture-response-schema.js";
+import { canonicalJson } from "../../src/commerce/fresh-hire-schema.js";
 
 export const RECENT_JOB_STORAGE_KEY = "positioncrew.recent-jobs.v1";
 export const RECENT_JOB_CHANGED_EVENT = "positioncrew:recent-job-changed";
@@ -67,6 +68,7 @@ function isFixtureJobResponseForChain(
   value: unknown,
   reference: RecentJobReference,
   expectedProviderId: string,
+  expectedRequest: unknown,
   expectedRequestHash: string,
   expectedDeliverableHash: string,
   expectedEvaluationHash: string,
@@ -149,6 +151,14 @@ function isFixtureJobResponseForChain(
     !Number.isFinite(request.maxSlippageBps) ||
     typeof request.maxDataAgeSeconds !== "number" ||
     !Number.isFinite(request.maxDataAgeSeconds)) {
+    return false;
+  }
+
+  try {
+    if (canonicalJson(request) !== canonicalJson(expectedRequest)) {
+      return false;
+    }
+  } catch {
     return false;
   }
 
@@ -328,6 +338,7 @@ export function isFreshMarketplaceChainForReference(
 
   if (hire.hireId !== reference.hireId || hire.service !== reference.service ||
     typeof hire.providerId !== "string" ||
+    !isRecord(hire.request) ||
     typeof hire.requestHash !== "string" ||
     !["HISTORICAL_FIXTURE", "CURRENT_BLOCK_PINNED"].includes(String(hire.evidenceMode)) ||
     typeof job.jobId !== "string" ||
@@ -354,6 +365,7 @@ export function isFreshMarketplaceChainForReference(
         receipt.response,
         reference,
         hire.providerId,
+        hire.request,
         hire.requestHash,
         receipt.deliverableHash,
         receipt.evaluationHash,
