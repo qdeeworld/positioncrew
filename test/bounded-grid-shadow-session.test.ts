@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 // @ts-ignore -- The operational ESM collector intentionally has no declaration output.
@@ -101,6 +102,42 @@ function harness(
 }
 
 describe("bounded-grid scheduled session collector", () => {
+  it("gates collection on the successful exact-head production verifier job", async () => {
+    const workflow = await readFile(
+      new URL("../.github/workflows/production-smoke.yml", import.meta.url),
+      "utf8",
+    );
+    const verifierStart = workflow.indexOf("  verify-production:");
+    const shadowStart = workflow.indexOf("  bounded-grid-shadow-session:");
+    const shadowEnd = workflow.indexOf("  attest-runtime-rotation-evidence:");
+    expect(verifierStart).toBeGreaterThan(-1);
+    expect(shadowStart).toBeGreaterThan(verifierStart);
+    expect(shadowEnd).toBeGreaterThan(shadowStart);
+
+    const verifierJob = workflow.slice(verifierStart, shadowStart);
+    expect(verifierJob).toContain("run: npm run verify:production");
+    expect(verifierJob).toContain("name: Enforce production verification");
+    expect(verifierJob).toContain('run: test "$VERIFY_OUTCOME" = "success"');
+
+    const shadowJob = workflow.slice(shadowStart, shadowEnd);
+    const stepsStart = shadowJob.indexOf("    steps:");
+    const collectorStart = shadowJob.indexOf(
+      "node scripts/collect-bounded-grid-shadow-ledger.mjs",
+    );
+    const artifactStart = shadowJob.indexOf("      - name: Preserve session evidence");
+    const shadowJobHeader = shadowJob.slice(0, stepsStart);
+    expect(shadowJobHeader).toContain("needs: verify-production");
+    expect(shadowJobHeader).toContain("needs.verify-production.result == 'success'");
+    expect(shadowJobHeader).toContain("github.event_name == 'schedule'");
+    expect(shadowJobHeader).toContain("github.event.schedule == '17 * * * *'");
+    expect(shadowJobHeader).not.toContain("always()");
+    expect(shadowJobHeader.indexOf("needs: verify-production")).toBeLessThan(
+      shadowJobHeader.indexOf("needs.verify-production.result == 'success'"),
+    );
+    expect(artifactStart).toBeGreaterThan(collectorStart);
+    expect(shadowJob.slice(artifactStart)).toContain("        if: always()");
+  });
+
   it("opens once and uses absolute +5/+10/+15 targets without drift", async () => {
     const runtime = harness([
       { body: tick("PRECOMMITTED", 2), duration: 20_000 },

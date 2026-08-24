@@ -79,7 +79,11 @@ jobs:
         run: test "$VERIFY_OUTCOME" = "success"
 
   bounded-grid-shadow-session:
-    if: github.event_name == 'schedule' && github.event.schedule == '17 * * * *'
+    needs: verify-production
+    if: >-
+      ${{ needs.verify-production.result == 'success' &&
+          github.event_name == 'schedule' &&
+          github.event.schedule == '17 * * * *' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:

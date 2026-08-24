@@ -32,6 +32,22 @@ function deterministicUuid(seed) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function rehashPublicShadowEvent(event) {
+  const { eventHash: _eventHash, ...unsignedEvent } = event;
+  return `sha256:${createHash("sha256").update(canonicalJson(unsignedEvent)).digest("hex")}`;
+}
+
 function finiteDate(milliseconds, label) {
   assert(Number.isFinite(milliseconds), `${label} timestamp is not finite`);
   const date = new Date(milliseconds);
@@ -211,6 +227,32 @@ function executeD1SetupMutation(sql) {
     result.status,
     0,
     `D1 genesis-only setup failed: ${result.stderr}${result.stdout}`,
+  );
+}
+
+function queryD1SetupRows(sql) {
+  const result = spawnSync(
+    "npx",
+    [
+      "wrangler",
+      "d1",
+      "execute",
+      "DB",
+      "--local",
+      "--config",
+      config,
+      "--persist-to",
+      persistence,
+      "--command",
+      sql,
+      "--json",
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, `D1 fixture query failed: ${result.stderr}${result.stdout}`);
+  const envelopes = JSON.parse(result.stdout);
+  return (Array.isArray(envelopes) ? envelopes : [envelopes]).flatMap(
+    (envelope) => Array.isArray(envelope.results) ? envelope.results : [],
   );
 }
 
@@ -901,12 +943,10 @@ try {
     "legacy-provenance opening hour",
   );
   const legacyRunId = shadowGridRunId(legacyOpeningNow);
-  const legacyOriginHeaders = {
+  const legacySeedOriginHeaders = {
     ...headers,
     "X-GitHub-Run-Id": "4001",
     "X-GitHub-Sha": "7".repeat(40),
-    "X-GitHub-Workflow-Ref":
-      "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
   };
 
   await stopWorker(worker);
@@ -916,7 +956,7 @@ try {
   const legacyOpen = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
-    { method: "POST", headers: legacyOriginHeaders },
+    { method: "POST", headers: legacySeedOriginHeaders },
   );
   assert.equal(legacyOpen.response.status, 200);
   assert.equal(legacyOpen.body.runId, legacyRunId);
@@ -930,7 +970,7 @@ try {
   baseUrl = `http://127.0.0.1:${port}`;
   worker = await startWorker(port, legacyPreSampleFollowNow);
   const legacyPinnedHeaders = {
-    ...legacyOriginHeaders,
+    ...legacySeedOriginHeaders,
     "X-PositionCrew-Shadow-Run-Id": legacyRunId,
   };
   const legacySameOriginFollow = await requestJson(
@@ -966,7 +1006,7 @@ try {
     {
       method: "POST",
       headers: {
-        ...legacyOriginHeaders,
+        ...legacySeedOriginHeaders,
         "X-GitHub-Run-Id": "4099",
         "X-GitHub-Sha": "c".repeat(40),
       },
@@ -979,7 +1019,7 @@ try {
     {
       method: "POST",
       headers: {
-        ...legacyOriginHeaders,
+        ...legacySeedOriginHeaders,
         "X-GitHub-Run-Id": "4098",
         "X-GitHub-Workflow-Ref":
           "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
@@ -993,7 +1033,7 @@ try {
     {
       method: "POST",
       headers: {
-        ...legacyOriginHeaders,
+        ...legacySeedOriginHeaders,
         "X-GitHub-Run-Id": "4097",
         "X-GitHub-Workflow-Ref":
           "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/not-main",
@@ -1016,51 +1056,104 @@ try {
     legacySameOriginFollow.body.eventCount,
   );
 
-  const legacyContinuationHeaders = {
-    ...legacyOriginHeaders,
+  const rejectedCurrentCrossRunHeaders = {
+    ...legacySeedOriginHeaders,
     "X-GitHub-Run-Id": "4002",
   };
   assert.equal(
-    Object.hasOwn(legacyContinuationHeaders, "X-PositionCrew-Shadow-Run-Id"),
+    Object.hasOwn(rejectedCurrentCrossRunHeaders, "X-PositionCrew-Shadow-Run-Id"),
     false,
-    "Legacy cross-run continuation unexpectedly pinned the ledger run",
+    "Current cross-run rejection probe unexpectedly pinned the ledger run",
   );
-  const legacyCrossRunFollow = await requestJson(
+  const rejectedCurrentCrossRun = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
-    { method: "POST", headers: legacyContinuationHeaders },
+    { method: "POST", headers: rejectedCurrentCrossRunHeaders },
   );
-  assert.equal(legacyCrossRunFollow.response.status, 200);
-  assert.equal(legacyCrossRunFollow.body.runId, legacyRunId);
-  assert.notEqual(legacyCrossRunFollow.body.headHash, legacySameOriginFollow.body.headHash);
-  assert(legacyCrossRunFollow.body.eventCount > legacySameOriginFollow.body.eventCount);
+  assert.equal(rejectedCurrentCrossRun.response.status, 400);
 
-  const legacyWindowAfterContinuation = await requestJson(
+  const currentWindowAfterRejectedCrossRun = await requestJson(
     baseUrl,
     `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(legacyRunId)}`,
   );
-  assert.equal(legacyWindowAfterContinuation.response.status, 200);
-  assert.equal(legacyWindowAfterContinuation.body.integrity.valid, true);
+  assert.equal(currentWindowAfterRejectedCrossRun.response.status, 200);
+  assert.equal(currentWindowAfterRejectedCrossRun.body.integrity.valid, true);
   assert.equal(
-    legacyWindowAfterContinuation.body.events.at(-1).eventHash,
-    legacyCrossRunFollow.body.headHash,
+    currentWindowAfterRejectedCrossRun.body.events.at(-1).eventHash,
+    legacySameOriginFollow.body.headHash,
   );
   assert.equal(
-    legacyWindowAfterContinuation.body.events.length,
-    legacyCrossRunFollow.body.eventCount,
+    currentWindowAfterRejectedCrossRun.body.events.length,
+    legacySameOriginFollow.body.eventCount,
   );
-  assert.equal(legacyWindowAfterContinuation.body.events[0].payload.schedule.runId, "4001");
-  assert.equal(legacyWindowAfterContinuation.body.events[0].payload.schedule.headSha, "7".repeat(40));
+  assert.equal(currentWindowAfterRejectedCrossRun.body.events[0].payload.schedule.runId, "4001");
+  assert.equal(currentWindowAfterRejectedCrossRun.body.events[0].payload.schedule.headSha, "7".repeat(40));
   assert.equal(
-    legacyWindowAfterContinuation.body.events[0].payload.schedule.workflowRef,
-    "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+    currentWindowAfterRejectedCrossRun.body.events[0].payload.schedule.workflowRef,
+    "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
   );
 
   await stopWorker(worker);
   worker = undefined;
   executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_no_delete");
+  executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_no_update");
   executeD1SetupMutation(
     `DELETE FROM shadow_grid_events WHERE run_id = ${sqlLiteral(legacyRunId)} AND event_type <> 'EPOCH_STARTED'`,
+  );
+  const storedLegacyGenesis = structuredClone(
+    currentWindowAfterRejectedCrossRun.body.events[0],
+  );
+  storedLegacyGenesis.payload.schedule.workflowPath =
+    ".github/workflows/bounded-grid-shadow-ledger.yml";
+  storedLegacyGenesis.payload.schedule.workflowRef =
+    "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main";
+  storedLegacyGenesis.eventHash = rehashPublicShadowEvent(storedLegacyGenesis);
+  const storedLegacyEventId =
+    `${legacyRunId}:0:${storedLegacyGenesis.eventHash.slice(7, 19)}`;
+  executeD1SetupMutation(
+    `UPDATE shadow_grid_events
+     SET event_id = ${sqlLiteral(storedLegacyEventId)},
+         event_json = ${sqlLiteral(JSON.stringify(storedLegacyGenesis))},
+         event_hash = ${sqlLiteral(storedLegacyGenesis.eventHash)}
+     WHERE run_id = ${sqlLiteral(legacyRunId)} AND event_type = 'EPOCH_STARTED'`,
+  );
+  const storedLegacyRowsBeforeRejectedIncoming = queryD1SetupRows(
+    `SELECT event_id AS eventId, event_json AS eventJson, event_hash AS eventHash
+     FROM shadow_grid_events WHERE run_id = ${sqlLiteral(legacyRunId)} ORDER BY event_sequence`,
+  );
+  assert.deepEqual(storedLegacyRowsBeforeRejectedIncoming, [{
+    eventId: storedLegacyEventId,
+    eventJson: JSON.stringify(storedLegacyGenesis),
+    eventHash: storedLegacyGenesis.eventHash,
+  }]);
+
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, legacyOpeningNow);
+  const rejectedExactLegacyIncoming = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    {
+      method: "POST",
+      headers: {
+        ...legacySeedOriginHeaders,
+        "X-GitHub-Run-Id": "4002",
+        "X-GitHub-Workflow-Ref":
+          "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+      },
+    },
+  );
+  assert.equal(rejectedExactLegacyIncoming.response.status, 400);
+  await stopWorker(worker);
+  worker = undefined;
+  const storedLegacyRowsAfterRejectedIncoming = queryD1SetupRows(
+    `SELECT event_id AS eventId, event_json AS eventJson, event_hash AS eventHash
+     FROM shadow_grid_events WHERE run_id = ${sqlLiteral(legacyRunId)} ORDER BY event_sequence`,
+  );
+  assert.deepEqual(
+    storedLegacyRowsAfterRejectedIncoming,
+    storedLegacyRowsBeforeRejectedIncoming,
+    "Rejected legacy incoming tick mutated the stored cleanup-only genesis",
   );
 
   const legacyRecoveryNow = finiteDate(
