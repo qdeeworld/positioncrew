@@ -272,7 +272,9 @@ function assertNonNegativeInteger(value, context) {
 }
 
 function shadowGridTransitionAllowed(previous, current) {
-  if (previous === "EPOCH_STARTED") return current === "PRECOMMITTED";
+  if (previous === "EPOCH_STARTED") {
+    return current === "PRECOMMITTED" || current === "VOID_SOURCE_GAP";
+  }
   if (previous === "PRECOMMITTED") {
     return ["REFUSED", "OBSERVED", "VOID_SOURCE_GAP"].includes(current);
   }
@@ -308,7 +310,7 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
   );
   assert(
     Array.isArray(envelope.events) && envelope.events.length >= 2,
-    `Forward-shadow window ${summaryWindow.windowId} omitted its precommitted chain`,
+    `Forward-shadow window ${summaryWindow.windowId} omitted its retained chain`,
   );
 
   const window = envelope.window;
@@ -325,14 +327,11 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
     `${window.windowId} has an invalid start time`,
   );
   assert(
-    typeof window.sourceBlockNumber === "string" &&
-      /^[1-9][0-9]*$/.test(window.sourceBlockNumber),
-    `${window.windowId} has an invalid source block`,
-  );
-  assert(
+    typeof window.sourceHireId === "string" &&
+      window.sourceHireId.length > 0 &&
     typeof window.sourceRequestHash === "string" &&
       /^sha256:[a-f0-9]{64}$/.test(window.sourceRequestHash),
-    `${window.windowId} has an invalid source-request commitment`,
+    `${window.windowId} has an invalid source binding`,
   );
 
   const receiptUrl = localUrl(window.receiptUrl);
@@ -341,12 +340,6 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
       `/api/evidence/bounded-grid-forward-shadow/windows/${window.windowId}`,
     `${window.windowId} has a non-canonical receipt URL`,
   );
-  const sourceReceiptUrl = localUrl(window.sourceReceiptUrl);
-  assert(
-    /^\/api\/benchmark-receipts\/[0-9a-f-]{36}$/.test(sourceReceiptUrl.pathname),
-    `${window.windowId} has a non-canonical source receipt URL`,
-  );
-
   let previous = null;
   let terminalSeen = false;
   for (const [index, event] of events.entries()) {
@@ -399,16 +392,61 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
     previous = event;
   }
 
-  const precommit = events[1];
   const latest = events.at(-1);
-  assert(precommit.eventType === "PRECOMMITTED", `${window.windowId} has no precommitment`);
+  const initializationVoid =
+    events.length === 2 &&
+    events[0].eventType === "EPOCH_STARTED" &&
+    latest.eventType === "VOID_SOURCE_GAP";
+  const normalPrecommittedChain = events[1]?.eventType === "PRECOMMITTED";
   assert(
-    precommit.payload.sourceHireId === window.sourceHireId &&
-      precommit.payload.sourceRequestHash === window.sourceRequestHash &&
-      localUrl(precommit.payload.sourceReceiptUrl).pathname === sourceReceiptUrl.pathname &&
-      String(precommit.payload.sourceBlockNumber) === window.sourceBlockNumber,
-    `${window.windowId} public summary differs from its precommitment`,
+    initializationVoid || normalPrecommittedChain,
+    `${window.windowId} is neither a precommitted chain nor an exact initialization void`,
   );
+  if (initializationVoid) {
+    assert(
+      window.initializationState === "VOIDED_BEFORE_PRECOMMIT" &&
+        window.precommitPersisted === false &&
+        window.state === "VOID_SOURCE_GAP" &&
+        window.sourceReceiptUrl === null &&
+        window.sourceBlockNumber === null &&
+        window.sampledCrossings === 0 &&
+        window.simulatedNetOutcomeUsd === null,
+      `${window.windowId} weakened its initialization-void public boundary`,
+    );
+    assert(
+      latest.payload.observedSampleCount === 0 &&
+        latest.payload.netOutcomeUsd === null &&
+        latest.payload.outcome === null &&
+        latest.payload.repairedLater === false &&
+        typeof latest.payload.reason === "string" &&
+        latest.payload.reason.length > 0,
+      `${window.windowId} has invalid initialization-void terminal semantics`,
+    );
+  } else {
+    const precommit = events[1];
+    assert(
+      window.initializationState === "PRECOMMITTED" &&
+        window.precommitPersisted === true,
+      `${window.windowId} weakened its precommitted initialization boundary`,
+    );
+    assert(
+      typeof window.sourceBlockNumber === "string" &&
+        /^[1-9][0-9]*$/.test(window.sourceBlockNumber),
+      `${window.windowId} has an invalid source block`,
+    );
+    const sourceReceiptUrl = localUrl(window.sourceReceiptUrl);
+    assert(
+      /^\/api\/benchmark-receipts\/[0-9a-f-]{36}$/.test(sourceReceiptUrl.pathname),
+      `${window.windowId} has a non-canonical source receipt URL`,
+    );
+    assert(
+      precommit.payload.sourceHireId === window.sourceHireId &&
+        precommit.payload.sourceRequestHash === window.sourceRequestHash &&
+        localUrl(precommit.payload.sourceReceiptUrl).pathname === sourceReceiptUrl.pathname &&
+        String(precommit.payload.sourceBlockNumber) === window.sourceBlockNumber,
+      `${window.windowId} public summary differs from its precommitment`,
+    );
+  }
   assert(
     envelope.integrity?.valid === true &&
       envelope.integrity?.headHash === latest.eventHash,
@@ -516,7 +554,10 @@ async function verifyShadowGridLedger(ledger) {
   const summary = ledger.summary;
   assert(summary && typeof summary === "object", "Forward-shadow ledger omitted its summary");
   for (const key of [
+    "openedWindowCount",
     "precommittedWindowCount",
+    "initializationVoidWindowCount",
+    "precommittedTerminalWindowCount",
     "terminalWindowCount",
     "closedWindowCount",
     "refusedWindowCount",
@@ -529,8 +570,18 @@ async function verifyShadowGridLedger(ledger) {
   }
   assert(
     summary.terminalWindowCount === maturity.terminalWindowCount &&
-      summary.precommittedWindowCount >= summary.terminalWindowCount,
+      summary.terminalWindowCount <= summary.openedWindowCount &&
+      summary.precommittedWindowCount <= summary.openedWindowCount,
     "Forward-shadow summary and maturity counts disagree",
+  );
+  assert(
+    summary.openedWindowCount ===
+        summary.precommittedWindowCount + summary.initializationVoidWindowCount &&
+      summary.terminalWindowCount ===
+        summary.precommittedTerminalWindowCount + summary.initializationVoidWindowCount &&
+      summary.precommittedTerminalWindowCount <= summary.precommittedWindowCount &&
+      summary.initializationVoidWindowCount <= summary.voidWindowCount,
+    "Forward-shadow initialization categories do not reconcile",
   );
   assert(
     summary.terminalWindowCount ===
@@ -592,7 +643,7 @@ async function verifyShadowGridLedger(ledger) {
     "Forward-shadow recent-window list is invalid",
   );
   assert(
-    ledger.recentWindows.length <= summary.precommittedWindowCount &&
+    ledger.recentWindows.length <= summary.openedWindowCount &&
       new Set(ledger.recentWindows.map((window) => window.windowId)).size ===
         ledger.recentWindows.length,
     "Forward-shadow recent windows are duplicated or exceed retained windows",

@@ -238,7 +238,10 @@ describe("bounded-grid forward shadow evidence", () => {
       mature: false,
     });
     expect(projection.summary).toEqual({
+      openedWindowCount: 1,
       precommittedWindowCount: 0,
+      initializationVoidWindowCount: 1,
+      precommittedTerminalWindowCount: 0,
       terminalWindowCount: 1,
       closedWindowCount: 0,
       refusedWindowCount: 0,
@@ -248,6 +251,14 @@ describe("bounded-grid forward shadow evidence", () => {
       negativeWindowCount: 0,
       simulatedNetOutcomeUsd: null,
     });
+    expect(projection.summary.openedWindowCount).toBe(
+      projection.summary.precommittedWindowCount +
+        projection.summary.initializationVoidWindowCount,
+    );
+    expect(projection.summary.terminalWindowCount).toBe(
+      projection.summary.precommittedTerminalWindowCount +
+        projection.summary.initializationVoidWindowCount,
+    );
     expect(projection.recentWindows).toHaveLength(1);
     expect(projection.recentWindows[0]).toMatchObject({
       windowId: runBinding.runId,
@@ -331,6 +342,13 @@ describe("bounded-grid forward shadow evidence", () => {
       ORIGIN,
       new Date("2026-09-02T12:00:00.000Z"),
     );
+    expect(summary.summary).toMatchObject({
+      openedWindowCount: 1,
+      precommittedWindowCount: 1,
+      initializationVoidWindowCount: 0,
+      precommittedTerminalWindowCount: 1,
+      terminalWindowCount: 1,
+    });
     expect(summary.summary.negativeWindowCount).toBe(1);
     expect(summary.summary.positiveWindowCount).toBe(0);
     expect(summary.summary.simulatedNetOutcomeUsd).toBeNull();

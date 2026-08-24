@@ -840,6 +840,11 @@ try {
   );
   assert.equal(recoveredGenesisOnlyWindow.response.status, 200);
   assert.equal(recoveredGenesisOnlyWindow.body.window.state, "VOID_SOURCE_GAP");
+  assert.equal(
+    recoveredGenesisOnlyWindow.body.window.initializationState,
+    "VOIDED_BEFORE_PRECOMMIT",
+  );
+  assert.equal(recoveredGenesisOnlyWindow.body.window.precommitPersisted, false);
   assert.equal(recoveredGenesisOnlyWindow.body.integrity.valid, true);
   assert.equal(recoveredGenesisOnlyWindow.body.events.length, 2);
   const recoveredGenesis = recoveredGenesisOnlyWindow.body.events[0];
@@ -874,17 +879,32 @@ try {
     "VOID_SOURCE_GAP",
     "Genesis-only epoch remained permanently nonterminal",
   );
+  const normalReplacementSummaryWindow = recoveredGenesisSummary.body.recentWindows.find(
+    (window) => window.windowId === genesisRecoveryRunId,
+  );
   assert.equal(
-    recoveredGenesisSummary.body.recentWindows.find(
-      (window) => window.windowId === genesisRecoveryRunId,
-    )?.state,
+    normalReplacementSummaryWindow?.state,
     "PRECOMMITTED",
     "Normally precommitted replacement run is absent from the public summary",
   );
+  assert.equal(normalReplacementSummaryWindow?.initializationState, "PRECOMMITTED");
+  assert.equal(normalReplacementSummaryWindow?.precommitPersisted, true);
   assert.equal(
     recoveredGenesisSummary.body.summary.precommittedWindowCount,
     precommittedCountBeforeGenesisOnlyRecovery + 1,
     "Genesis-only void was counted as precommitted or the normal replacement was omitted",
+  );
+  assert.equal(
+    recoveredGenesisSummary.body.summary.openedWindowCount,
+    recoveredGenesisSummary.body.summary.initializationVoidWindowCount +
+      recoveredGenesisSummary.body.summary.precommittedWindowCount,
+    "Opened windows do not reconcile to initialization voids plus persisted precommits",
+  );
+  assert.equal(
+    recoveredGenesisSummary.body.summary.terminalWindowCount,
+    recoveredGenesisSummary.body.summary.initializationVoidWindowCount +
+      recoveredGenesisSummary.body.summary.precommittedTerminalWindowCount,
+    "Terminal windows do not reconcile to initialization voids plus precommitted terminals",
   );
 
   const legacyOpeningNow = finiteDate(

@@ -743,8 +743,8 @@ export interface BoundedGridForwardShadowWindow {
   pair: "WBNB/USDT";
   sourceHireId: string;
   sourceRequestHash: string;
-  sourceReceiptUrl: string;
-  sourceBlockNumber: string;
+  sourceReceiptUrl: string | null;
+  sourceBlockNumber: string | null;
   startedAt: string;
   terminalAt: string | null;
   horizonMinutes: 15;

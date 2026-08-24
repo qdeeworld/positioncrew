@@ -82,6 +82,26 @@ export interface ShadowGridPublicEvent {
   eventHash: string;
 }
 
+export interface ShadowGridPublicWindow {
+  windowId: string;
+  state: "PRECOMMITTED" | "REFUSED" | "CLOSED" | "VOID_SOURCE_GAP" | "RISK_EXIT";
+  initializationState: "PRECOMMITTED" | "VOIDED_BEFORE_PRECOMMIT";
+  precommitPersisted: boolean;
+  pair: "WBNB/USDT";
+  sourceHireId: string;
+  sourceRequestHash: string;
+  sourceReceiptUrl: string | null;
+  sourceBlockNumber: string | null;
+  startedAt: string;
+  terminalAt: string | null;
+  horizonMinutes: 15;
+  sampledCrossings: number;
+  simulatedNetOutcomeUsd: string | null;
+  receiptUrl: string;
+  eventHash: string;
+  previousEventHash: string | null;
+}
+
 export interface ShadowGridFillPayload extends Record<string, unknown> {
   orderIndex: number;
   side: "BUY" | "SELL";
@@ -391,7 +411,10 @@ export function shadowGridRunIsTerminal(events: readonly ShadowGridEvent[]): boo
   return latest ? TERMINAL_TYPES.has(latest.eventType) : false;
 }
 
-export function publicShadowGridWindow(events: readonly ShadowGridEvent[], origin: string) {
+export function publicShadowGridWindow(
+  events: readonly ShadowGridEvent[],
+  origin: string,
+): ShadowGridPublicWindow {
   verifyShadowGridRun(events);
   const hasPrecommit = events.some((event) => event.eventType === "PRECOMMITTED");
   const precommit = hasPrecommit ? precommitFromShadowGridRun(events) : null;
@@ -405,6 +428,8 @@ export function publicShadowGridWindow(events: readonly ShadowGridEvent[], origi
   return {
     windowId: events[0]!.runId,
     state: shadowGridRunState(events),
+    initializationState: precommit ? "PRECOMMITTED" : "VOIDED_BEFORE_PRECOMMIT",
+    precommitPersisted: precommit !== null,
     pair: "WBNB/USDT" as const,
     sourceHireId: precommit?.sourceHireId ?? events[0]!.hireId,
     sourceRequestHash: precommit?.sourceRequestHash ?? events[0]!.requestHash,
@@ -439,11 +464,22 @@ export function summarizeShadowGridRuns(
     run.some((event) => event.eventType === "PRECOMMITTED")
   ).length;
   const windows = runs.map((run) => publicShadowGridWindow(run, origin));
+  const openedWindowCount = windows.length;
   const terminal = windows.filter((window) => window.terminalAt !== null);
   const closed = windows.filter((window) => window.state === "CLOSED");
   const refused = windows.filter((window) => window.state === "REFUSED");
   const voided = windows.filter((window) => window.state === "VOID_SOURCE_GAP");
   const risk = windows.filter((window) => window.state === "RISK_EXIT");
+  const initializationVoid = windows.filter(
+    (window) => window.initializationState === "VOIDED_BEFORE_PRECOMMIT",
+  );
+  const precommittedTerminal = terminal.filter((window) => window.precommitPersisted);
+  if (openedWindowCount !== precommittedWindowCount + initializationVoid.length) {
+    throw new Error("Shadow-grid opened-window summary does not reconcile with initialization state");
+  }
+  if (terminal.length !== precommittedTerminal.length + initializationVoid.length) {
+    throw new Error("Shadow-grid terminal-window summary does not reconcile with initialization state");
+  }
   const returnBearing = [...closed, ...risk];
   const positive = returnBearing.filter((window) => Number(window.simulatedNetOutcomeUsd) > 0);
   const negative = returnBearing.filter((window) => Number(window.simulatedNetOutcomeUsd) < 0);
@@ -485,7 +521,10 @@ export function summarizeShadowGridRuns(
       mature,
     },
     summary: {
+      openedWindowCount,
       precommittedWindowCount,
+      initializationVoidWindowCount: initializationVoid.length,
+      precommittedTerminalWindowCount: precommittedTerminal.length,
       terminalWindowCount: terminal.length,
       closedWindowCount: closed.length,
       refusedWindowCount: refused.length,

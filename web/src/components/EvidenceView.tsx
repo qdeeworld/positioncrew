@@ -430,33 +430,46 @@ export function EvidenceView({
             </div>
             {forwardShadowLedger.recentWindows.length > 0 ? (
               <div className="forward-shadow-windows" aria-label="Recent bounded grid forward shadow windows">
-                {forwardShadowLedger.recentWindows.map((window) => (
-                  <article key={window.windowId} className={`forward-shadow-window ${window.state.toLowerCase()}`}>
-                    <div>
-                      <span className={`state-label ${shadowStateTone(window.state)}`}>{shadowStateLabel(window.state)}</span>
-                      <time dateTime={window.startedAt}>
-                        {new Date(window.startedAt).toLocaleString([], {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </time>
-                    </div>
-                    <strong>
-                      {window.state === "CLOSED" || window.state === "RISK_EXIT"
-                        ? simulatedUsd(window.simulatedNetOutcomeUsd)
-                        : shadowStateLabel(window.state)}
-                    </strong>
-                    <small>
-                      {window.sampledCrossings} sampled crossings · BSC block {window.sourceBlockNumber}
-                    </small>
-                    <code>Hire {shortHash(window.sourceHireId, 14)}</code>
-                    <a href={window.receiptUrl} target="_blank" rel="noreferrer">
-                      Window evidence <ExternalLink size={12} />
-                    </a>
-                  </article>
-                ))}
+                {forwardShadowLedger.recentWindows.map((window) => {
+                  const hasSourcePrecommit =
+                    window.sourceReceiptUrl !== null && window.sourceBlockNumber !== null;
+                  return (
+                    <article key={window.windowId} className={`forward-shadow-window ${window.state.toLowerCase()}`}>
+                      <div>
+                        <span className={`state-label ${shadowStateTone(window.state)}`}>{shadowStateLabel(window.state)}</span>
+                        <time dateTime={window.startedAt}>
+                          {new Date(window.startedAt).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </time>
+                      </div>
+                      <strong>
+                        {window.state === "CLOSED" || window.state === "RISK_EXIT"
+                          ? simulatedUsd(window.simulatedNetOutcomeUsd)
+                          : shadowStateLabel(window.state)}
+                      </strong>
+                      {hasSourcePrecommit ? (
+                        <>
+                          <small>
+                            {window.sampledCrossings} sampled crossings · BSC block {window.sourceBlockNumber}
+                          </small>
+                          <code>Hire {shortHash(window.sourceHireId, 14)}</code>
+                        </>
+                      ) : (
+                        <>
+                          <small>Initialization failed before a source receipt or precommit was recorded.</small>
+                          <code>Source receipt not committed</code>
+                        </>
+                      )}
+                      <a href={window.receiptUrl} target="_blank" rel="noreferrer">
+                        Window evidence <ExternalLink size={12} />
+                      </a>
+                    </article>
+                  );
+                })}
               </div>
             ) : (
               <div className="infrastructure-loading">
