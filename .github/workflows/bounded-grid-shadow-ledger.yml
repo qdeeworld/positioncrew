@@ -2,7 +2,7 @@ name: Bounded Grid forward shadow
 
 on:
   schedule:
-    - cron: "2,7,12,17,22 * * * *"
+    - cron: "32,37,42,47,52 * * * *"
   workflow_dispatch:
     inputs:
       operation:

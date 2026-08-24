@@ -16,7 +16,7 @@ const boundedGridFixture = JSON.parse(
 const persistence = await mkdtemp(join(tmpdir(), "positioncrew-shadow-grid-d1-"));
 const token = "positioncrew-shadow-grid-integration-token";
 const testNow = new Date();
-testNow.setUTCMinutes(2, 0, 0);
+testNow.setUTCMinutes(32, 0, 0);
 if (testNow.getTime() > Date.now()) testNow.setUTCHours(testNow.getUTCHours() - 1);
 
 function shadowGridRunId(date) {
@@ -395,11 +395,11 @@ try {
   cutoffHour.setUTCHours(cutoffHour.getUTCHours() + 2);
   assert(Number.isFinite(cutoffHour.getTime()), "Opening-cutoff hour became invalid");
   const beforeOpeningCutoff = finiteDate(
-    cutoffHour.getTime() + 7 * 60_000 + 59_000,
+    cutoffHour.getTime() + 37 * 60_000 + 59_000,
     "pre-opening-cutoff checkpoint",
   );
   const afterOpeningCutoff = finiteDate(
-    cutoffHour.getTime() + 8 * 60_000 + 1_000,
+    cutoffHour.getTime() + 38 * 60_000 + 1_000,
     "post-opening-cutoff checkpoint",
   );
   const cutoffRunId = shadowGridRunId(beforeOpeningCutoff);
