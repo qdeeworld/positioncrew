@@ -36,6 +36,8 @@ jobs:
           npm test
       - name: Build production bundle
         run: npm run build
+      - name: D1-backed lifecycle integrations
+        run: npm run test:integration:d1:built
       - name: Install browser runtime
         run: npx playwright install --with-deps chromium
       - name: Browser workflows

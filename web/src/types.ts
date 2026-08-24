@@ -724,6 +724,76 @@ export interface PancakeGridProbe {
   boundary: string;
 }
 
+export type BoundedGridForwardShadowState =
+  | "PRECOMMITTED"
+  | "REFUSED"
+  | "CLOSED"
+  | "VOID_SOURCE_GAP"
+  | "RISK_EXIT";
+
+export type BoundedGridForwardShadowLedgerStatus =
+  | "COLLECTING"
+  | "MATURE"
+  | "DEGRADED"
+  | "SOURCE_UNAVAILABLE";
+
+export interface BoundedGridForwardShadowWindow {
+  windowId: string;
+  state: BoundedGridForwardShadowState;
+  pair: "WBNB/USDT";
+  sourceHireId: string;
+  sourceRequestHash: string;
+  sourceReceiptUrl: string;
+  sourceBlockNumber: string;
+  startedAt: string;
+  terminalAt: string | null;
+  horizonMinutes: 15;
+  sampledCrossings: number;
+  simulatedNetOutcomeUsd: string | null;
+  receiptUrl: string;
+  eventHash: string;
+  previousEventHash: string | null;
+}
+
+export interface BoundedGridForwardShadowLedger {
+  schemaVersion: "positioncrew.bounded-grid-forward-shadow-ledger.v1";
+  generatedAt: string;
+  status: BoundedGridForwardShadowLedgerStatus;
+  publicUrl: string;
+  model: {
+    name: "CONSERVATIVE_SAMPLED_CROSSING_V1";
+    strategyVersion: "positioncrew:bounded-grid-forward-shadow:v1";
+    pair: "WBNB/USDT";
+    capitalMode: "ZERO_FUND_SHADOW";
+    cadenceMinutes: 60;
+    sampleCadenceMinutes: 5;
+    horizonMinutes: 15;
+  };
+  maturity: {
+    observedDays: number;
+    terminalWindowCount: number;
+    minimumObservedDays: 7;
+    minimumTerminalWindows: 30;
+    nonVoidRatePct: number | null;
+    minimumNonVoidRatePct: 90;
+    hashChainValid: boolean;
+    mature: boolean;
+  };
+  summary: {
+    precommittedWindowCount: number;
+    terminalWindowCount: number;
+    closedWindowCount: number;
+    refusedWindowCount: number;
+    voidWindowCount: number;
+    riskExitWindowCount: number;
+    positiveWindowCount: number;
+    negativeWindowCount: number;
+    simulatedNetOutcomeUsd: string | null;
+  };
+  recentWindows: BoundedGridForwardShadowWindow[];
+  claimBoundary: string[];
+}
+
 export interface PancakePositionProbe {
   schemaVersion: "positioncrew.pancake-position-probe.v1";
   generatedAt: string;

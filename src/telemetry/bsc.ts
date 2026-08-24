@@ -133,6 +133,7 @@ class RpcTransportError extends Error {
 
 interface RpcBlock {
   number: Hex;
+  hash: Hex;
   timestamp: Hex;
 }
 
@@ -299,6 +300,7 @@ function rpcBlock(value: unknown, label: string): RpcBlock {
   const candidate = value as Partial<RpcBlock>;
   return {
     number: rpcHex(candidate.number, `${label} number`),
+    hash: rpcHex(candidate.hash, `${label} hash`),
     timestamp: rpcHex(candidate.timestamp, `${label} timestamp`),
   };
 }
@@ -427,6 +429,23 @@ export interface PancakeGridProbe {
 export interface PancakeGridRequestOptions {
   account?: string;
   capitalUsd?: number;
+}
+
+export interface PancakeGridPriceSample {
+  sampledAt: string;
+  spotPriceUsd: string;
+  source: {
+    chainId: 56;
+    market: "WBNB/USDT";
+    protocol: "PancakeSwap V3";
+    poolAddress: Address;
+    blockNumber: string;
+    blockHash: Hex;
+    blockTimestamp: string;
+    explorerUrl: string;
+    confirmationDepth: number;
+    finality: "FINALIZED_OR_32_CONFIRMATIONS";
+  };
 }
 
 export interface VenusYieldProbe {
@@ -1170,6 +1189,81 @@ export async function inspectPancakeGridMarket(
     boundary:
       "Token ordering, spot price, current active virtual liquidity, reserve balances, volatility observations, and gas were read for one BSC block. The grid is unsigned, assumes future completed cycles, and must be re-quoted and bound to the executing account before any order is placed.",
   };
+}
+
+export async function inspectPancakeGridPriceSample(): Promise<PancakeGridPriceSample> {
+  const [latestValue] = await rpcBatch(MAINNET_RPC, [
+    { method: "eth_getBlockByNumber", params: ["latest", false] },
+  ]);
+  const latest = rpcBlock(latestValue, "BNB Smart Chain latest block");
+  const latestNumber = BigInt(latest.number);
+  if (latestNumber <= 32n) throw new Error("BSC does not have enough confirmed blocks");
+  const sampleTag = toHex(latestNumber - 32n);
+  const [sampleBlockValue, poolValue] = await rpcBatch(MAINNET_RPC, [
+    { method: "eth_getBlockByNumber", params: [sampleTag, false] },
+    ethCall(
+      PANCAKE_V3_FACTORY,
+      encodeFunctionData({
+        abi: FACTORY_ABI,
+        functionName: "getPool",
+        args: [WBNB, USDT, 100],
+      }),
+      sampleTag,
+    ),
+  ]);
+  const block = rpcBlock(sampleBlockValue, "BNB Smart Chain confirmed sample block");
+  const poolAddress = decodeFunctionResult({
+    abi: FACTORY_ABI,
+    functionName: "getPool",
+    data: rpcHex(poolValue, "PancakeSwap WBNB/USDT pool"),
+  });
+  if (poolAddress === NATIVE_BNB) throw new Error("PancakeSwap WBNB/USDT pool is unavailable");
+  const [token0Value, token1Value, slot0Value] = await rpcBatch(MAINNET_RPC, [
+    ethCall(poolAddress, encodeFunctionData({ abi: POOL_ABI, functionName: "token0" }), block.number),
+    ethCall(poolAddress, encodeFunctionData({ abi: POOL_ABI, functionName: "token1" }), block.number),
+    ethCall(poolAddress, encodeFunctionData({ abi: POOL_ABI, functionName: "slot0" }), block.number),
+  ]);
+  const token0 = decodeFunctionResult({ abi: POOL_ABI, functionName: "token0", data: rpcHex(token0Value, "PancakeSwap token0") });
+  const token1 = decodeFunctionResult({ abi: POOL_ABI, functionName: "token1", data: rpcHex(token1Value, "PancakeSwap token1") });
+  if (token0.toLowerCase() !== USDT.toLowerCase() || token1.toLowerCase() !== WBNB.toLowerCase()) {
+    throw new Error("PancakeSwap WBNB/USDT token ordering changed unexpectedly");
+  }
+  const slot0 = decodeFunctionResult({ abi: POOL_ABI, functionName: "slot0", data: rpcHex(slot0Value, "PancakeSwap slot0") });
+  const price = poolPriceFromSqrtPriceX96(slot0[0]);
+  if (!Number.isFinite(price) || price <= 0) throw new Error("PancakeSwap returned an invalid sample price");
+  const blockNumber = BigInt(block.number).toString();
+  return {
+    sampledAt: new Date().toISOString(),
+    spotPriceUsd: decimal(price, 8),
+    source: {
+      chainId: 56,
+      market: "WBNB/USDT",
+      protocol: "PancakeSwap V3",
+      poolAddress,
+      blockNumber,
+      blockHash: block.hash,
+      blockTimestamp: new Date(Number(BigInt(block.timestamp)) * 1_000).toISOString(),
+      explorerUrl: `https://bscscan.com/block/${blockNumber}`,
+      confirmationDepth: Number(latestNumber - BigInt(block.number)),
+      finality: "FINALIZED_OR_32_CONFIRMATIONS",
+    },
+  };
+}
+
+export async function verifyPancakeGridPriceSample(sample: PancakeGridPriceSample): Promise<void> {
+  const blockTag = toHex(BigInt(sample.source.blockNumber));
+  const value = await rpcRequest(MAINNET_RPC, {
+    method: "eth_getBlockByNumber",
+    params: [blockTag, false],
+  });
+  const block = rpcBlock(value, "BNB Smart Chain retained sample block");
+  if (
+    BigInt(block.number).toString() !== sample.source.blockNumber ||
+    block.hash.toLowerCase() !== sample.source.blockHash.toLowerCase() ||
+    new Date(Number(BigInt(block.timestamp)) * 1_000).toISOString() !== sample.source.blockTimestamp
+  ) {
+    throw new Error("Retained PancakeSwap sample block identity changed");
+  }
 }
 
 export async function inspectPancakePosition(

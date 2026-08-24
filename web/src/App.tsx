@@ -13,6 +13,7 @@ import type {
   PublicationLoadState,
   BenchmarkRepeatabilityMatrixResponse,
   BenchmarkRepeatabilityResponse,
+  BoundedGridForwardShadowLedger,
   CurrentMarketplaceObservation,
   Erc8183TestnetLedger,
   ExternalComparisonSnapshot,
@@ -73,6 +74,7 @@ export default function App() {
   const [commerceLedger, setCommerceLedger] = useState<Erc8183TestnetLedger | null>(null);
   const [aacpReadiness, setAacpReadiness] = useState<AacpProductionReadiness | null>(null);
   const [productionTrackRecord, setProductionTrackRecord] = useState<ProductionTrackRecord | null>(null);
+  const [forwardShadowLedger, setForwardShadowLedger] = useState<BoundedGridForwardShadowLedger | null>(null);
   const [externalComparisons, setExternalComparisons] = useState<ExternalComparisonSnapshot | null>(null);
   const [sessionJobs, setSessionJobs] = useState<SessionJob[]>([]);
   const [activeJob, setActiveJob] = useState<SessionJob | null>(null);
@@ -147,6 +149,12 @@ export default function App() {
       fetch("/api/operations/production", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<ProductionTrackRecord>(response))
         .then(setProductionTrackRecord),
+      fetch("/api/evidence/bounded-grid-forward-shadow", {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      })
+        .then((response) => jsonResponse<BoundedGridForwardShadowLedger>(response))
+        .then(setForwardShadowLedger),
     ];
     void Promise.allSettled(contextualLoads);
 
@@ -343,6 +351,7 @@ export default function App() {
           founderAdvantagePublication={founderAdvantagePublication}
           advantagePublicationLoadState={advantagePublicationLoadState}
           founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState}
+          forwardShadowLedger={forwardShadowLedger}
           onClearJobs={() => {
             setSessionJobs([]);
             setActiveJob(null);
@@ -350,7 +359,7 @@ export default function App() {
         />
       );
     }
-    if (view === "evidence") return <EvidenceView providers={providers} matrix={matrix} telemetry={telemetry} benchmarks={benchmarks} captureManifest={captureManifest} marketplaceProvenance={marketplaceProvenance} commerceLedger={commerceLedger} aacpReadiness={aacpReadiness} advantagePublication={advantagePublication} founderAdvantagePublication={founderAdvantagePublication} advantagePublicationLoadState={advantagePublicationLoadState} founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState} productionTrackRecord={productionTrackRecord} />;
+    if (view === "evidence") return <EvidenceView providers={providers} matrix={matrix} telemetry={telemetry} benchmarks={benchmarks} captureManifest={captureManifest} marketplaceProvenance={marketplaceProvenance} commerceLedger={commerceLedger} aacpReadiness={aacpReadiness} advantagePublication={advantagePublication} founderAdvantagePublication={founderAdvantagePublication} advantagePublicationLoadState={advantagePublicationLoadState} founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState} productionTrackRecord={productionTrackRecord} forwardShadowLedger={forwardShadowLedger} />;
     return (
       <MarketplaceView
         providers={providers}
@@ -362,7 +371,7 @@ export default function App() {
         externalComparisons={externalComparisons}
       />
     );
-  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, providers, matrix, selectedService, telemetry, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord]);
+  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, providers, matrix, selectedService, telemetry, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord, forwardShadowLedger]);
 
   return (
     <div className="app-shell">

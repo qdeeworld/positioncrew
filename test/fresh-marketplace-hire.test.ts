@@ -1000,16 +1000,19 @@ describe("fresh marketplace hire contract", () => {
     const generatedMigrationName = "0000_fresh_benchmark_hires.sql";
     const generatedCurrentMigrationName = "0001_current_block_pinned_hires.sql";
     const generatedFourCategoryMigrationName = "0002_four_category_current_hires.sql";
+    const generatedShadowGridMigrationName = "0003_shadow_grid_events.sql";
     expect(readdirSync(drizzleRoot).sort()).toEqual([
       generatedMigrationName,
       generatedCurrentMigrationName,
       generatedFourCategoryMigrationName,
+      generatedShadowGridMigrationName,
       "meta",
     ]);
     expect(readdirSync(resolve(drizzleRoot, "meta")).sort()).toEqual([
       "0000_snapshot.json",
       "0001_snapshot.json",
       "0002_snapshot.json",
+      "0003_snapshot.json",
       "_journal.json",
     ]);
 
@@ -1033,6 +1036,7 @@ describe("fresh marketplace hire contract", () => {
       { idx: 0, tag: "0000_fresh_benchmark_hires" },
       { idx: 1, tag: "0001_current_block_pinned_hires" },
       { idx: 2, tag: "0002_four_category_current_hires" },
+      { idx: 3, tag: "0003_shadow_grid_events" },
     ]);
 
     const currentMigration = readFileSync(

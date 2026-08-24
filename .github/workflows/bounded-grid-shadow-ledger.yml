@@ -1,0 +1,68 @@
+name: Bounded Grid forward shadow
+
+on:
+  schedule:
+    - cron: "2,7,12,17,22 * * * *"
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Read-only operation
+        required: true
+        default: verify-only
+        type: choice
+        options:
+          - verify-only
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: positioncrew-bounded-grid-forward-shadow
+  cancel-in-progress: false
+
+jobs:
+  protected-tick:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install collector dependencies
+        run: npm ci --ignore-scripts
+      - name: Collect one protected actual-sample tick
+        env:
+          POSITIONCREW_BASE_URL: https://positioncrew.dolepee.com
+          SHADOW_GRID_TICK_TOKEN: ${{ secrets.POSITIONCREW_SHADOW_GRID_TICK_TOKEN }}
+          POSITIONCREW_SHADOW_GRID_OUTPUT: /tmp/positioncrew-bounded-grid-forward-shadow-tick.json
+        run: npm run shadow-grid:collect
+      - name: Preserve tick response
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: positioncrew-bounded-grid-forward-shadow-${{ github.run_id }}
+          path: /tmp/positioncrew-bounded-grid-forward-shadow-tick.json
+          if-no-files-found: error
+          retention-days: 30
+
+  verify-only:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'verify-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify public evidence without collecting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          POSITIONCREW_BASE_URL: https://positioncrew.dolepee.com
+          POSITIONCREW_HEALTH_OUTPUT: /tmp/positioncrew-production-health.json
+        run: npm run verify:production
