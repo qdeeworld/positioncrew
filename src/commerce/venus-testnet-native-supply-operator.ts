@@ -54,6 +54,8 @@ export interface VenusRpcTransaction {
   input: Hex;
   value: bigint;
   nonce: number;
+  gas: bigint;
+  gasPrice: bigint | null;
 }
 
 export interface VenusRpcReceipt {
@@ -69,6 +71,7 @@ export interface VenusRpcReceipt {
 export interface VenusNativeSupplyRpc {
   getChainId(): Promise<number>;
   getBlockNumber(): Promise<bigint>;
+  getBlockHash(blockNumber: bigint): Promise<Hash | null>;
   getBalance(address: Address, blockNumber?: bigint): Promise<bigint>;
   getPendingNonce(address: Address): Promise<number>;
   getCodeHash(address: Address, blockNumber?: bigint): Promise<Hash | null>;
@@ -80,7 +83,7 @@ export interface VenusNativeSupplyRpc {
   estimateMintGas(vToken: Address, account: Address, value: bigint): Promise<bigint>;
   getGasPrice(): Promise<bigint>;
   sendRawTransaction(rawTransaction: Hex): Promise<Hash>;
-  getTransaction(hash: Hash): Promise<VenusRpcTransaction>;
+  getTransaction(hash: Hash): Promise<VenusRpcTransaction | null>;
   getTransactionReceipt(hash: Hash): Promise<VenusRpcReceipt>;
 }
 
@@ -103,8 +106,9 @@ export interface VenusNativeSupplyDependencies {
 }
 
 function normalizeSnapshot(snapshot: readonly [bigint, bigint, bigint, bigint]): VenusAccountSnapshotEvidence {
+  if (snapshot[0] !== 0n) throw new Error(`Venus account snapshot returned error ${snapshot[0]}`);
   return {
-    errorCode: snapshot[0].toString(),
+    errorCode: "0",
     vTokenBalanceRaw: snapshot[1].toString(),
     borrowBalanceRaw: snapshot[2].toString(),
     exchangeRateMantissa: snapshot[3].toString(),
@@ -123,6 +127,32 @@ function requireCodeHash(actual: Hash | null, expected: string, label: string): 
   if (!actual) throw new Error(`${label} has no runtime bytecode`);
   if (actual.toLowerCase() !== expected.toLowerCase()) {
     throw new Error(`${label} runtime bytecode hash mismatch`);
+  }
+}
+
+function sameHash(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function assertRpcTransactionMatchesIntent(
+  transaction: VenusRpcTransaction,
+  expectedHash: Hash,
+  intent: VenusTestnetNativeSupplyIntent,
+): void {
+  if (!sameHash(transaction.hash, expectedHash)) throw new Error("Fetched transaction hash mismatch");
+  if (transaction.chainId !== 97 || transaction.type !== "legacy") {
+    throw new Error("Transaction is not a legacy EIP-155 BSC Testnet transaction");
+  }
+  if (
+    getAddress(transaction.from) !== getAddress(intent.actor) ||
+    !transaction.to || getAddress(transaction.to) !== getAddress(intent.transaction.to) ||
+    transaction.input.toLowerCase() !== intent.transaction.data.toLowerCase() ||
+    transaction.value !== BigInt(intent.transaction.valueWei) ||
+    transaction.nonce !== Number(intent.transaction.nonce) ||
+    transaction.gas !== BigInt(intent.transaction.gasLimit) ||
+    transaction.gasPrice !== BigInt(intent.transaction.gasPriceWei)
+  ) {
+    throw new Error("Transaction does not match the frozen Venus supply intent");
   }
 }
 
@@ -268,6 +298,7 @@ export async function signVenusTestnetNativeSupply(
   const intent = VenusTestnetNativeSupplyIntentSchema.parse(intentInput);
   const actor = requireExactActor(signer.address);
   if (actor !== intent.actor) throw new Error("Decrypted keystore does not control the reviewed actor");
+  if (now.getTime() < Date.parse(intent.createdAt)) throw new Error("Signing clock precedes the Venus supply intent");
   if (now.getTime() >= Date.parse(intent.expiresAt)) throw new Error("Venus supply intent has expired");
   const [testnetChainId, pendingNonce, blockNumber, currentGasPrice] = await Promise.all([
     dependencies.testnet.getChainId(),
@@ -290,6 +321,14 @@ export async function signVenusTestnetNativeSupply(
     actor,
     BigInt(intent.transaction.valueWei),
   );
+  const currentEstimatedGas = await dependencies.testnet.estimateMintGas(
+    getAddress(intent.transaction.to),
+    actor,
+    BigInt(intent.transaction.valueWei),
+  );
+  if (currentEstimatedGas <= 0n || currentEstimatedGas > BigInt(intent.transaction.gasLimit)) {
+    throw new Error("Current Venus mint gas estimate exceeds the frozen gas limit");
+  }
   const rawTransaction = await signer.signLegacyTransaction({
     chainId: 97,
     to: getAddress(intent.transaction.to),
@@ -310,10 +349,10 @@ export async function signVenusTestnetNativeSupply(
 
 export async function broadcastIdenticalVenusSubmission(
   submissionInput: unknown,
-  client: VenusNativeSupplyRpc,
+  dependencies: VenusNativeSupplyDependencies,
+  clock: () => Date = () => new Date(),
 ): Promise<Hash> {
   const submission = verifyVenusTestnetNativeSupplySubmission(submissionInput);
-  if (await client.getChainId() !== 97) throw new Error("Raw transaction broadcaster is not on BSC Testnet");
   await assertSignedLegacyTransactionMatches({
     rawTransaction: submission.rawTransaction as Hex,
     transactionHash: submission.transactionHash as Hash,
@@ -326,11 +365,68 @@ export async function broadcastIdenticalVenusSubmission(
     gas: BigInt(submission.intent.transaction.gasLimit),
     gasPrice: BigInt(submission.intent.transaction.gasPriceWei),
   });
-  const returnedHash = await client.sendRawTransaction(submission.rawTransaction as Hex);
+  const inspection = await inspectVenusSubmissionBroadcastState(submission, dependencies, clock);
+  if (inspection.state === "ALREADY_KNOWN") return inspection.transactionHash;
+  if (clock().getTime() >= Date.parse(submission.intent.expiresAt)) {
+    throw new Error("Venus supply intent expired immediately before broadcast");
+  }
+  const returnedHash = await dependencies.testnet.sendRawTransaction(submission.rawTransaction as Hex);
   if (returnedHash.toLowerCase() !== submission.transactionHash.toLowerCase()) {
     throw new Error("RPC returned a hash that does not match the frozen raw transaction");
   }
   return returnedHash;
+}
+
+export type VenusSubmissionBroadcastState =
+  | { state: "ALREADY_KNOWN"; transactionHash: Hash }
+  | { state: "READY_TO_SEND"; transactionHash: Hash };
+
+export async function inspectVenusSubmissionBroadcastState(
+  submissionInput: unknown,
+  dependencies: VenusNativeSupplyDependencies,
+  clock: () => Date = () => new Date(),
+): Promise<VenusSubmissionBroadcastState> {
+  const submission = verifyVenusTestnetNativeSupplySubmission(submissionInput);
+  const transactionHash = submission.transactionHash as Hash;
+  if (await dependencies.testnet.getChainId() !== 97) {
+    throw new Error("Raw transaction broadcaster is not on BSC Testnet");
+  }
+  const knownTransaction = await dependencies.testnet.getTransaction(transactionHash);
+  if (knownTransaction) {
+    assertRpcTransactionMatchesIntent(knownTransaction, transactionHash, submission.intent);
+    return { state: "ALREADY_KNOWN", transactionHash };
+  }
+  const currentTime = clock();
+  if (currentTime.getTime() < Date.parse(submission.signedAt)) {
+    throw new Error("Broadcast clock precedes the signed submission");
+  }
+  if (currentTime.getTime() >= Date.parse(submission.intent.expiresAt)) {
+    throw new Error("Unknown Venus supply transaction cannot be broadcast after intent expiry");
+  }
+  const actor = getAddress(submission.intent.actor);
+  if (await dependencies.testnet.getChainId() !== 97) throw new Error("Testnet chain changed before broadcast");
+  const [pendingNonce, blockNumber] = await Promise.all([
+    dependencies.testnet.getPendingNonce(actor),
+    dependencies.testnet.getBlockNumber(),
+  ]);
+  if (pendingNonce.toString() !== submission.intent.transaction.nonce) {
+    throw new Error("Pending nonce changed before broadcast");
+  }
+  await assertMainnetIsolation(dependencies.mainnet, actor, clock().toISOString());
+  const protocolState = await assertProtocolState(dependencies.testnet, actor, blockNumber);
+  const value = BigInt(submission.intent.transaction.valueWei);
+  const maximumGasCost = BigInt(submission.intent.transaction.gasLimit) * BigInt(submission.intent.transaction.gasPriceWei);
+  if (maximumGasCost > BigInt(VENUS_TESTNET_NATIVE_SUPPLY.maxGasCostWei)) {
+    throw new Error("Frozen broadcast gas cost exceeds the hard cap");
+  }
+  if (protocolState.nativeBalance < value + maximumGasCost) {
+    throw new Error("Dedicated testnet signer cannot fund the exact supply plus frozen gas");
+  }
+  await dependencies.testnet.simulateMint(getAddress(submission.intent.transaction.to), actor, value);
+  if (clock().getTime() >= Date.parse(submission.intent.expiresAt)) {
+    throw new Error("Venus supply intent expired during final broadcast checks");
+  }
+  return { state: "READY_TO_SEND", transactionHash };
 }
 
 export interface ExpectedSignedLegacyTransaction {
@@ -408,55 +504,114 @@ function decodeSupplyEvents(receipt: VenusRpcReceipt) {
   return { mintEvent, transferEvent };
 }
 
+interface ValidatedMinedVenusSupply {
+  transaction: VenusRpcTransaction;
+  receipt: VenusRpcReceipt;
+  finalityBlock: bigint;
+  confirmations: bigint;
+  previousBlock: bigint;
+  balanceBefore: bigint;
+  balanceAfter: bigint;
+  snapshotBefore: readonly [bigint, bigint, bigint, bigint];
+  snapshotAfter: readonly [bigint, bigint, bigint, bigint];
+  events: ReturnType<typeof decodeSupplyEvents>;
+  transactionCost: bigint;
+}
+
+async function validateMinedVenusSupply(
+  intent: VenusTestnetNativeSupplyIntent,
+  expectedHash: Hash,
+  client: VenusNativeSupplyRpc,
+): Promise<ValidatedMinedVenusSupply> {
+  if (await client.getChainId() !== 97) throw new Error("Receipt validation RPC is not on BSC Testnet");
+  const [transaction, receipt, finalityBlock] = await Promise.all([
+    client.getTransaction(expectedHash),
+    client.getTransactionReceipt(expectedHash),
+    client.getBlockNumber(),
+  ]);
+  if (!transaction) throw new Error("Venus supply transaction is not known on BSC Testnet");
+  if (!sameHash(transaction.hash, expectedHash) || !sameHash(receipt.transactionHash, expectedHash)) {
+    throw new Error("Transaction, receipt, and submission hashes do not match");
+  }
+  assertRpcTransactionMatchesIntent(transaction, expectedHash, intent);
+  if (receipt.status !== "success") throw new Error("Venus native supply transaction reverted");
+  if (transaction.blockNumber === null || transaction.blockHash === null) throw new Error("Transaction is not block-pinned");
+  if (
+    transaction.blockNumber !== receipt.blockNumber ||
+    !sameHash(transaction.blockHash, receipt.blockHash)
+  ) throw new Error("Transaction and receipt block mismatch");
+  if (finalityBlock < receipt.blockNumber) throw new Error("Finality observation precedes the receipt block");
+  const confirmations = finalityBlock - receipt.blockNumber + 1n;
+  if (confirmations < BigInt(VENUS_TESTNET_NATIVE_SUPPLY.confirmations)) {
+    throw new Error("Venus supply receipt has fewer than 12 confirmations");
+  }
+  const canonicalBlockHash = await client.getBlockHash(receipt.blockNumber);
+  if (!canonicalBlockHash || !sameHash(canonicalBlockHash, receipt.blockHash) || !sameHash(canonicalBlockHash, transaction.blockHash)) {
+    throw new Error("Receipt block is not canonical at the confirmed block height");
+  }
+  if (receipt.blockNumber === 0n) throw new Error("Cannot reconstruct a pre-transaction block");
+  const previousBlock = receipt.blockNumber - 1n;
+  const actor = getAddress(intent.actor);
+  const vToken = getAddress(intent.transaction.to);
+  const protocolState = await assertProtocolState(client, actor, receipt.blockNumber);
+  const [balanceBefore, snapshotBefore] = await Promise.all([
+    client.getVTokenBalance(vToken, actor, previousBlock),
+    client.getAccountSnapshot(vToken, actor, previousBlock),
+  ]);
+  const balanceAfter = protocolState.vTokenBalance;
+  const snapshotAfter = protocolState.accountSnapshot;
+  if (snapshotBefore[0] !== 0n || snapshotAfter[0] !== 0n) {
+    throw new Error("Block-pinned Venus account snapshot returned a non-zero error code");
+  }
+  if (snapshotBefore[1] !== balanceBefore || snapshotAfter[1] !== balanceAfter) {
+    throw new Error("Block-pinned Venus account snapshot balance mismatch");
+  }
+  const events = decodeSupplyEvents(receipt);
+  if (
+    getAddress(events.mintEvent.minter) !== actor ||
+    events.mintEvent.mintAmount !== BigInt(intent.transaction.valueWei) ||
+    events.mintEvent.mintTokens <= 0n ||
+    getAddress(events.transferEvent.from) !== "0x0000000000000000000000000000000000000000" ||
+    getAddress(events.transferEvent.to) !== actor ||
+    events.transferEvent.amount !== events.mintEvent.mintTokens
+  ) throw new Error("Venus Mint and Transfer evidence does not match the reviewed supply");
+  if (balanceAfter < balanceBefore || balanceAfter - balanceBefore !== events.mintEvent.mintTokens) {
+    throw new Error("Block-pinned vBNB balance delta does not equal the Mint event");
+  }
+  if (receipt.gasUsed <= 0n || receipt.gasUsed > transaction.gas) {
+    throw new Error("Receipt gas used exceeds the signed gas limit");
+  }
+  if (transaction.gasPrice === null || receipt.effectiveGasPrice !== transaction.gasPrice) {
+    throw new Error("Receipt gas price does not match the signed legacy gas price");
+  }
+  const transactionCost = receipt.gasUsed * receipt.effectiveGasPrice;
+  if (transactionCost > BigInt(VENUS_TESTNET_NATIVE_SUPPLY.maxGasCostWei)) {
+    throw new Error("Actual transaction cost exceeded the hard gas cap");
+  }
+  return {
+    transaction,
+    receipt,
+    finalityBlock,
+    confirmations,
+    previousBlock,
+    balanceBefore,
+    balanceAfter,
+    snapshotBefore,
+    snapshotAfter,
+    events,
+    transactionCost,
+  };
+}
+
 export async function reconcileVenusTestnetNativeSupply(
   submissionInput: unknown,
   client: VenusNativeSupplyRpc,
   now = new Date(),
 ): Promise<VenusTestnetNativeSupplyEvidence> {
-  const submission = VenusTestnetNativeSupplySubmissionSchema.parse(submissionInput);
-  if (await client.getChainId() !== 97) throw new Error("Receipt reconciler is not on BSC Testnet");
-  const [transaction, receipt, finalityBlock] = await Promise.all([
-    client.getTransaction(submission.transactionHash as Hash),
-    client.getTransactionReceipt(submission.transactionHash as Hash),
-    client.getBlockNumber(),
-  ]);
-  if (receipt.status !== "success") throw new Error("Venus native supply transaction reverted");
-  if (transaction.hash.toLowerCase() !== submission.transactionHash.toLowerCase()) throw new Error("Transaction hash mismatch");
-  if (transaction.chainId !== 97 || transaction.type !== "legacy") throw new Error("Transaction is not a legacy EIP-155 BSC Testnet transaction");
-  if (!transaction.blockNumber || !transaction.blockHash) throw new Error("Transaction is not block-pinned");
-  if (transaction.blockNumber !== receipt.blockNumber || transaction.blockHash !== receipt.blockHash) throw new Error("Transaction and receipt block mismatch");
-  const confirmations = finalityBlock - receipt.blockNumber + 1n;
-  if (confirmations < BigInt(VENUS_TESTNET_NATIVE_SUPPLY.confirmations)) throw new Error("Venus supply receipt has fewer than 12 confirmations");
+  const submission = verifyVenusTestnetNativeSupplySubmission(submissionInput);
   const intent = submission.intent;
-  if (
-    getAddress(transaction.from) !== intent.actor ||
-    !transaction.to || getAddress(transaction.to) !== intent.transaction.to ||
-    transaction.input.toLowerCase() !== intent.transaction.data ||
-    transaction.value.toString() !== intent.transaction.valueWei ||
-    transaction.nonce.toString() !== intent.transaction.nonce
-  ) throw new Error("Mined transaction does not match the reviewed Venus supply intent");
-  const events = decodeSupplyEvents(receipt);
-  if (
-    getAddress(events.mintEvent.minter) !== intent.actor ||
-    events.mintEvent.mintAmount.toString() !== intent.transaction.valueWei ||
-    events.mintEvent.mintTokens <= 0n ||
-    events.transferEvent.amount !== events.mintEvent.mintTokens
-  ) throw new Error("Venus Mint and Transfer evidence does not match the reviewed supply");
-  if (receipt.blockNumber === 0n) throw new Error("Cannot reconstruct a pre-transaction block");
-  const previousBlock = receipt.blockNumber - 1n;
-  const vToken = getAddress(VENUS_TESTNET_NATIVE_SUPPLY.vBnb);
-  const actor = getAddress(VENUS_TESTNET_NATIVE_SUPPLY.actor);
-  const [balanceBefore, balanceAfter, snapshotBefore, snapshotAfter] = await Promise.all([
-    client.getVTokenBalance(vToken, actor, previousBlock),
-    client.getVTokenBalance(vToken, actor, receipt.blockNumber),
-    client.getAccountSnapshot(vToken, actor, previousBlock),
-    client.getAccountSnapshot(vToken, actor, receipt.blockNumber),
-  ]);
-  if (balanceAfter < balanceBefore || balanceAfter - balanceBefore !== events.mintEvent.mintTokens) {
-    throw new Error("Block-pinned vBNB balance delta does not equal the Mint event");
-  }
-  const transactionCost = receipt.gasUsed * receipt.effectiveGasPrice;
-  if (transactionCost > BigInt(VENUS_TESTNET_NATIVE_SUPPLY.maxGasCostWei)) throw new Error("Actual transaction cost exceeded the hard gas cap");
+  const validated = await validateMinedVenusSupply(intent, submission.transactionHash as Hash, client);
+  const { transaction, receipt, finalityBlock, confirmations, previousBlock, balanceBefore, balanceAfter, snapshotBefore, snapshotAfter, events, transactionCost } = validated;
   const evidence = commitVenusTestnetNativeSupplyEvidence({
     schemaVersion: "positioncrew.venus-testnet-native-supply-receipt.v1",
     evidenceId: "venus-bsc-testnet-native-supply-1",
@@ -502,6 +657,8 @@ export async function reconcileVenusTestnetNativeSupply(
       input: VENUS_TESTNET_NATIVE_SUPPLY.mintSelector,
       valueWei: VENUS_TESTNET_NATIVE_SUPPLY.amountWei,
       nonce: transaction.nonce.toString(),
+      gasLimit: transaction.gas.toString(),
+      gasPriceWei: transaction.gasPrice!.toString(),
       status: "SUCCESS",
       gasUsed: receipt.gasUsed.toString(),
       effectiveGasPriceWei: receipt.effectiveGasPrice.toString(),
@@ -545,22 +702,56 @@ export async function verifyVenusTestnetNativeSupplyOnchain(
   client: VenusNativeSupplyRpc,
 ): Promise<VenusTestnetNativeSupplyEvidence> {
   const evidence = verifyVenusTestnetNativeSupplyEvidence(evidenceInput);
-  const [transaction, receipt, currentBlock] = await Promise.all([
-    client.getTransaction(evidence.transaction.hash as Hash),
-    client.getTransactionReceipt(evidence.transaction.hash as Hash),
-    client.getBlockNumber(),
-  ]);
-  if (receipt.status !== "success" || currentBlock - receipt.blockNumber + 1n < 12n) throw new Error("Published receipt is not successful and sufficiently confirmed");
+  const validated = await validateMinedVenusSupply(evidence.intent, evidence.transaction.hash as Hash, client);
+  const { transaction, receipt, finalityBlock, confirmations, previousBlock, balanceBefore, balanceAfter, snapshotBefore, snapshotAfter, events, transactionCost } = validated;
+  const expectedExplorerUrl = `https://testnet.bscscan.com/tx/${transaction.hash}`;
+  const recordedFinality = BigInt(evidence.network.finalityObservationBlockNumber);
+  const recordedConfirmations = recordedFinality - receipt.blockNumber + 1n;
   if (
-    transaction.hash !== evidence.transaction.hash ||
-    transaction.blockHash !== evidence.transaction.blockHash ||
-    transaction.value.toString() !== evidence.transaction.valueWei
+    evidence.network.receiptBlockNumber !== receipt.blockNumber.toString() ||
+    !sameHash(evidence.network.receiptBlockHash, receipt.blockHash) ||
+    recordedFinality > finalityBlock ||
+    recordedConfirmations !== BigInt(evidence.network.confirmationsObserved) ||
+    recordedConfirmations < BigInt(VENUS_TESTNET_NATIVE_SUPPLY.confirmations) ||
+    evidence.network.explorerUrl !== expectedExplorerUrl
+  ) throw new Error("Published network finality evidence differs from BSC Testnet");
+  if (
+    !sameHash(evidence.transaction.hash, transaction.hash) ||
+    evidence.transaction.chainId !== transaction.chainId ||
+    evidence.transaction.type !== transaction.type ||
+    evidence.transaction.blockNumber !== transaction.blockNumber!.toString() ||
+    !sameHash(evidence.transaction.blockHash, transaction.blockHash!) ||
+    getAddress(evidence.transaction.from) !== getAddress(transaction.from) ||
+    getAddress(evidence.transaction.to) !== getAddress(transaction.to!) ||
+    evidence.transaction.input.toLowerCase() !== transaction.input.toLowerCase() ||
+    evidence.transaction.valueWei !== transaction.value.toString() ||
+    evidence.transaction.nonce !== transaction.nonce.toString() ||
+    evidence.transaction.gasLimit !== transaction.gas.toString() ||
+    evidence.transaction.gasPriceWei !== transaction.gasPrice!.toString() ||
+    evidence.transaction.gasUsed !== receipt.gasUsed.toString() ||
+    evidence.transaction.effectiveGasPriceWei !== receipt.effectiveGasPrice.toString() ||
+    evidence.transaction.transactionCostWei !== transactionCost.toString() ||
+    evidence.transaction.explorerUrl !== expectedExplorerUrl
   ) throw new Error("Published transaction differs from BSC Testnet");
-  const events = decodeSupplyEvents(receipt);
-  if (events.mintEvent.mintTokens.toString() !== evidence.proof.mintEvent.mintTokensRaw) throw new Error("Published Mint event differs from BSC Testnet");
-  const before = await client.getVTokenBalance(getAddress(VENUS_TESTNET_NATIVE_SUPPLY.vBnb), getAddress(VENUS_TESTNET_NATIVE_SUPPLY.actor), BigInt(evidence.proof.previousBlockNumber));
-  const after = await client.getVTokenBalance(getAddress(VENUS_TESTNET_NATIVE_SUPPLY.vBnb), getAddress(VENUS_TESTNET_NATIVE_SUPPLY.actor), BigInt(evidence.network.receiptBlockNumber));
-  if (before.toString() !== evidence.proof.vTokenBalanceBeforeRaw || after.toString() !== evidence.proof.vTokenBalanceAfterRaw) throw new Error("Published balance proof differs from BSC Testnet");
+  if (
+    evidence.proof.previousBlockNumber !== previousBlock.toString() ||
+    evidence.proof.mintEvent.minter !== getAddress(events.mintEvent.minter) ||
+    evidence.proof.mintEvent.mintAmountWei !== events.mintEvent.mintAmount.toString() ||
+    evidence.proof.mintEvent.mintTokensRaw !== events.mintEvent.mintTokens.toString() ||
+    evidence.proof.mintEvent.logIndex !== events.mintEvent.logIndex ||
+    evidence.proof.transferEvent.from !== getAddress(events.transferEvent.from) ||
+    evidence.proof.transferEvent.to !== getAddress(events.transferEvent.to) ||
+    evidence.proof.transferEvent.amountRaw !== events.transferEvent.amount.toString() ||
+    evidence.proof.transferEvent.logIndex !== events.transferEvent.logIndex ||
+    evidence.proof.vTokenBalanceBeforeRaw !== balanceBefore.toString() ||
+    evidence.proof.vTokenBalanceAfterRaw !== balanceAfter.toString() ||
+    evidence.proof.vTokenBalanceDeltaRaw !== (balanceAfter - balanceBefore).toString() ||
+    JSON.stringify(evidence.proof.accountSnapshotBefore) !== JSON.stringify(normalizeSnapshot(snapshotBefore)) ||
+    JSON.stringify(evidence.proof.accountSnapshotAfter) !== JSON.stringify(normalizeSnapshot(snapshotAfter))
+  ) throw new Error("Published Venus proof differs from BSC Testnet");
+  if (confirmations < BigInt(VENUS_TESTNET_NATIVE_SUPPLY.confirmations)) {
+    throw new Error("Published receipt is not sufficiently confirmed");
+  }
   return evidence;
 }
 
@@ -570,6 +761,7 @@ export function createViemVenusRpcClient(network: "testnet" | "mainnet", rpcUrl:
   return {
     getChainId: () => client.getChainId(),
     getBlockNumber: () => client.getBlockNumber(),
+    getBlockHash: async (blockNumber) => (await client.getBlock({ blockNumber })).hash,
     getBalance: (address, blockNumber) => client.getBalance({ address, blockNumber }),
     getPendingNonce: (address) => client.getTransactionCount({ address, blockTag: "pending" }),
     getCodeHash: async (address, blockNumber) => {
@@ -588,19 +780,26 @@ export function createViemVenusRpcClient(network: "testnet" | "mainnet", rpcUrl:
     getGasPrice: () => client.getGasPrice(),
     sendRawTransaction: (rawTransaction) => client.sendRawTransaction({ serializedTransaction: rawTransaction }),
     getTransaction: async (hash) => {
-      const transaction = await client.getTransaction({ hash });
-      return {
-        hash: transaction.hash,
-        chainId: transaction.chainId ?? null,
-        type: transaction.type,
-        blockNumber: transaction.blockNumber,
-        blockHash: transaction.blockHash,
-        from: transaction.from,
-        to: transaction.to,
-        input: transaction.input,
-        value: transaction.value,
-        nonce: transaction.nonce,
-      };
+      try {
+        const transaction = await client.getTransaction({ hash });
+        return {
+          hash: transaction.hash,
+          chainId: transaction.chainId ?? null,
+          type: transaction.type,
+          blockNumber: transaction.blockNumber,
+          blockHash: transaction.blockHash,
+          from: transaction.from,
+          to: transaction.to,
+          input: transaction.input,
+          value: transaction.value,
+          nonce: transaction.nonce,
+          gas: transaction.gas,
+          gasPrice: transaction.gasPrice ?? null,
+        };
+      } catch (error) {
+        if (error instanceof Error && error.name === "TransactionNotFoundError") return null;
+        throw error;
+      }
     },
     getTransactionReceipt: async (hash) => {
       const receipt = await client.getTransactionReceipt({ hash });

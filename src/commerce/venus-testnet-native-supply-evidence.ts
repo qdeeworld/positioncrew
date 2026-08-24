@@ -38,7 +38,7 @@ export const VENUS_TESTNET_NATIVE_SUPPLY_CLAIM_BOUNDARY = [
 ] as const;
 
 const AccountSnapshotSchema = z.object({
-  errorCode: UintStringSchema,
+  errorCode: z.literal("0"),
   vTokenBalanceRaw: UintStringSchema,
   borrowBalanceRaw: UintStringSchema,
   exchangeRateMantissa: UintStringSchema,
@@ -104,6 +104,13 @@ export const VenusTestnetNativeSupplyIntentSchema = IntentContentSchema.extend({
   if (Date.parse(intent.expiresAt) - Date.parse(intent.createdAt) !== VENUS_TESTNET_NATIVE_SUPPLY.intentTtlMilliseconds) {
     context.addIssue({ code: "custom", path: ["expiresAt"], message: "Intent must expire exactly ten minutes after creation" });
   }
+  const { preflightHash: _preflightHash, ...preflightContent } = intent.preflight;
+  if (canonicalHash(preflightContent) !== intent.preflight.preflightHash) {
+    context.addIssue({ code: "custom", path: ["preflight", "preflightHash"], message: "Preflight commitment mismatch" });
+  }
+  if (intent.preflight.accountSnapshot.vTokenBalanceRaw !== intent.preflight.vTokenBalanceRaw) {
+    context.addIssue({ code: "custom", path: ["preflight", "accountSnapshot", "vTokenBalanceRaw"], message: "Preflight snapshot balance mismatch" });
+  }
   const gasCost = BigInt(intent.transaction.gasLimit) * BigInt(intent.transaction.gasPriceWei);
   if (gasCost > BigInt(VENUS_TESTNET_NATIVE_SUPPLY.maxGasCostWei)) {
     context.addIssue({ code: "custom", path: ["transaction", "gasLimit"], message: "Maximum transaction gas cost exceeds the hard cap" });
@@ -134,6 +141,10 @@ const SubmissionContentSchema = z.object({
 export const VenusTestnetNativeSupplySubmissionSchema = SubmissionContentSchema.extend({
   submissionHash: HashSchema,
 }).strict().superRefine((submission, context) => {
+  const signedAt = Date.parse(submission.signedAt);
+  if (signedAt < Date.parse(submission.intent.createdAt) || signedAt >= Date.parse(submission.intent.expiresAt)) {
+    context.addIssue({ code: "custom", path: ["signedAt"], message: "Submission must be signed within the intent validity window" });
+  }
   const { submissionHash: _submissionHash, ...content } = submission;
   if (canonicalHash(content) !== submission.submissionHash) {
     context.addIssue({ code: "custom", path: ["submissionHash"], message: "Submission commitment mismatch" });
@@ -169,8 +180,10 @@ const NormalizedTransactionSchema = z.object({
   input: z.literal(VENUS_TESTNET_NATIVE_SUPPLY.mintSelector),
   valueWei: z.literal(VENUS_TESTNET_NATIVE_SUPPLY.amountWei),
   nonce: UintStringSchema,
+  gasLimit: UintStringSchema.refine((value) => BigInt(value) > 0n, "gasLimit must be positive"),
+  gasPriceWei: UintStringSchema.refine((value) => BigInt(value) > 0n, "gasPriceWei must be positive"),
   status: z.literal("SUCCESS"),
-  gasUsed: UintStringSchema,
+  gasUsed: UintStringSchema.refine((value) => BigInt(value) > 0n, "gasUsed must be positive"),
   effectiveGasPriceWei: UintStringSchema,
   transactionCostWei: UintStringSchema,
   explorerUrl: z.string().url(),
@@ -257,6 +270,43 @@ export const VenusTestnetNativeSupplyEvidenceSchema = EvidenceContentSchema.supe
   const delta = BigInt(evidence.proof.vTokenBalanceDeltaRaw);
   if (after - before !== delta || delta !== mintTokens || mintTokens !== transferAmount) {
     context.addIssue({ code: "custom", path: ["proof"], message: "Mint, transfer, and block-pinned vBNB balance delta do not match" });
+  }
+  if (
+    evidence.proof.accountSnapshotBefore.vTokenBalanceRaw !== evidence.proof.vTokenBalanceBeforeRaw ||
+    evidence.proof.accountSnapshotAfter.vTokenBalanceRaw !== evidence.proof.vTokenBalanceAfterRaw
+  ) {
+    context.addIssue({ code: "custom", path: ["proof"], message: "Account snapshot balances do not match the pinned vToken balances" });
+  }
+  if (
+    evidence.transaction.nonce !== evidence.intent.transaction.nonce ||
+    evidence.transaction.gasLimit !== evidence.intent.transaction.gasLimit ||
+    evidence.transaction.gasPriceWei !== evidence.intent.transaction.gasPriceWei
+  ) {
+    context.addIssue({ code: "custom", path: ["transaction"], message: "Normalized transaction does not match the frozen intent" });
+  }
+  if (
+    evidence.transaction.blockNumber !== evidence.network.receiptBlockNumber ||
+    evidence.transaction.blockHash.toLowerCase() !== evidence.network.receiptBlockHash.toLowerCase() ||
+    BigInt(evidence.proof.previousBlockNumber) + 1n !== BigInt(evidence.network.receiptBlockNumber)
+  ) {
+    context.addIssue({ code: "custom", path: ["network"], message: "Receipt, transaction, and proof block identities do not match" });
+  }
+  const recordedConfirmations = BigInt(evidence.network.finalityObservationBlockNumber) - BigInt(evidence.network.receiptBlockNumber) + 1n;
+  if (recordedConfirmations !== BigInt(evidence.network.confirmationsObserved)) {
+    context.addIssue({ code: "custom", path: ["network", "confirmationsObserved"], message: "Recorded confirmation count mismatch" });
+  }
+  const gasUsed = BigInt(evidence.transaction.gasUsed);
+  const gasLimit = BigInt(evidence.transaction.gasLimit);
+  const gasPrice = BigInt(evidence.transaction.gasPriceWei);
+  const effectiveGasPrice = BigInt(evidence.transaction.effectiveGasPriceWei);
+  const transactionCost = BigInt(evidence.transaction.transactionCostWei);
+  if (
+    gasUsed > gasLimit ||
+    effectiveGasPrice !== gasPrice ||
+    transactionCost !== gasUsed * effectiveGasPrice ||
+    transactionCost > BigInt(VENUS_TESTNET_NATIVE_SUPPLY.maxGasCostWei)
+  ) {
+    context.addIssue({ code: "custom", path: ["transaction"], message: "Normalized gas evidence is inconsistent or exceeds the hard cap" });
   }
   const { proofHash: _proofHash, ...proofContent } = evidence.proof;
   if (canonicalHash(proofContent) !== evidence.proof.proofHash) {

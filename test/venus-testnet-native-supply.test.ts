@@ -14,17 +14,20 @@ import {
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { canonicalHash } from "../src/core/canonical.js";
 import {
   VENUS_TESTNET_NATIVE_SUPPLY,
   VenusTestnetNativeSupplyEvidenceSchema,
   VenusTestnetNativeSupplyIntentSchema,
   VenusTestnetNativeSupplySubmissionSchema,
   commitVenusTestnetNativeSupplySubmission,
+  commitVenusTestnetNativeSupplyEvidence,
   verifyVenusTestnetNativeSupplyEvidence,
 } from "../src/commerce/venus-testnet-native-supply-evidence.js";
 import {
   broadcastIdenticalVenusSubmission,
   assertSignedLegacyTransactionMatches,
+  inspectVenusSubmissionBroadcastState,
   prepareVenusTestnetNativeSupply,
   reconcileVenusTestnetNativeSupply,
   signVenusTestnetNativeSupply,
@@ -80,6 +83,7 @@ function supplyLogs(): VenusRpcReceipt["logs"] {
 class FakeRpc implements VenusNativeSupplyRpc {
   chainId = 97;
   blockNumber = 111n;
+  canonicalBlockHash: Hash | null = `0x${"ab".repeat(32)}` as Hash;
   nativeBalance = 1_000_000_000_000_000_000n;
   pendingNonce = 7;
   vTokenCodeHash: Hash | null = VENUS_TESTNET_NATIVE_SUPPLY.vBnbRuntimeCodeHash;
@@ -89,10 +93,11 @@ class FakeRpc implements VenusNativeSupplyRpc {
   gasEstimate = 50_000n;
   gasPrice = 1_000_000_000n;
   simulateCalls = 0;
+  simulationError: Error | null = null;
   sentRaw: Hex[] = [];
   balanceBefore = 0n;
   balanceAfter = MINT_TOKENS;
-  transaction: VenusRpcTransaction = {
+  transaction: VenusRpcTransaction | null = {
     hash: TRANSACTION_HASH,
     chainId: 97,
     type: "legacy",
@@ -103,6 +108,8 @@ class FakeRpc implements VenusNativeSupplyRpc {
     input: VENUS_TESTNET_NATIVE_SUPPLY.mintSelector,
     value: BigInt(VENUS_TESTNET_NATIVE_SUPPLY.amountWei),
     nonce: 7,
+    gas: 60_000n,
+    gasPrice: 1_000_000_000n,
   };
   receipt: VenusRpcReceipt = {
     transactionHash: TRANSACTION_HASH,
@@ -116,6 +123,7 @@ class FakeRpc implements VenusNativeSupplyRpc {
 
   getChainId = async () => this.chainId;
   getBlockNumber = async () => this.blockNumber;
+  getBlockHash = async (_blockNumber: bigint) => this.canonicalBlockHash;
   getBalance = async (_address: Address, _blockNumber?: bigint) => this.nativeBalance;
   getPendingNonce = async (_address: Address) => this.pendingNonce;
   getCodeHash = async (address: Address, _blockNumber?: bigint) =>
@@ -124,11 +132,14 @@ class FakeRpc implements VenusNativeSupplyRpc {
   getMarket = async (_comptroller: Address, _vToken: Address, _blockNumber?: bigint) => this.market;
   getVTokenBalance = async (_vToken: Address, _account: Address, blockNumber?: bigint) =>
     blockNumber === 99n ? this.balanceBefore : blockNumber === 100n ? this.balanceAfter : this.balanceBefore;
-  getAccountSnapshot = async (_vToken: Address, _account: Address, blockNumber?: bigint) => {
+  getAccountSnapshot: VenusNativeSupplyRpc["getAccountSnapshot"] = async (_vToken: Address, _account: Address, blockNumber?: bigint) => {
     const balance = blockNumber === 100n ? this.balanceAfter : this.balanceBefore;
     return [0n, balance, 0n, 20_000_000_000_000_000_000_000_000n] as const;
   };
-  simulateMint = async (_vToken: Address, _account: Address, _value: bigint) => { this.simulateCalls += 1; };
+  simulateMint = async (_vToken: Address, _account: Address, _value: bigint) => {
+    this.simulateCalls += 1;
+    if (this.simulationError) throw this.simulationError;
+  };
   estimateMintGas = async (_vToken: Address, _account: Address, _value: bigint) => this.gasEstimate;
   getGasPrice = async () => this.gasPrice;
   sendRawTransaction = async (rawTransaction: Hex) => {
@@ -212,6 +223,12 @@ describe("bounded Venus BSC Testnet native supply", () => {
     const tampered = structuredClone(intent);
     (tampered.transaction as { valueWei: string }).valueWei = "100000000000001";
     expect(() => VenusTestnetNativeSupplyIntentSchema.parse(tampered)).toThrow();
+
+    const stalePreflight = structuredClone(intent);
+    stalePreflight.preflight.nativeBalanceWei = "999999999999999999";
+    const { intentHash: _intentHash, ...staleContent } = stalePreflight;
+    stalePreflight.intentHash = canonicalHash(staleContent);
+    expect(() => VenusTestnetNativeSupplyIntentSchema.parse(stalePreflight)).toThrow("Preflight commitment mismatch");
   });
 
   it("rejects amount, mainnet exposure, nonce, code, market, and gas-cap mutations", async () => {
@@ -262,6 +279,25 @@ describe("bounded Venus BSC Testnet native supply", () => {
       address: ACTOR,
       signLegacyTransaction: async () => RAW_TRANSACTION,
     }, mainnetChanged, new Date("2026-08-24T12:01:00.000Z"))).rejects.toThrow("mainnet native balance");
+
+    const gasChanged = dependencies();
+    const gasReviewed = await prepared(gasChanged);
+    gasChanged.testnet.gasEstimate = 60_001n;
+    await expect(signVenusTestnetNativeSupply(gasReviewed, {
+      address: ACTOR,
+      signLegacyTransaction: async () => RAW_TRANSACTION,
+    }, gasChanged, new Date("2026-08-24T12:01:00.000Z"))).rejects.toThrow("exceeds the frozen gas limit");
+  });
+
+  it("requires signedAt inside the frozen intent window", async () => {
+    const intent = await prepared();
+    expect(() => commitVenusTestnetNativeSupplySubmission({
+      schemaVersion: "positioncrew.venus-testnet-native-supply-submission.v1",
+      signedAt: intent.expiresAt,
+      intent,
+      rawTransaction: RAW_TRANSACTION,
+      transactionHash: TRANSACTION_HASH,
+    })).toThrow("validity window");
   });
 
   it("parses and recovers the exact signed legacy transaction before authorization", async () => {
@@ -335,10 +371,55 @@ describe("bounded Venus BSC Testnet native supply", () => {
       transactionHash: keccak256(wrongSignerRaw),
     });
     expect(VenusTestnetNativeSupplySubmissionSchema.parse(reconstructed)).toEqual(reconstructed);
-    await expect(broadcastIdenticalVenusSubmission(reconstructed, deps.testnet)).rejects.toThrow(
+    await expect(broadcastIdenticalVenusSubmission(reconstructed, deps)).rejects.toThrow(
       "sender mismatch",
     );
     expect(deps.testnet.sentRaw).toEqual([]);
+  });
+
+  it("never resends a known hash and rejects expired unknown transactions", async () => {
+    const known = dependencies();
+    const knownSubmission = (await signed(known)).submission;
+    await expect(inspectVenusSubmissionBroadcastState(
+      knownSubmission,
+      known,
+      () => new Date("2026-08-24T12:30:00.000Z"),
+    )).resolves.toEqual({ state: "ALREADY_KNOWN", transactionHash: TRANSACTION_HASH });
+    expect(known.testnet.sentRaw).toEqual([]);
+
+    const unknown = dependencies();
+    const unknownSubmission = (await signed(unknown)).submission;
+    unknown.testnet.transaction = null;
+    await expect(inspectVenusSubmissionBroadcastState(
+      unknownSubmission,
+      unknown,
+      () => new Date("2026-08-24T12:30:00.000Z"),
+    )).rejects.toThrow("cannot be broadcast after intent expiry");
+    expect(unknown.testnet.sentRaw).toEqual([]);
+  });
+
+  it("fails every fresh pre-send invariant without sending", async () => {
+    const cases: Array<{ mutate: (deps: ReturnType<typeof dependencies>) => void; message: string }> = [
+      { mutate: (deps) => { deps.testnet.chainId = 56; }, message: "not on BSC Testnet" },
+      { mutate: (deps) => { deps.testnet.pendingNonce = 8; }, message: "Pending nonce changed" },
+      { mutate: (deps) => { deps.mainnet.nativeBalance = 1n; }, message: "mainnet native balance" },
+      { mutate: (deps) => { deps.testnet.vTokenCodeHash = `0x${"00".repeat(32)}`; }, message: "bytecode hash mismatch" },
+      { mutate: (deps) => { deps.testnet.market = { isListed: false, isVenus: true }; }, message: "active listed Venus market" },
+      { mutate: (deps) => { deps.testnet.nativeBalance = 1n; }, message: "cannot fund" },
+      { mutate: (deps) => { deps.testnet.simulationError = new Error("simulation rejected"); }, message: "simulation rejected" },
+    ];
+    for (const scenario of cases) {
+      const deps = dependencies();
+      const submission = (await signed(deps)).submission;
+      deps.testnet.transaction = null;
+      scenario.mutate(deps);
+      await expect(inspectVenusSubmissionBroadcastState(
+        submission,
+        deps,
+        () => new Date("2026-08-24T12:02:00.000Z"),
+      )).rejects.toThrow(scenario.message);
+      expect(deps.testnet.sentRaw).toEqual([]);
+    }
   });
 
   it("reconciles Mint, Transfer, confirmations, cost, and pinned balance delta", async () => {
@@ -362,6 +443,20 @@ describe("bounded Venus BSC Testnet native supply", () => {
     expect(VenusTestnetNativeSupplyEvidenceSchema.parse(evidence)).toEqual(evidence);
     expect(verifyVenusTestnetNativeSupplyEvidence(evidence)).toEqual(evidence);
     await expect(verifyVenusTestnetNativeSupplyOnchain(evidence, deps.testnet)).resolves.toEqual(evidence);
+
+    const { commitments: _commitments, ...forgedContent } = evidence;
+    const forged = commitVenusTestnetNativeSupplyEvidence({
+      ...forgedContent,
+      transaction: {
+        ...forgedContent.transaction,
+        gasUsed: "20001",
+        transactionCostWei: "20001000000000",
+      },
+    });
+    expect(VenusTestnetNativeSupplyEvidenceSchema.parse(forged)).toEqual(forged);
+    await expect(verifyVenusTestnetNativeSupplyOnchain(forged, deps.testnet)).rejects.toThrow(
+      "Published transaction differs",
+    );
 
     const tampered = structuredClone(evidence);
     (tampered.proof as { vTokenBalanceAfterRaw: string }).vTokenBalanceAfterRaw = "500001";
@@ -388,5 +483,40 @@ describe("bounded Venus BSC Testnet native supply", () => {
     const wrongDeltaSubmission = (await signed(wrongDelta)).submission;
     wrongDelta.testnet.balanceAfter = MINT_TOKENS + 1n;
     await expect(reconcileVenusTestnetNativeSupply(wrongDeltaSubmission, wrongDelta.testnet)).rejects.toThrow("balance delta");
+
+    const receiptHash = dependencies();
+    const receiptHashSubmission = (await signed(receiptHash)).submission;
+    receiptHash.testnet.receipt = { ...receiptHash.testnet.receipt, transactionHash: `0x${"cd".repeat(32)}` as Hash };
+    await expect(reconcileVenusTestnetNativeSupply(receiptHashSubmission, receiptHash.testnet)).rejects.toThrow("hashes do not match");
+
+    const fetchedHash = dependencies();
+    const fetchedHashSubmission = (await signed(fetchedHash)).submission;
+    fetchedHash.testnet.transaction = { ...fetchedHash.testnet.transaction!, hash: `0x${"ef".repeat(32)}` as Hash };
+    await expect(reconcileVenusTestnetNativeSupply(fetchedHashSubmission, fetchedHash.testnet)).rejects.toThrow("hashes do not match");
+
+    const reorged = dependencies();
+    const reorgedSubmission = (await signed(reorged)).submission;
+    reorged.testnet.canonicalBlockHash = `0x${"01".repeat(32)}` as Hash;
+    await expect(reconcileVenusTestnetNativeSupply(reorgedSubmission, reorged.testnet)).rejects.toThrow("not canonical");
+
+    const snapshotMismatch = dependencies();
+    const snapshotMismatchSubmission = (await signed(snapshotMismatch)).submission;
+    snapshotMismatch.testnet.getAccountSnapshot = async (_vToken, _account, blockNumber) => [
+      0n,
+      blockNumber === 100n ? snapshotMismatch.testnet.balanceAfter + 1n : snapshotMismatch.testnet.balanceBefore,
+      0n,
+      20_000_000_000_000_000_000_000_000n,
+    ] as const;
+    await expect(reconcileVenusTestnetNativeSupply(snapshotMismatchSubmission, snapshotMismatch.testnet)).rejects.toThrow("snapshot balance mismatch");
+
+    const snapshotError = dependencies();
+    const snapshotErrorSubmission = (await signed(snapshotError)).submission;
+    snapshotError.testnet.getAccountSnapshot = async (_vToken, _account, blockNumber) => [
+      blockNumber === 99n ? 1n : 0n,
+      blockNumber === 100n ? snapshotError.testnet.balanceAfter : snapshotError.testnet.balanceBefore,
+      0n,
+      20_000_000_000_000_000_000_000_000n,
+    ] as const;
+    await expect(reconcileVenusTestnetNativeSupply(snapshotErrorSubmission, snapshotError.testnet)).rejects.toThrow("non-zero error code");
   });
 });

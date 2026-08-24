@@ -168,7 +168,7 @@ async function broadcast(args: ReturnType<typeof parsedArguments>): Promise<void
     if (!args.flags.has("--identical-raw-retry")) throw new Error("Existing submissions require --identical-raw-retry");
     if (args.values.has("--intent") || args.values.has("--submission-out")) throw new Error("Identical retry accepts only the existing submission");
     const submission = VenusTestnetNativeSupplySubmissionSchema.parse(await readJson(existingSubmissionPath));
-    const transactionHash = await broadcastIdenticalVenusSubmission(submission, dependencies.testnet);
+    const transactionHash = await broadcastIdenticalVenusSubmission(submission, dependencies);
     process.stdout.write(`${JSON.stringify({ state: "IDENTICAL_RAW_TRANSACTION_SENT", transactionHash })}\n`);
     return;
   }
@@ -185,7 +185,7 @@ async function broadcast(args: ReturnType<typeof parsedArguments>): Promise<void
     args.values.get("--submission-out") ?? ".state/venus-testnet-native-supply-submission.json",
     submission,
   );
-  const transactionHash = await broadcastIdenticalVenusSubmission(submission, dependencies.testnet);
+  const transactionHash = await broadcastIdenticalVenusSubmission(submission, dependencies);
   process.stdout.write(`${JSON.stringify({ state: "RAW_TRANSACTION_SENT", transactionHash, submissionPath })}\n`);
 }
 
