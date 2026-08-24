@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const config = resolve(root, "dist/server/wrangler.local.json");
+const wrangler = resolve(root, "node_modules/.bin/wrangler");
 const boundedGridFixture = JSON.parse(
   await readFile(resolve(root, "fixtures/bounded-grid/bnb-usdt-grid.v1.json"), "utf8"),
 );
@@ -36,6 +37,26 @@ function finiteDate(milliseconds, label) {
   const date = new Date(milliseconds);
   assert(Number.isFinite(date.getTime()), `${label} date is invalid`);
   return date;
+}
+
+function normalizeLoopbackUrlOrigins(value) {
+  if (Array.isArray(value)) return value.map(normalizeLoopbackUrlOrigins);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, normalizeLoopbackUrlOrigins(child)]),
+    );
+  }
+  if (typeof value !== "string") return value;
+  try {
+    const url = new URL(value);
+    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") return value;
+    url.protocol = "https:";
+    url.hostname = "positioncrew.test";
+    url.port = "";
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
 
 function adversarialGridHire(idempotencyKey) {
@@ -92,7 +113,6 @@ async function waitForWorker(baseUrl) {
 
 async function startWorker(port, entryNow = testNow, checkpointNow = null) {
   const args = [
-    "wrangler",
     "dev",
     "--local",
     "--config",
@@ -113,7 +133,7 @@ async function startWorker(port, entryNow = testNow, checkpointNow = null) {
     );
   }
   const child = spawn(
-    "npx",
+    wrangler,
     args,
     { cwd: root, stdio: "ignore" },
   );
@@ -122,12 +142,19 @@ async function startWorker(port, entryNow = testNow, checkpointNow = null) {
 }
 
 async function stopWorker(child) {
-  if (child.exitCode !== null) return;
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolvePromise) => child.once("exit", () => resolvePromise(true)));
   child.kill("SIGTERM");
-  await new Promise((resolvePromise) => {
-    child.once("exit", resolvePromise);
-    setTimeout(resolvePromise, 2_000);
-  });
+  const stopped = await Promise.race([
+    exited,
+    new Promise((resolvePromise) => {
+      const timer = setTimeout(() => resolvePromise(false), 5_000);
+      timer.unref();
+    }),
+  ]);
+  if (stopped) return;
+  child.kill("SIGKILL");
+  await exited;
 }
 
 async function requestJson(baseUrl, path, init) {
@@ -177,8 +204,8 @@ try {
     { cwd: root, stdio: "ignore" },
   );
 
-  const port = await availablePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
+  let port = await availablePort();
+  let baseUrl = `http://127.0.0.1:${port}`;
   worker = await startWorker(port);
 
   const unauthorized = await requestJson(
@@ -291,6 +318,8 @@ try {
   );
 
   await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
   worker = await startWorker(port);
 
   const summaryAfterRestart = await requestJson(
@@ -302,7 +331,10 @@ try {
   assert(Number.isFinite(Date.parse(summaryAfterRestart.body.generatedAt)));
   const { generatedAt: _summaryBeforeGeneratedAt, ...summaryBeforeDurable } = summaryBeforeRestart.body;
   const { generatedAt: _summaryAfterGeneratedAt, ...summaryAfterDurable } = summaryAfterRestart.body;
-  assert.deepEqual(summaryAfterDurable, summaryBeforeDurable);
+  assert.deepEqual(
+    normalizeLoopbackUrlOrigins(summaryAfterDurable),
+    normalizeLoopbackUrlOrigins(summaryBeforeDurable),
+  );
 
   const windowAfterRestart = await requestJson(
     baseUrl,
@@ -313,7 +345,10 @@ try {
   assert(Number.isFinite(Date.parse(windowAfterRestart.body.generatedAt)));
   const { generatedAt: _windowBeforeGeneratedAt, ...windowBeforeDurable } = windowBeforeRestart.body;
   const { generatedAt: _windowAfterGeneratedAt, ...windowAfterDurable } = windowAfterRestart.body;
-  assert.deepEqual(windowAfterDurable, windowBeforeDurable);
+  assert.deepEqual(
+    normalizeLoopbackUrlOrigins(windowAfterDurable),
+    normalizeLoopbackUrlOrigins(windowBeforeDurable),
+  );
 
   const epochStartedAt = Date.parse(windowAfterRestart.body.window.startedAt);
   assert(Number.isFinite(epochStartedAt), "Public window startedAt is invalid");
@@ -328,6 +363,8 @@ try {
   );
 
   await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
   worker = await startWorker(port, beforeSampleGrace, afterSampleGrace);
   const lateSampleTick = await requestJson(
     baseUrl,
@@ -368,6 +405,8 @@ try {
   const cutoffRunId = shadowGridRunId(beforeOpeningCutoff);
 
   await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
   worker = await startWorker(port, beforeOpeningCutoff, afterOpeningCutoff);
   const cutoffTick = await requestJson(
     baseUrl,
