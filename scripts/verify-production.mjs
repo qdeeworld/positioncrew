@@ -455,6 +455,10 @@ try {
     new URL(marketplace.externalComparisonSnapshotUrl).origin === baseUrl.origin,
     "Marketplace external comparison snapshot is not canonical",
   );
+  assert(
+    new URL(marketplace.venusTestnetNativeSupplyEvidenceUrl).origin === baseUrl.origin,
+    "Marketplace Venus testnet supply evidence is not canonical",
+  );
   const externalComparisons = await fetchJson(
     "external-comparison-snapshot",
     marketplace.externalComparisonSnapshotUrl,
@@ -487,6 +491,57 @@ try {
     snapshotId: externalComparisons.snapshotId,
     snapshotHash: externalComparisons.snapshotHash,
     candidateCount: externalComparisons.candidates.length,
+  };
+
+  const venusNativeSupplyEvidence = await fetchJson(
+    "venus-testnet-native-supply-evidence",
+    marketplace.venusTestnetNativeSupplyEvidenceUrl,
+  );
+  assert(
+    venusNativeSupplyEvidence.schemaVersion === "positioncrew.venus-testnet-native-supply-receipt.v1",
+    "Unexpected Venus testnet native-supply evidence schema",
+  );
+  const venusArtifactCommitmentBody = {
+    ...venusNativeSupplyEvidence,
+    commitments: {
+      normalizedReceiptHash: venusNativeSupplyEvidence.commitments?.normalizedReceiptHash,
+    },
+  };
+  assert(
+    canonicalSha256(venusArtifactCommitmentBody) === venusNativeSupplyEvidence.commitments?.artifactHash &&
+      venusNativeSupplyEvidence.commitments.artifactHash === "sha256:cc1239e1932aac886eee9365303f65f4903991389bdd73b507c9ba3108988976",
+    "Venus testnet native-supply artifact commitment is invalid",
+  );
+  assert(
+    venusNativeSupplyEvidence.relationship === "FOUNDER_CONTROLLED_TESTNET_ACTION" &&
+      venusNativeSupplyEvidence.network?.chainId === 97 &&
+      venusNativeSupplyEvidence.intent?.transaction?.amountTbnb === "0.0001" &&
+      venusNativeSupplyEvidence.intent?.transaction?.valueWei === "100000000000000" &&
+      venusNativeSupplyEvidence.actor?.externalBuyer === false &&
+      venusNativeSupplyEvidence.intent?.preflight?.mainnetIsolation?.nativeBalanceWei === "0" &&
+      venusNativeSupplyEvidence.intent?.preflight?.mainnetIsolation?.pendingNonce === "0",
+    "Venus testnet native-supply evidence overstates its execution boundary",
+  );
+  assert(
+    venusNativeSupplyEvidence.transaction?.hash === "0xf2b4a8790ff7f81fc832a365d89eb84f0554d2242c45faa886ba6819acb1773b",
+    "Venus testnet native-supply transaction changed",
+  );
+  const serializedVenusEvidence = JSON.stringify(venusNativeSupplyEvidence);
+  assert(
+    !/rawTransaction|private[-_ ]?key|password|keystore|mnemonic|seed[-_ ]?phrase|\/Users\/|\/home\/|\/root\//i.test(serializedVenusEvidence),
+    "Venus testnet native-supply publication contains private or local material",
+  );
+  assert(
+    marketplace.claims?.venusTestnetNativeSupply?.includes("no mainnet funds") &&
+      marketplace.claims.venusTestnetNativeSupply.includes("external buyer") &&
+      marketplace.claims.venusTestnetNativeSupply.includes("marketplace demand") &&
+      marketplace.claims.venusTestnetNativeSupply.includes("financial performance"),
+    "Marketplace Venus testnet supply claim boundary is incomplete",
+  );
+  report.venusTestnetNativeSupplyEvidence = {
+    transactionHash: venusNativeSupplyEvidence.transaction.hash,
+    artifactHash: venusNativeSupplyEvidence.commitments.artifactHash,
+    amountTbnb: venusNativeSupplyEvidence.intent.transaction.amountTbnb,
   };
 
   const aacpReadiness = await fetchJson(
@@ -1185,6 +1240,11 @@ try {
       "/api/evidence/external-comparisons/2026-08-24",
       "get",
       "getExternalComparisonSnapshot",
+    ],
+    [
+      "/api/evidence/venus-testnet-native-supply/2026-08-24",
+      "get",
+      "getVenusTestnetNativeSupplyEvidence",
     ],
     ["/api/status", "get", "getSystemTelemetry"],
     ["/api/commerce/aacp", "get", "getAacpProductionReadiness"],

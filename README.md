@@ -104,6 +104,7 @@ The local Cloudflare-compatible worker serves the application on `http://127.0.0
 - `GET /api/providers` for the provider catalog;
 - `GET /.well-known/positioncrew.json` for the marketplace discovery manifest;
 - `GET /openapi.json` for the four-provider OpenAPI 3.1 contract;
+- `GET /api/evidence/venus-testnet-native-supply/2026-08-24` for one immutable, founder-controlled Venus BSC Testnet supply receipt using exactly `0.0001 tBNB`;
 - `GET /api/providers/:provider/manifest` for a self-contained provider transport and claim boundary;
 - `GET /api/schemas/:schemaVersion` for exact request or deliverable JSON Schema;
 - `GET /api/status` for block-pinned BSC, PancakeSwap, Venus, and integration-boundary telemetry;
@@ -170,5 +171,7 @@ Offline role-specific handoff tools reduce procedural errors without weakening t
 - React provides the buyer marketplace and job workspace without duplicating decision logic in the browser.
 
 ## Claim boundary
+
+The optional Venus native-supply receipt proves one bounded `0.0001 tBNB` action by the disclosed operator on BSC Testnet. It proves no mainnet funds, external buyer, revenue, autonomous custody, strategy return, repeated track record, marketplace demand, or financial performance, and it is not a performance claim.
 
 The browser workspace remains an in-memory conformance rail and does not submit a buyer's wallet transaction. Its no-wallet provider trial collects no token; the displayed `5 TEST_USDC` is a listed testnet price, not trial revenue. The Venus and PancakeSwap builders read block-pinned public state, but their embedded requests and provider outputs remain unsigned and must be revalidated before execution. Venus APYs are variable base rates derived from per-block rates and measured block time; they exclude incentives and do not remove stablecoin depeg risk. Pancake active liquidity is a current virtual-liquidity estimate from `slot0` and the pool's active `liquidity`, not a fill guarantee across future ticks; the grid's cycle count is an explicit assumption. LP collectible fees come from a read-only `collect` simulation, and the displayed 24-hour volume and fee values are extrapolated run rates from an exact recent swap window rather than guaranteed future activity. Other interactive jobs validate caller-supplied scenario observations against the current request clock. Locked jobs reproduce historical fixtures and public receipts but are not presented as current instructions. Separately, the public ERC-8183 ledger proves seven operator-controlled BSC Testnet lifecycles, including six funded completions; it does not prove external demand or revenue. The scheduled operating record measures production verification, not demand, financial performance, mainnet execution, or Agent Advantage. The production AACP endpoint verifies current protocol deployment and PositionCrew onboarding state; it does not prove a minted production Agent NFT, published listing, paid order, settlement, revenue, reputation, or external demand. No provisional ABI, undocumented write route, external-provider track record, or incomplete blind benchmark is represented as production evidence.

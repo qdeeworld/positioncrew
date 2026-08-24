@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "positioncrew.venus-testnet-native-supply-receipt.v1",
+  "evidenceId": "venus-bsc-testnet-native-supply-1",
+  "completedAt": "2026-08-24T07:43:20.153Z",
+  "relationship": "FOUNDER_CONTROLLED_TESTNET_ACTION",
+  "network": {
+    "name": "BSC Testnet",
+    "chainId": 97,
+    "receiptBlockNumber": "126912422",
+    "receiptBlockHash": "0xce2b0cebaba6277313fe00d8c89f06a395476d46a4d36ed0ff05b42f0c25755e",
+    "finalityObservationBlockNumber": "126913276",
+    "confirmationsObserved": 855,
+    "explorerUrl": "https://testnet.bscscan.com/tx/0xf2b4a8790ff7f81fc832a365d89eb84f0554d2242c45faa886ba6819acb1773b"
+  },
+  "protocol": {
+    "name": "Venus Core Pool",
+    "marketSymbol": "vBNB",
+    "vTokenAddress": "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c",
+    "comptrollerAddress": "0x94d1820b2D1c7c7452A163983Dc888CEC546b77D",
+    "sourceCommit": "2ef5ebeff8062bbc8b6cfcda67c2c176299373c0",
+    "sourceUrls": [
+      "https://github.com/VenusProtocol/venus-protocol/blob/2ef5ebeff8062bbc8b6cfcda67c2c176299373c0/deployments/bsctestnet/vBNB.json",
+      "https://github.com/VenusProtocol/venus-protocol/blob/2ef5ebeff8062bbc8b6cfcda67c2c176299373c0/deployments/bsctestnet/Unitroller.json",
+      "https://github.com/VenusProtocol/venus-protocol/blob/2ef5ebeff8062bbc8b6cfcda67c2c176299373c0/contracts/Tokens/VTokens/VBNB.sol"
+    ],
+    "vTokenRuntimeCodeHash": "0xcc20f27bd25a7af8587849a15291244e3aa8018a01cb81ef15e6fd1b78f85ac1",
+    "comptrollerRuntimeCodeHash": "0x4b4e586288eed4781d5ccd0ff329746c38ed2c4bfd4472c1986f5bf663ad0ba0"
+  },
+  "actor": {
+    "wallet": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+    "role": "FOUNDER_CONTROLLED_TESTNET_WALLET",
+    "externalBuyer": false
+  },
+  "intent": {
+    "schemaVersion": "positioncrew.venus-testnet-native-supply-intent.v1",
+    "operationId": "4e60a529-222d-46f5-a9e2-c751af7e54b3",
+    "createdAt": "2026-08-24T07:35:52.072Z",
+    "expiresAt": "2026-08-24T07:45:52.072Z",
+    "chainId": 97,
+    "actor": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+    "protocol": {
+      "vTokenAddress": "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c",
+      "comptrollerAddress": "0x94d1820b2D1c7c7452A163983Dc888CEC546b77D",
+      "vTokenRuntimeCodeHash": "0xcc20f27bd25a7af8587849a15291244e3aa8018a01cb81ef15e6fd1b78f85ac1",
+      "comptrollerRuntimeCodeHash": "0x4b4e586288eed4781d5ccd0ff329746c38ed2c4bfd4472c1986f5bf663ad0ba0",
+      "sourceCommit": "2ef5ebeff8062bbc8b6cfcda67c2c176299373c0",
+      "sourceUrls": [
+        "https://github.com/VenusProtocol/venus-protocol/blob/2ef5ebeff8062bbc8b6cfcda67c2c176299373c0/deployments/bsctestnet/vBNB.json",
+        "https://github.com/VenusProtocol/venus-protocol/blob/2ef5ebeff8062bbc8b6cfcda67c2c176299373c0/deployments/bsctestnet/Unitroller.json",
+        "https://github.com/VenusProtocol/venus-protocol/blob/2ef5ebeff8062bbc8b6cfcda67c2c176299373c0/contracts/Tokens/VTokens/VBNB.sol"
+      ]
+    },
+    "transaction": {
+      "type": "legacy",
+      "chainId": 97,
+      "from": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+      "to": "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c",
+      "data": "0x1249c58b",
+      "amountTbnb": "0.0001",
+      "valueWei": "100000000000000",
+      "nonce": "24",
+      "gasLimit": "241814",
+      "gasPriceWei": "100000000",
+      "maxGasCostWei": "100000000000000"
+    },
+    "preflight": {
+      "observedAt": "2026-08-24T07:35:52.072Z",
+      "blockNumber": "126912280",
+      "nativeBalanceWei": "5888932000000000",
+      "vTokenBalanceRaw": "0",
+      "accountSnapshot": {
+        "errorCode": "0",
+        "vTokenBalanceRaw": "0",
+        "borrowBalanceRaw": "0",
+        "exchangeRateMantissa": "10150554274773356900746752309"
+      },
+      "marketListed": true,
+      "venusMarket": true,
+      "comptrollerMatches": true,
+      "simulationPassed": true,
+      "mainnetIsolation": {
+        "observedAt": "2026-08-24T07:35:52.072Z",
+        "chainId": 56,
+        "nativeBalanceWei": "0",
+        "pendingNonce": "0"
+      },
+      "preflightHash": "sha256:cf7dbc0c79890b42502cc2b025cdd70252f0f8f5ee7885973952aac53667d0db"
+    },
+    "intentHash": "sha256:e4a2796086e2b0847ccf22d9289712af1004158389a774912d2a601d24ef3591"
+  },
+  "transaction": {
+    "hash": "0xf2b4a8790ff7f81fc832a365d89eb84f0554d2242c45faa886ba6819acb1773b",
+    "chainId": 97,
+    "type": "legacy",
+    "blockNumber": "126912422",
+    "blockHash": "0xce2b0cebaba6277313fe00d8c89f06a395476d46a4d36ed0ff05b42f0c25755e",
+    "from": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+    "to": "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c",
+    "input": "0x1249c58b",
+    "valueWei": "100000000000000",
+    "nonce": "24",
+    "gasLimit": "241814",
+    "gasPriceWei": "100000000",
+    "status": "SUCCESS",
+    "gasUsed": "195302",
+    "effectiveGasPriceWei": "100000000",
+    "transactionCostWei": "19530200000000",
+    "explorerUrl": "https://testnet.bscscan.com/tx/0xf2b4a8790ff7f81fc832a365d89eb84f0554d2242c45faa886ba6819acb1773b"
+  },
+  "proof": {
+    "previousBlockNumber": "126912421",
+    "mintEvent": {
+      "minter": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+      "mintAmountWei": "100000000000000",
+      "mintTokensRaw": "9816",
+      "logIndex": 2
+    },
+    "transferEvent": {
+      "from": "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c",
+      "to": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+      "amountRaw": "9816",
+      "logIndex": 3
+    },
+    "vTokenBalanceBeforeRaw": "0",
+    "vTokenBalanceAfterRaw": "9816",
+    "vTokenBalanceDeltaRaw": "9816",
+    "accountSnapshotBefore": {
+      "errorCode": "0",
+      "vTokenBalanceRaw": "0",
+      "borrowBalanceRaw": "0",
+      "exchangeRateMantissa": "10150554274773356900746752309"
+    },
+    "accountSnapshotAfter": {
+      "errorCode": "0",
+      "vTokenBalanceRaw": "9816",
+      "borrowBalanceRaw": "0",
+      "exchangeRateMantissa": "10186946920510640145624614017"
+    },
+    "proofHash": "sha256:3b7ae520afd9c966f93ca0c6b25d511df55122687a2be3d73be2c1c8b9330242"
+  },
+  "commitments": {
+    "normalizedReceiptHash": "sha256:e969192347a9acf292a032c553fc818ada922c70c45b42b04692fccf416acbb7",
+    "artifactHash": "sha256:cc1239e1932aac886eee9365303f65f4903991389bdd73b507c9ba3108988976"
+  },
+  "claimBoundary": [
+    "This is one founder-controlled BSC Testnet native tBNB supply into the Venus Core Pool, not a BSC mainnet action.",
+    "Testnet tBNB and vBNB are not represented as revenue, paid value, or financial performance.",
+    "The receipt proves one successful mint to the named operator wallet; it does not prove an external buyer, marketplace hire, settlement, or autonomous execution.",
+    "No collateral enablement, borrow, leverage, redemption, rescue, or withdrawal is performed by this action.",
+    "This point-in-time receipt does not guarantee future Venus availability, yield, safety, or repeated execution."
+  ]
+}

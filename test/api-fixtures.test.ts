@@ -19,6 +19,10 @@ import {
   EXTERNAL_COMPARISON_SNAPSHOT_ROUTE,
 } from "../src/marketplace/external-comparisons.js";
 import {
+  VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE,
+  VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
+} from "../src/commerce/venus-testnet-native-supply-publication.js";
+import {
   buildMarketplaceManifest,
   buildOpenApiDocument,
   buildProviderManifest,
@@ -216,18 +220,26 @@ describe("public fixture job boundary", () => {
       schemaVersion: "positioncrew.marketplace-manifest.v1",
       aacpReadinessUrl: `${origin}/api/commerce/aacp`,
       externalComparisonSnapshotUrl: `${origin}${EXTERNAL_COMPARISON_SNAPSHOT_ROUTE}`,
+      venusTestnetNativeSupplyEvidenceUrl: `${origin}${VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE}`,
       claims: {
         categoryCoverage: "4_OF_4",
         providerIdentity: "ERC8004_BSC_TESTNET_VERIFIED",
         judgeTrial: "NO_WALLET_PROVIDER_CALL",
         aacp: "PRODUCTION_RUNTIME_PENDING",
+        venusTestnetNativeSupply: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
       },
     });
     expect(openApi).toMatchObject({ openapi: "3.1.0", servers: [{ url: origin }] });
-    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(19);
+    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(20);
     expect(openApi.paths).toMatchObject({
       [EXTERNAL_COMPARISON_SNAPSHOT_ROUTE]: {
         get: { operationId: "getExternalComparisonSnapshot" },
+      },
+      [VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE]: {
+        get: {
+          operationId: "getVenusTestnetNativeSupplyEvidence",
+          description: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
+        },
       },
       "/api/status": { get: { operationId: "getSystemTelemetry" } },
       "/api/operations/production": {
@@ -257,6 +269,7 @@ describe("public fixture job boundary", () => {
       },
     });
     expect(Object.keys((openApi.paths as Record<string, object>)[EXTERNAL_COMPARISON_SNAPSHOT_ROUTE] ?? {})).toEqual(["get"]);
+    expect(Object.keys((openApi.paths as Record<string, object>)[VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE] ?? {})).toEqual(["get"]);
     expect(
       ((openApi.paths as Record<string, { post: { requestBody: { content: { "application/json": { schema: { properties: { mode: { default: string } } } } } } } }>)[provider.endpoint]
         ?.post.requestBody.content["application/json"].schema.properties.mode.default),
