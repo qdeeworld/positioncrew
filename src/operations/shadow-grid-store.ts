@@ -186,22 +186,29 @@ const SHADOW_GRID_GUARD_STATEMENTS = [
     "first_event.deliverable_hash IS NOT NEW.deliverable_hash OR first_event.evaluation_hash IS NOT NEW.evaluation_hash",
     ")) THEN RAISE(ABORT, 'shadow grid run invariants cannot change') END; END",
   ].join(" "),
-  [
-    "CREATE TRIGGER IF NOT EXISTS shadow_grid_events_validate_transition BEFORE INSERT ON shadow_grid_events",
-    "WHEN EXISTS (SELECT 1 FROM shadow_grid_events WHERE run_id = NEW.run_id) BEGIN",
-    "SELECT CASE WHEN NOT (",
-    "((SELECT event_type FROM shadow_grid_events WHERE run_id = NEW.run_id ORDER BY event_sequence DESC LIMIT 1) = 'EPOCH_STARTED' AND NEW.event_type = 'PRECOMMITTED') OR",
-    "((SELECT event_type FROM shadow_grid_events WHERE run_id = NEW.run_id ORDER BY event_sequence DESC LIMIT 1) = 'PRECOMMITTED' AND NEW.event_type IN ('REFUSED', 'OBSERVED', 'VOID_SOURCE_GAP')) OR",
-    "((SELECT event_type FROM shadow_grid_events WHERE run_id = NEW.run_id ORDER BY event_sequence DESC LIMIT 1) IN ('OBSERVED', 'SHADOW_FILL')",
-    "AND NEW.event_type IN ('OBSERVED', 'SHADOW_FILL', 'CLOSED', 'VOID_SOURCE_GAP', 'RISK_EXIT'))",
-    ") THEN RAISE(ABORT, 'invalid shadow grid lifecycle transition') END; END",
-  ].join(" "),
 ] as const;
 
+const SHADOW_GRID_TRANSITION_TRIGGER_V2 = [
+  "CREATE TRIGGER IF NOT EXISTS shadow_grid_events_validate_transition_v2 BEFORE INSERT ON shadow_grid_events",
+  "WHEN EXISTS (SELECT 1 FROM shadow_grid_events WHERE run_id = NEW.run_id) BEGIN",
+  "SELECT CASE WHEN NOT (",
+  "((SELECT event_type FROM shadow_grid_events WHERE run_id = NEW.run_id ORDER BY event_sequence DESC LIMIT 1) = 'EPOCH_STARTED' AND NEW.event_type IN ('PRECOMMITTED', 'VOID_SOURCE_GAP')) OR",
+  "((SELECT event_type FROM shadow_grid_events WHERE run_id = NEW.run_id ORDER BY event_sequence DESC LIMIT 1) = 'PRECOMMITTED' AND NEW.event_type IN ('REFUSED', 'OBSERVED', 'VOID_SOURCE_GAP')) OR",
+  "((SELECT event_type FROM shadow_grid_events WHERE run_id = NEW.run_id ORDER BY event_sequence DESC LIMIT 1) IN ('OBSERVED', 'SHADOW_FILL')",
+  "AND NEW.event_type IN ('OBSERVED', 'SHADOW_FILL', 'CLOSED', 'VOID_SOURCE_GAP', 'RISK_EXIT'))",
+  ") THEN RAISE(ABORT, 'invalid shadow grid lifecycle transition') END; END",
+].join(" ");
+
 export async function ensureShadowGridAppendOnlyGuards(db: D1Database): Promise<void> {
-  for (const sql of SHADOW_GRID_GUARD_STATEMENTS) {
-    const result = await db.prepare(sql).run();
-    if (!result.success) throw new Error(result.error ?? "D1 did not install a shadow-grid append-only guard");
+  const results = await db.batch([
+    ...SHADOW_GRID_GUARD_STATEMENTS.map((sql) => db.prepare(sql)),
+    db.prepare("DROP TRIGGER IF EXISTS shadow_grid_events_validate_transition"),
+    db.prepare(SHADOW_GRID_TRANSITION_TRIGGER_V2),
+  ]);
+  for (const result of results) {
+    if (!result.success) {
+      throw new Error(result.error ?? "D1 did not install a shadow-grid append-only guard");
+    }
   }
 }
 
@@ -290,6 +297,21 @@ export class ShadowGridLedgerStore {
       "SELECT * FROM shadow_grid_events WHERE event_type = 'EPOCH_STARTED' ORDER BY recorded_at DESC, event_id DESC LIMIT ?",
     ).bind(limit)).all<ShadowGridEventRow>();
     if (!result.success) throw new Error(result.error ?? "D1 shadow-grid epoch read failed");
+    return result.results.map(rowToEvent);
+  }
+
+  async listOldestNonterminalEpochs(limit = 50): Promise<readonly ShadowGridEvent[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error("Shadow-grid cleanup limit must be between 1 and 500");
+    }
+    const result = await queryable(this.db.prepare([
+      "SELECT epoch.* FROM shadow_grid_events epoch",
+      "WHERE epoch.event_type = 'EPOCH_STARTED' AND NOT EXISTS (",
+      "SELECT 1 FROM shadow_grid_events terminal WHERE terminal.run_id = epoch.run_id",
+      "AND terminal.event_type IN ('REFUSED', 'CLOSED', 'VOID_SOURCE_GAP', 'RISK_EXIT')",
+      ") ORDER BY epoch.epoch_started_at ASC, epoch.event_id ASC LIMIT ?",
+    ].join(" ")).bind(limit)).all<ShadowGridEventRow>();
+    if (!result.success) throw new Error(result.error ?? "D1 nonterminal shadow-grid epoch read failed");
     return result.results.map(rowToEvent);
   }
 

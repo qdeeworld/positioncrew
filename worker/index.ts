@@ -147,10 +147,15 @@ const API_HEADERS = {
 
 const CANONICAL_PRODUCT_ORIGIN = "https://positioncrew.dolepee.com";
 const MAX_FRESH_MARKETPLACE_REQUEST_BYTES = 32_768;
-const SHADOW_GRID_WORKFLOW_PATH = ".github/workflows/bounded-grid-shadow-ledger.yml";
+const SHADOW_GRID_WORKFLOW_PATH = ".github/workflows/production-smoke.yml";
+// Historical provenance accepted only for terminal abandoned-run cleanup.
+const SHADOW_GRID_LEGACY_WORKFLOW_PATH = ".github/workflows/bounded-grid-shadow-ledger.yml";
+const SHADOW_GRID_EXPECTED_RUN_HEADER = "X-PositionCrew-Shadow-Run-Id";
+const SHADOW_GRID_RUN_ID_PATTERN = /^bg-\d{8}-\d{2}$/;
+const SHADOW_GRID_ABANDONED_CLEANUP_LIMIT = 50;
 const SHADOW_GRID_SAMPLE_GRACE_MILLISECONDS = 3 * 60_000;
 const SHADOW_GRID_SAMPLE_EARLY_TOLERANCE_MILLISECONDS = 90_000;
-const SHADOW_GRID_OPENING_CUTOFF_MINUTE = 38;
+const SHADOW_GRID_OPENING_CUTOFF_MINUTE = 44;
 const SHADOW_GRID_SOURCE_RETRY_DELAYS_MILLISECONDS = [0, 3_000, 9_000] as const;
 
 function isAllowedMutationOrigin(request: Request): boolean {
@@ -316,13 +321,15 @@ function scheduleEvidence(request: Request, now: Date): ShadowGridScheduleEviden
   const runAttempt = request.headers.get("X-GitHub-Run-Attempt");
   const headSha = request.headers.get("X-GitHub-Sha");
   const workflowRef = request.headers.get("X-GitHub-Workflow-Ref");
+  const currentWorkflowRef =
+    `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`;
   if (
     event !== "schedule" ||
     repository !== "dolepee/positioncrew" ||
     !runId || !/^\d+$/.test(runId) ||
-    !runAttempt || !/^\d+$/.test(runAttempt) ||
+    runAttempt !== "1" ||
     !headSha || !/^[a-f0-9]{40}$/i.test(headSha) ||
-    !workflowRef || !workflowRef.startsWith(`dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@`)
+    workflowRef !== currentWorkflowRef
   ) {
     throw new FreshMarketplaceRequestError(
       400,
@@ -337,7 +344,7 @@ function scheduleEvidence(request: Request, now: Date): ShadowGridScheduleEviden
     runId,
     runAttempt,
     headSha: headSha.toLowerCase(),
-    workflowRef,
+    workflowRef: currentWorkflowRef,
     recordedAt: now.toISOString(),
   };
 }
@@ -461,24 +468,99 @@ async function appendShadowGridRunEvent(
   return [...events, persisted.event];
 }
 
-function scheduleFromShadowGridGenesis(
+type StoredShadowGridScheduleEvidence = Omit<ShadowGridScheduleEvidence, "workflowPath"> & {
+  workflowPath: typeof SHADOW_GRID_WORKFLOW_PATH | typeof SHADOW_GRID_LEGACY_WORKFLOW_PATH;
+};
+
+function isShadowGridRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function storedScheduleFromShadowGridGenesis(
   events: readonly ShadowGridEvent[],
-): ShadowGridScheduleEvidence {
+): StoredShadowGridScheduleEvidence {
   const genesis = events[0];
   if (!genesis || genesis.eventType !== "EPOCH_STARTED") {
     throw new Error("Shadow-grid initialization requires an EPOCH_STARTED event");
   }
   const payload = parseShadowGridEvent(genesis).payload;
-  const schedule = payload.schedule as ShadowGridScheduleEvidence | undefined;
+  const schedule = payload.schedule;
   if (
-    !schedule ||
+    !isShadowGridRecord(schedule) ||
     schedule.event !== "schedule" ||
     schedule.repository !== "dolepee/positioncrew" ||
-    schedule.workflowPath !== SHADOW_GRID_WORKFLOW_PATH
+    (schedule.workflowPath !== SHADOW_GRID_WORKFLOW_PATH &&
+      schedule.workflowPath !== SHADOW_GRID_LEGACY_WORKFLOW_PATH) ||
+    typeof schedule.runId !== "string" ||
+    !/^\d+$/.test(schedule.runId) ||
+    schedule.runAttempt !== "1" ||
+    typeof schedule.headSha !== "string" ||
+    !/^[a-f0-9]{40}$/i.test(schedule.headSha) ||
+    typeof schedule.workflowRef !== "string" ||
+    typeof schedule.recordedAt !== "string" ||
+    !Number.isFinite(Date.parse(schedule.recordedAt))
   ) {
     throw new Error("Shadow-grid genesis has no valid scheduled-workflow evidence");
   }
+  return {
+    event: "schedule",
+    repository: "dolepee/positioncrew",
+    workflowPath: schedule.workflowPath,
+    runId: schedule.runId,
+    runAttempt: "1",
+    headSha: schedule.headSha,
+    workflowRef: schedule.workflowRef,
+    recordedAt: schedule.recordedAt,
+  };
+}
+
+function scheduleFromShadowGridGenesis(
+  events: readonly ShadowGridEvent[],
+): ShadowGridScheduleEvidence {
+  const schedule = storedScheduleFromShadowGridGenesis(events);
+  if (
+    schedule.workflowPath !== SHADOW_GRID_WORKFLOW_PATH ||
+    schedule.workflowRef !==
+      `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
+  ) {
+    throw new Error("Shadow-grid genesis has no current scheduled-workflow evidence");
+  }
+  return { ...schedule, workflowPath: SHADOW_GRID_WORKFLOW_PATH };
+}
+
+function cleanupScheduleFromShadowGridGenesis(
+  events: readonly ShadowGridEvent[],
+): StoredShadowGridScheduleEvidence {
+  const schedule = storedScheduleFromShadowGridGenesis(events);
+  if (
+    schedule.workflowRef !==
+      `dolepee/positioncrew/${schedule.workflowPath}@refs/heads/main`
+  ) {
+    throw new Error("Shadow-grid cleanup genesis has no recognized scheduled-workflow provenance");
+  }
   return schedule;
+}
+
+function assertShadowGridScheduleBinding(
+  events: readonly ShadowGridEvent[],
+  incoming: ShadowGridScheduleEvidence,
+): void {
+  const committed = storedScheduleFromShadowGridGenesis(events);
+  if (
+    committed.event !== incoming.event ||
+    committed.repository !== incoming.repository ||
+    committed.workflowPath !== incoming.workflowPath ||
+    committed.runId !== incoming.runId ||
+    committed.runAttempt !== incoming.runAttempt ||
+    committed.headSha !== incoming.headSha ||
+    committed.workflowRef !== incoming.workflowRef
+  ) {
+    throw new FreshMarketplaceRequestError(
+      400,
+      "INVALID_JSON",
+      "Shadow-grid tick identity does not match the originating scheduled workflow",
+    );
+  }
 }
 
 function assertShadowGridHireBinding(
@@ -781,16 +863,25 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   if ((request.headers.get("Content-Length") ?? "0") !== "0") {
     return apiError(400, "CALLER_INPUT_PROHIBITED", ["Collector request bodies are prohibited."]);
   }
-  const expected = env.SHADOW_GRID_TICK_TOKEN;
+  const expectedToken = env.SHADOW_GRID_TICK_TOKEN;
   const supplied = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  if (!expected || !supplied || !(await constantTimeTokenMatch(supplied, expected))) {
+  if (!expectedToken || !supplied || !(await constantTimeTokenMatch(supplied, expectedToken))) {
     return apiError(401, "UNAUTHORIZED", ["A valid scheduler credential is required."]);
+  }
+  const expectedRunId = request.headers.get(SHADOW_GRID_EXPECTED_RUN_HEADER);
+  if (expectedRunId !== null && !SHADOW_GRID_RUN_ID_PATTERN.test(expectedRunId)) {
+    throw new FreshMarketplaceRequestError(
+      400,
+      "INVALID_JSON",
+      "Shadow-grid follow-up run ID must match bg-YYYYMMDD-HH",
+    );
   }
   await ensureShadowGridAppendOnlyGuards(env.DB);
   const now = shadowGridCollectorNow(request, env);
   const schedule = scheduleEvidence(request, now);
   const currentHour = new Date(now);
   currentHour.setUTCMinutes(0, 0, 0);
+  const currentRunId = shadowGridRunId(currentHour);
   const openingDeadline = currentHour.getTime() + SHADOW_GRID_OPENING_CUTOFF_MINUTE * 60_000;
   const previousHour = new Date(currentHour.getTime() - 60 * 60_000);
   const store = shadowGridStore(env);
@@ -803,23 +894,134 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
     status: "NOT_REQUIRED",
     error: null,
   };
-  const previousRun = await store.getRun(shadowGridRunId(previousHour));
-  if (previousRun.length > 0 && !shadowGridRunIsTerminal(previousRun)) {
+  const abandonedRunCleanup: {
+    status: "SKIPPED_EXPECTED_RUN" | "NOT_REQUIRED" | "PROCESSED" | "PARTIAL" | "FAILED";
+    batchLimit: number;
+    candidateCount: number;
+    examinedCount: number;
+    voidedCount: number;
+    failedCount: number;
+    deferredNonExpiredCount: number;
+    currentRunExcludedCount: number;
+    alreadyTerminalCount: number;
+    batchLimitReached: boolean;
+    truncated: boolean;
+    failures: Array<{ runId: string | null; error: string }>;
+  } = {
+    status: expectedRunId === null ? "NOT_REQUIRED" : "SKIPPED_EXPECTED_RUN",
+    batchLimit: SHADOW_GRID_ABANDONED_CLEANUP_LIMIT,
+    candidateCount: 0,
+    examinedCount: 0,
+    voidedCount: 0,
+    failedCount: 0,
+    deferredNonExpiredCount: 0,
+    currentRunExcludedCount: 0,
+    alreadyTerminalCount: 0,
+    batchLimitReached: false,
+    truncated: false,
+    failures: [],
+  };
+  if (expectedRunId === null) {
     try {
-      await processOpenShadowGridRun(env, previousRun, now, request);
-      previousHourCleanup = { ...previousHourCleanup, status: "PROCESSED" };
+      const discoveredCandidates = await store.listOldestNonterminalEpochs(
+        SHADOW_GRID_ABANDONED_CLEANUP_LIMIT + 1,
+      );
+      const candidates = discoveredCandidates.slice(0, SHADOW_GRID_ABANDONED_CLEANUP_LIMIT);
+      abandonedRunCleanup.candidateCount = candidates.length;
+      abandonedRunCleanup.batchLimitReached =
+        candidates.length === SHADOW_GRID_ABANDONED_CLEANUP_LIMIT;
+      abandonedRunCleanup.truncated =
+        discoveredCandidates.length > SHADOW_GRID_ABANDONED_CLEANUP_LIMIT;
+      for (const candidate of candidates) {
+        if (candidate.runId === currentRunId) {
+          abandonedRunCleanup.currentRunExcludedCount += 1;
+          continue;
+        }
+        abandonedRunCleanup.examinedCount += 1;
+        try {
+          const events = await store.getRun(candidate.runId);
+          if (events.length === 0 || shadowGridRunIsTerminal(events)) {
+            abandonedRunCleanup.alreadyTerminalCount += 1;
+            continue;
+          }
+          verifyShadowGridRun(events);
+          const originatingSchedule = cleanupScheduleFromShadowGridGenesis(events);
+          const observedSampleCount = events.filter(
+            (event) => event.eventType === "OBSERVED",
+          ).length;
+          const nextSampleDeadline = Date.parse(events[0]!.epochStartedAt) +
+            (observedSampleCount + 1) * 5 * 60_000 +
+            SHADOW_GRID_SAMPLE_GRACE_MILLISECONDS;
+          const horizonDeadline = Date.parse(events[0]!.horizonEndsAt) +
+            SHADOW_GRID_SAMPLE_GRACE_MILLISECONDS;
+          const abandonmentDeadline = Math.min(nextSampleDeadline, horizonDeadline);
+          if (!Number.isFinite(abandonmentDeadline)) {
+            throw new Error("Shadow-grid abandoned epoch has an invalid sampling deadline");
+          }
+          if (now.getTime() <= abandonmentDeadline) {
+            abandonedRunCleanup.deferredNonExpiredCount += 1;
+            continue;
+          }
+          const cleanupRecordedAt = shadowGridCollectorCheckpointNow(request, env);
+          if (cleanupRecordedAt.getTime() <= Date.parse(events.at(-1)!.recordedAt)) {
+            throw new Error("Shadow-grid cleanup checkpoint must advance beyond the persisted ledger head");
+          }
+          await voidShadowGridRun(
+            store,
+            events,
+            cleanupRecordedAt,
+            `Originating GitHub workflow run ${originatingSchedule.runId} ended before its next required forward sample; the abandoned epoch was voided without backfill or source sampling`,
+          );
+          abandonedRunCleanup.voidedCount += 1;
+          if (candidate.runId === previousHourCleanup.runId) {
+            previousHourCleanup = { ...previousHourCleanup, status: "PROCESSED" };
+          }
+        } catch (error) {
+          try {
+            const refreshed = await store.getRun(candidate.runId);
+            if (refreshed.length > 0 && shadowGridRunIsTerminal(refreshed)) {
+              abandonedRunCleanup.alreadyTerminalCount += 1;
+              continue;
+            }
+          } catch {
+            // Preserve the original cleanup failure below.
+          }
+          const message = error instanceof Error
+            ? error.message.slice(0, 240)
+            : "Unknown cleanup failure";
+          abandonedRunCleanup.failedCount += 1;
+          abandonedRunCleanup.failures.push({ runId: candidate.runId, error: message });
+          if (candidate.runId === previousHourCleanup.runId) {
+            previousHourCleanup = { ...previousHourCleanup, status: "FAILED", error: message };
+          }
+        }
+      }
     } catch (error) {
-      previousHourCleanup = {
-        ...previousHourCleanup,
-        status: "FAILED",
-        error: error instanceof Error ? error.message.slice(0, 240) : "Unknown cleanup failure",
-      };
+      const message = error instanceof Error
+        ? error.message.slice(0, 240)
+        : "Unknown cleanup enumeration failure";
+      abandonedRunCleanup.failedCount += 1;
+      abandonedRunCleanup.failures.push({ runId: null, error: message });
     }
+    abandonedRunCleanup.status = abandonedRunCleanup.failedCount > 0
+      ? abandonedRunCleanup.voidedCount > 0 ? "PARTIAL" : "FAILED"
+      : abandonedRunCleanup.voidedCount > 0 ? "PROCESSED" : "NOT_REQUIRED";
   }
-  const runId = shadowGridRunId(currentHour);
+  const runId = expectedRunId ?? currentRunId;
   let events = await store.getRun(runId);
+  if (expectedRunId !== null && events.length === 0) {
+    throw new FreshMarketplaceRequestError(
+      400,
+      "INVALID_JSON",
+      "Shadow-grid follow-up references an unknown originating run",
+    );
+  }
   const openingCheckpoint = shadowGridCollectorNow(request, env);
-  if (events.length === 0 && openingCheckpoint.getTime() >= openingDeadline) {
+  if (
+    expectedRunId === null &&
+    events.length === 0 &&
+    openingCheckpoint.getTime() >= openingDeadline
+  ) {
     return json({
       schemaVersion: "positioncrew.bounded-grid-forward-shadow-tick.v1",
       accepted: true,
@@ -828,7 +1030,10 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
       state: "LATE_START_SKIPPED",
       headHash: null,
       eventCount: 0,
+      epochStartedAt: null,
+      horizonEndsAt: null,
       previousHourCleanup,
+      abandonedRunCleanup,
       claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
     });
   }
@@ -843,12 +1048,17 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
         state: "LATE_START_SKIPPED",
         headHash: null,
         eventCount: 0,
+        epochStartedAt: null,
+        horizonEndsAt: null,
         previousHourCleanup,
+        abandonedRunCleanup,
         claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
       });
     }
     events = started.events;
+    assertShadowGridScheduleBinding(events, schedule);
   } else {
+    assertShadowGridScheduleBinding(events, schedule);
     events = await processOpenShadowGridRun(env, events, now, request);
   }
   const latest = events.at(-1);
@@ -861,7 +1071,10 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
     state: shadowGridRunState(events),
     headHash: latest.eventHash,
     eventCount: events.length,
+    epochStartedAt: latest.epochStartedAt,
+    horizonEndsAt: latest.horizonEndsAt,
     previousHourCleanup,
+    abandonedRunCleanup,
     claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
   });
 }
@@ -1402,7 +1615,7 @@ async function api(
     }
 
     if (url.pathname === "/api/internal/bounded-grid-forward-shadow/tick") {
-      return collectShadowGridTick(request, env, url);
+      return await collectShadowGridTick(request, env, url);
     }
 
     if (url.pathname === "/api/benchmarks/status") {

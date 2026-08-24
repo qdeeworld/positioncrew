@@ -95,12 +95,12 @@ function precommittedRun(ordinal = 1): StoredEvent[] {
       schedule: {
         event: "schedule",
         repository: "dolepee/positioncrew",
-        workflowPath: ".github/workflows/bounded-grid-shadow-ledger.yml",
+        workflowPath: ".github/workflows/production-smoke.yml",
         runId: String(10_000 + ordinal),
         runAttempt: "1",
         headSha: String(ordinal).padStart(40, "0"),
         workflowRef:
-          "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+          "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
         recordedAt: startedAt.toISOString(),
       },
       sourceHireId: runBinding.hireId,
@@ -186,6 +186,115 @@ describe("bounded-grid forward shadow evidence", () => {
     expect(() => verifyShadowGridRun(unlinked)).toThrow(/sequence|previous hash/u);
   });
 
+  it("accepts a genesis source-gap void once and preserves its terminal head", () => {
+    const runBinding = binding(91);
+    const startedAt = runBinding.epochStartedAt;
+    const genesis = append([], runBinding, "EPOCH_STARTED", startedAt, {
+      schedule: {
+        event: "schedule",
+        repository: "dolepee/positioncrew",
+        workflowPath: ".github/workflows/production-smoke.yml",
+        runId: "10991",
+        runAttempt: "1",
+        headSha: "9".repeat(40),
+        workflowRef:
+          "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+        recordedAt: startedAt,
+      },
+      method: "FORWARD_ONLY_ACTUAL_SAMPLES",
+      sampleCadenceMinutes: 5,
+      horizonMinutes: 15,
+      backfill: "PROHIBITED",
+      capitalMode: "ZERO_FUND_SHADOW",
+    });
+    const voided = append(
+      genesis,
+      runBinding,
+      "VOID_SOURCE_GAP",
+      new Date(Date.parse(startedAt) + 60_000).toISOString(),
+      {
+        reason: "Opening deadline elapsed before immutable precommitment",
+        observedSampleCount: 0,
+        netOutcomeUsd: null,
+        outcome: null,
+        repairedLater: false,
+      },
+    );
+
+    const terminalIntegrity = verifyShadowGridRun(voided);
+    expect(terminalIntegrity).toMatchObject({ valid: true });
+    expect(verifyShadowGridRun(voided)).toEqual(terminalIntegrity);
+
+    const projection = summarizeShadowGridRuns(
+      [voided],
+      ORIGIN,
+      new Date(Date.parse(startedAt) + 86_400_000),
+    );
+    expect(projection.status).toBe("COLLECTING");
+    expect(projection.maturity).toMatchObject({
+      terminalWindowCount: 1,
+      nonVoidRatePct: 0,
+      hashChainValid: true,
+      mature: false,
+    });
+    expect(projection.summary).toEqual({
+      openedWindowCount: 1,
+      precommittedWindowCount: 0,
+      initializationVoidWindowCount: 1,
+      precommittedTerminalWindowCount: 0,
+      terminalWindowCount: 1,
+      closedWindowCount: 0,
+      refusedWindowCount: 0,
+      voidWindowCount: 1,
+      riskExitWindowCount: 0,
+      positiveWindowCount: 0,
+      negativeWindowCount: 0,
+      simulatedNetOutcomeUsd: null,
+    });
+    expect(projection.summary.openedWindowCount).toBe(
+      projection.summary.precommittedWindowCount +
+        projection.summary.initializationVoidWindowCount,
+    );
+    expect(projection.summary.terminalWindowCount).toBe(
+      projection.summary.precommittedTerminalWindowCount +
+        projection.summary.initializationVoidWindowCount,
+    );
+    expect(projection.recentWindows).toHaveLength(1);
+    expect(projection.recentWindows[0]).toMatchObject({
+      windowId: runBinding.runId,
+      state: "VOID_SOURCE_GAP",
+      initializationState: "VOIDED_BEFORE_PRECOMMIT",
+      precommitPersisted: false,
+      sourceHireId: null,
+      sourceRequestHash: null,
+      sourceReceiptUrl: null,
+      sourceBlockNumber: null,
+      startedAt,
+      terminalAt: voided.at(-1)!.recordedAt,
+      sampledCrossings: 0,
+      simulatedNetOutcomeUsd: null,
+      eventHash: voided.at(-1)!.eventHash,
+      previousEventHash: genesis.at(-1)!.eventHash,
+    });
+
+    for (const eventType of [
+      "PRECOMMITTED",
+      "OBSERVED",
+      "SHADOW_FILL",
+      "CLOSED",
+      "VOID_SOURCE_GAP",
+    ] as const) {
+      const changedAfterTerminal = append(
+        voided,
+        runBinding,
+        eventType,
+        new Date(Date.parse(startedAt) + 120_000).toISOString(),
+        {},
+      );
+      expect(() => verifyShadowGridRun(changedAfterTerminal)).toThrow(/terminal/u);
+    }
+  });
+
   it("uses actual sampled crossings and charges conservative costs", () => {
     const events = precommittedRun();
     const precommit = parseShadowGridEvent(events[1]!);
@@ -235,6 +344,19 @@ describe("bounded-grid forward shadow evidence", () => {
       ORIGIN,
       new Date("2026-09-02T12:00:00.000Z"),
     );
+    expect(summary.summary).toMatchObject({
+      openedWindowCount: 1,
+      precommittedWindowCount: 1,
+      initializationVoidWindowCount: 0,
+      precommittedTerminalWindowCount: 1,
+      terminalWindowCount: 1,
+    });
+    expect(summary.recentWindows[0]).toMatchObject({
+      initializationState: "PRECOMMITTED",
+      precommitPersisted: true,
+      sourceHireId: runBinding.hireId,
+      sourceRequestHash: runBinding.requestHash,
+    });
     expect(summary.summary.negativeWindowCount).toBe(1);
     expect(summary.summary.positiveWindowCount).toBe(0);
     expect(summary.summary.simulatedNetOutcomeUsd).toBeNull();
