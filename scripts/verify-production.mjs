@@ -1379,9 +1379,10 @@ try {
   }
   report.productionTrackRecord = productionRecord;
 
+  const zeroAddress = "0x0000000000000000000000000000000000000000";
   const zeroVenus = await fetchJson(
     "venus-zero-position",
-    "/api/wallets/0x0000000000000000000000000000000000000000/venus",
+    `/api/wallets/${zeroAddress}/venus`,
   );
   assert(
     zeroVenus.schemaVersion === "positioncrew.venus-account-probe.v1",
@@ -1394,8 +1395,10 @@ try {
     "Zero address Venus collateral is nonzero",
   );
   assert(
-    zeroVenus.rescueRequest?.account === zeroVenus.account && zeroVenus.rescueRequest?.chainId === 56,
-    "Zero-position refusal request is not bound to the probed account and chain",
+    zeroVenus.account === zeroAddress &&
+      zeroVenus.rescueRequest?.account === zeroAddress &&
+      zeroVenus.rescueRequest?.chainId === 56,
+    "Zero-position refusal request is not bound to the requested account and chain",
   );
   assert(
     zeroVenus.rescueRequest?.position?.collateral?.length === 0 &&
