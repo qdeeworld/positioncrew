@@ -1092,6 +1092,45 @@ test("body-tampered founder task details fail closed even when declared commitme
   await expect(page.getByText("371 ms", { exact: true })).toHaveCount(0);
 });
 
+test("a refreshed founder publication cache is bound to both commitments", async ({ page }) => {
+  let providerRequestCount = 0;
+  let founderStatusRequestCount = 0;
+  let founderReportRequestCount = 0;
+  await page.route(/\/api\/providers$/u, async (route) => {
+    providerRequestCount += 1;
+    if (providerRequestCount === 1) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "retry fixture" }) });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/benchmarks/founder-comparison/status", async (route) => {
+    const response = await route.fetch();
+    const publication = await response.json() as Record<string, unknown>;
+    founderStatusRequestCount += 1;
+    if (founderStatusRequestCount > 1) {
+      publication.evidenceManifestHash = `sha256:${"f".repeat(64)}`;
+    }
+    await route.fulfill({ response, body: JSON.stringify(publication) });
+  });
+  await page.route("**/evidence/agent-advantage-founder/founder-agent-advantage-report.json", async (route) => {
+    founderReportRequestCount += 1;
+    await route.continue();
+  });
+
+  await page.goto("/#evidence");
+  const comparisonSection = page.getByRole("region", { name: "Agent Advantage evidence" });
+  await expect(comparisonSection.getByRole("list", { name: "Founder Agent Advantage task comparisons" }).getByRole("listitem")).toHaveCount(3);
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByRole("status", { name: "Founder comparison task details unavailable" })).toBeVisible();
+  await expect(comparisonSection.getByRole("list", { name: "Founder Agent Advantage task comparisons" })).toHaveCount(0);
+  await expect(page.getByText("356,626 ms", { exact: true })).toHaveCount(0);
+  expect(founderStatusRequestCount).toBe(2);
+  expect(founderReportRequestCount).toBe(2);
+});
+
 test("direct product links resolve to their canonical application views", async ({ page }) => {
   for (const view of ["marketplace", "jobs", "evidence"] as const) {
     await page.goto(`/${view}`);

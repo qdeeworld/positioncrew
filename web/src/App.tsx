@@ -96,7 +96,10 @@ export default function App() {
     requestKey: string;
     chain?: FreshMarketplaceChain;
   } | null>(null);
-  const loadedFounderAdvantageReportHash = useRef<string | null>(null);
+  const loadedFounderAdvantageCommitment = useRef<{
+    reportHash: string;
+    evidenceManifestHash: string;
+  } | null>(null);
   const provider = providers.find((candidate) => candidate.service === selectedService);
   const fixture = matrix.get(selectedService);
 
@@ -198,7 +201,7 @@ export default function App() {
     }
     const founderPublicationClaimsPublished = founderAdvantagePublication?.status === "PUBLISHED";
     if (!isVerifiedFounderAgentAdvantagePublication(founderAdvantagePublication)) {
-      loadedFounderAdvantageReportHash.current = null;
+      loadedFounderAdvantageCommitment.current = null;
       setFounderAdvantageAtAGlance(null);
       setFounderAdvantageAtAGlanceLoadState(
         founderPublicationClaimsPublished ||
@@ -208,7 +211,10 @@ export default function App() {
       );
       return;
     }
-    if (loadedFounderAdvantageReportHash.current === founderAdvantagePublication.reportHash) {
+    if (
+      loadedFounderAdvantageCommitment.current?.reportHash === founderAdvantagePublication.reportHash &&
+      loadedFounderAdvantageCommitment.current.evidenceManifestHash === founderAdvantagePublication.evidenceManifestHash
+    ) {
       setFounderAdvantageAtAGlanceLoadState("AVAILABLE");
       return;
     }
@@ -229,13 +235,16 @@ export default function App() {
         );
         if (!active) return;
         if (!projection) throw new Error("Founder Agent Advantage report failed projection");
-        loadedFounderAdvantageReportHash.current = founderAdvantagePublication.reportHash;
+        loadedFounderAdvantageCommitment.current = {
+          reportHash: founderAdvantagePublication.reportHash,
+          evidenceManifestHash: founderAdvantagePublication.evidenceManifestHash,
+        };
         setFounderAdvantageAtAGlance(projection);
         setFounderAdvantageAtAGlanceLoadState("AVAILABLE");
       })
       .catch((loadError: unknown) => {
         if (!active || (loadError instanceof DOMException && loadError.name === "AbortError")) return;
-        loadedFounderAdvantageReportHash.current = null;
+        loadedFounderAdvantageCommitment.current = null;
         setFounderAdvantageAtAGlance(null);
         setFounderAdvantageAtAGlanceLoadState("UNAVAILABLE");
       });
