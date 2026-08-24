@@ -37,6 +37,30 @@ const expectedAacpListings = new Map([
 ]);
 const expectedAacpOwner = "0xbad35fa6e368e90fc4faf63507f2d0a2fdf94baf";
 const referencePancakePositionId = "1456267";
+const expectedShadowGridClaimBoundary = [
+  "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
+  "Conservative sampled crossings are simulations, not transactions, executable fills, realised PnL, strategy returns, or audited financial performance.",
+  "The operator-scheduled record proves no external buyer, payment, revenue, demand, or Agent Advantage.",
+];
+const expectedShadowGridStrategyVersion =
+  "positioncrew:bounded-grid-forward-shadow:v1";
+const expectedShadowGridFillModel = "CONSERVATIVE_SAMPLED_CROSSING_V1";
+const shadowGridEventTypes = new Set([
+  "EPOCH_STARTED",
+  "PRECOMMITTED",
+  "REFUSED",
+  "OBSERVED",
+  "SHADOW_FILL",
+  "CLOSED",
+  "VOID_SOURCE_GAP",
+  "RISK_EXIT",
+]);
+const shadowGridTerminalEventTypes = new Set([
+  "REFUSED",
+  "CLOSED",
+  "VOID_SOURCE_GAP",
+  "RISK_EXIT",
+]);
 const checks = [];
 const monitorRunId = String(Date.now());
 const monitorRequestTimeoutMs = 15_000;
@@ -231,6 +255,376 @@ async function fetchJson(
     assert(body && typeof body === "object", `${name} did not return a JSON object`);
     return body;
   }
+}
+
+function assertShadowGridClaimBoundary(value, context) {
+  assert(
+    JSON.stringify(value) === JSON.stringify(expectedShadowGridClaimBoundary),
+    `${context} changed the explicit shadow-ledger claim boundary`,
+  );
+}
+
+function assertNonNegativeInteger(value, context) {
+  assert(
+    Number.isInteger(value) && value >= 0,
+    `${context} is not a non-negative integer`,
+  );
+}
+
+function shadowGridTransitionAllowed(previous, current) {
+  if (previous === "EPOCH_STARTED") return current === "PRECOMMITTED";
+  if (previous === "PRECOMMITTED") {
+    return ["REFUSED", "OBSERVED", "VOID_SOURCE_GAP"].includes(current);
+  }
+  if (["OBSERVED", "SHADOW_FILL"].includes(previous)) {
+    return [
+      "OBSERVED",
+      "SHADOW_FILL",
+      "CLOSED",
+      "VOID_SOURCE_GAP",
+      "RISK_EXIT",
+    ].includes(current);
+  }
+  return false;
+}
+
+function verifyShadowGridWindow(envelope, summaryWindow) {
+  assert(
+    envelope.schemaVersion ===
+      "positioncrew.bounded-grid-forward-shadow-window.v1",
+    `Unexpected forward-shadow window schema for ${summaryWindow.windowId}`,
+  );
+  assertShadowGridClaimBoundary(
+    envelope.claimBoundary,
+    `Forward-shadow window ${summaryWindow.windowId}`,
+  );
+  assert(
+    Number.isFinite(Date.parse(envelope.generatedAt)),
+    `Forward-shadow window ${summaryWindow.windowId} has an invalid generation time`,
+  );
+  assert(
+    envelope.window && typeof envelope.window === "object",
+    `Forward-shadow window ${summaryWindow.windowId} omitted its public summary`,
+  );
+  assert(
+    Array.isArray(envelope.events) && envelope.events.length >= 2,
+    `Forward-shadow window ${summaryWindow.windowId} omitted its precommitted chain`,
+  );
+
+  const window = envelope.window;
+  const events = envelope.events;
+  assert(
+    window.windowId === summaryWindow.windowId &&
+      /^bg-[0-9]{8}-[0-9]{2}$/.test(window.windowId),
+    "Forward-shadow detail changed its window identity",
+  );
+  assert(window.pair === "WBNB/USDT", `${window.windowId} changed its market`);
+  assert(window.horizonMinutes === 15, `${window.windowId} changed its horizon`);
+  assert(
+    Number.isFinite(Date.parse(window.startedAt)),
+    `${window.windowId} has an invalid start time`,
+  );
+  assert(
+    typeof window.sourceBlockNumber === "string" &&
+      /^[1-9][0-9]*$/.test(window.sourceBlockNumber),
+    `${window.windowId} has an invalid source block`,
+  );
+  assert(
+    typeof window.sourceRequestHash === "string" &&
+      /^sha256:[a-f0-9]{64}$/.test(window.sourceRequestHash),
+    `${window.windowId} has an invalid source-request commitment`,
+  );
+
+  const receiptUrl = localUrl(window.receiptUrl);
+  assert(
+    receiptUrl.pathname ===
+      `/api/evidence/bounded-grid-forward-shadow/windows/${window.windowId}`,
+    `${window.windowId} has a non-canonical receipt URL`,
+  );
+  const sourceReceiptUrl = localUrl(window.sourceReceiptUrl);
+  assert(
+    /^\/api\/benchmark-receipts\/[0-9a-f-]{36}$/.test(sourceReceiptUrl.pathname),
+    `${window.windowId} has a non-canonical source receipt URL`,
+  );
+
+  let previous = null;
+  let terminalSeen = false;
+  for (const [index, event] of events.entries()) {
+    assert(
+      event && typeof event === "object" && !Array.isArray(event),
+      `${window.windowId} event ${index} is not an object`,
+    );
+    assert(
+      event.schemaVersion ===
+        "positioncrew.bounded-grid-forward-shadow-event.v1",
+      `${window.windowId} event ${index} changed schema`,
+    );
+    assert(event.runId === window.windowId, `${window.windowId} event ${index} changed run`);
+    assert(event.sequence === index, `${window.windowId} event sequence is discontinuous`);
+    assert(
+      shadowGridEventTypes.has(event.eventType),
+      `${window.windowId} event ${index} has an unknown type`,
+    );
+    assert(
+      Number.isFinite(Date.parse(event.recordedAt)),
+      `${window.windowId} event ${index} has an invalid timestamp`,
+    );
+    assert(
+      event.payload && typeof event.payload === "object" && !Array.isArray(event.payload),
+      `${window.windowId} event ${index} has an invalid payload`,
+    );
+    assert(
+      event.previousEventHash === (previous?.eventHash ?? null),
+      `${window.windowId} event ${index} broke the previous-hash chain`,
+    );
+    const { eventHash, ...eventBody } = event;
+    assert(
+      /^sha256:[a-f0-9]{64}$/.test(eventHash ?? "") &&
+        canonicalSha256(eventBody) === eventHash,
+      `${window.windowId} event ${index} has an invalid canonical commitment`,
+    );
+    if (index === 0) {
+      assert(
+        event.eventType === "EPOCH_STARTED",
+        `${window.windowId} does not begin with EPOCH_STARTED`,
+      );
+    } else {
+      assert(!terminalSeen, `${window.windowId} changed after a terminal event`);
+      assert(
+        shadowGridTransitionAllowed(previous.eventType, event.eventType),
+        `${window.windowId} has an invalid lifecycle transition`,
+      );
+    }
+    terminalSeen = shadowGridTerminalEventTypes.has(event.eventType);
+    previous = event;
+  }
+
+  const precommit = events[1];
+  const latest = events.at(-1);
+  assert(precommit.eventType === "PRECOMMITTED", `${window.windowId} has no precommitment`);
+  assert(
+    precommit.payload.sourceHireId === window.sourceHireId &&
+      precommit.payload.sourceRequestHash === window.sourceRequestHash &&
+      localUrl(precommit.payload.sourceReceiptUrl).pathname === sourceReceiptUrl.pathname &&
+      String(precommit.payload.sourceBlockNumber) === window.sourceBlockNumber,
+    `${window.windowId} public summary differs from its precommitment`,
+  );
+  assert(
+    envelope.integrity?.valid === true &&
+      envelope.integrity?.headHash === latest.eventHash,
+    `${window.windowId} did not verify its retained hash chain`,
+  );
+  assert(
+    window.eventHash === latest.eventHash &&
+      window.previousEventHash === latest.previousEventHash,
+    `${window.windowId} public head differs from its retained event chain`,
+  );
+  assert(
+    events.some(
+      (event) =>
+        event.eventHash === summaryWindow.eventHash &&
+        event.previousEventHash === summaryWindow.previousEventHash,
+    ),
+    `${window.windowId} no longer contains the head published by the ledger summary`,
+  );
+
+  const expectedState = shadowGridTerminalEventTypes.has(latest.eventType)
+    ? latest.eventType
+    : "PRECOMMITTED";
+  assert(window.state === expectedState, `${window.windowId} state differs from its event chain`);
+  assert(
+    window.sampledCrossings ===
+      events.filter((event) => event.eventType === "SHADOW_FILL").length,
+    `${window.windowId} sampled-crossing count differs from its event chain`,
+  );
+  if (["CLOSED", "RISK_EXIT"].includes(latest.eventType)) {
+    assert(
+      typeof latest.payload.netOutcomeUsd === "string" &&
+        Number.isFinite(Number(latest.payload.netOutcomeUsd)) &&
+        window.simulatedNetOutcomeUsd === latest.payload.netOutcomeUsd,
+      `${window.windowId} has an invalid simulated terminal outcome`,
+    );
+  } else {
+    assert(
+      window.simulatedNetOutcomeUsd === null,
+      `${window.windowId} reports an outcome without a return-bearing terminal event`,
+    );
+  }
+  assert(
+    window.terminalAt ===
+      (shadowGridTerminalEventTypes.has(latest.eventType) ? latest.recordedAt : null),
+    `${window.windowId} terminal time differs from its event chain`,
+  );
+
+  return {
+    windowId: window.windowId,
+    state: window.state,
+    eventCount: events.length,
+    headHash: latest.eventHash,
+    simulatedNetOutcomeUsd: window.simulatedNetOutcomeUsd,
+  };
+}
+
+async function verifyShadowGridLedger(ledger) {
+  assert(
+    ledger.schemaVersion ===
+      "positioncrew.bounded-grid-forward-shadow-ledger.v1",
+    "Unexpected Bounded Grid forward-shadow ledger schema",
+  );
+  assert(
+    Number.isFinite(Date.parse(ledger.generatedAt)),
+    "Forward-shadow ledger has an invalid generation time",
+  );
+  const publicUrl = localUrl(ledger.publicUrl);
+  assert(
+    publicUrl.pathname === "/api/evidence/bounded-grid-forward-shadow",
+    "Forward-shadow ledger public URL is not canonical",
+  );
+  assertShadowGridClaimBoundary(ledger.claimBoundary, "Forward-shadow ledger");
+  assert(
+    ledger.model?.name === expectedShadowGridFillModel &&
+      ledger.model?.strategyVersion === expectedShadowGridStrategyVersion &&
+      ledger.model?.pair === "WBNB/USDT" &&
+      ledger.model?.capitalMode === "ZERO_FUND_SHADOW" &&
+      ledger.model?.cadenceMinutes === 60 &&
+      ledger.model?.sampleCadenceMinutes === 5 &&
+      ledger.model?.horizonMinutes === 15,
+    "Forward-shadow ledger model constants changed",
+  );
+
+  const maturity = ledger.maturity;
+  assert(
+    maturity && typeof maturity === "object",
+    "Forward-shadow ledger omitted its maturity contract",
+  );
+  assert(
+    Number.isFinite(maturity.observedDays) && maturity.observedDays >= 0,
+    "Forward-shadow observed-day count is invalid",
+  );
+  assertNonNegativeInteger(
+    maturity.terminalWindowCount,
+    "Forward-shadow terminal-window count",
+  );
+  assert(
+    maturity.minimumObservedDays === 7 &&
+      maturity.minimumTerminalWindows === 30 &&
+      maturity.minimumNonVoidRatePct === 90 &&
+      maturity.hashChainValid === true,
+    "Forward-shadow maturity constants or hash-chain status changed",
+  );
+
+  const summary = ledger.summary;
+  assert(summary && typeof summary === "object", "Forward-shadow ledger omitted its summary");
+  for (const key of [
+    "precommittedWindowCount",
+    "terminalWindowCount",
+    "closedWindowCount",
+    "refusedWindowCount",
+    "voidWindowCount",
+    "riskExitWindowCount",
+    "positiveWindowCount",
+    "negativeWindowCount",
+  ]) {
+    assertNonNegativeInteger(summary[key], `Forward-shadow ${key}`);
+  }
+  assert(
+    summary.terminalWindowCount === maturity.terminalWindowCount &&
+      summary.precommittedWindowCount >= summary.terminalWindowCount,
+    "Forward-shadow summary and maturity counts disagree",
+  );
+  assert(
+    summary.terminalWindowCount ===
+      summary.closedWindowCount +
+        summary.refusedWindowCount +
+        summary.voidWindowCount +
+        summary.riskExitWindowCount,
+    "Forward-shadow terminal categories do not reconcile",
+  );
+  assert(
+    summary.positiveWindowCount + summary.negativeWindowCount <=
+      summary.closedWindowCount + summary.riskExitWindowCount,
+    "Forward-shadow return-bearing outcome counts do not reconcile",
+  );
+
+  const expectedNonVoidRate = summary.terminalWindowCount === 0
+    ? null
+    : Number(
+        (
+          ((summary.terminalWindowCount - summary.voidWindowCount) /
+            summary.terminalWindowCount) *
+          100
+        ).toFixed(2),
+      );
+  assert(
+    maturity.nonVoidRatePct === expectedNonVoidRate,
+    "Forward-shadow non-void rate does not match retained terminal windows",
+  );
+  const expectedMature =
+    maturity.observedDays >= 7 &&
+    summary.terminalWindowCount >= 30 &&
+    (maturity.nonVoidRatePct ?? 0) >= 90;
+  assert(
+    maturity.mature === expectedMature,
+    "Forward-shadow maturity status does not follow its published thresholds",
+  );
+  const expectedStatus =
+    summary.terminalWindowCount >= 30 && (maturity.nonVoidRatePct ?? 0) < 90
+      ? "DEGRADED"
+      : expectedMature
+        ? "MATURE"
+        : "COLLECTING";
+  assert(ledger.status === expectedStatus, "Forward-shadow ledger status is inconsistent");
+  if (expectedMature) {
+    assert(
+      typeof summary.simulatedNetOutcomeUsd === "string" &&
+        Number.isFinite(Number(summary.simulatedNetOutcomeUsd)),
+      "Mature forward-shadow ledger has no numeric simulated aggregate",
+    );
+  } else {
+    assert(
+      summary.simulatedNetOutcomeUsd === null,
+      "Immature forward-shadow ledger published an aggregate outcome",
+    );
+  }
+
+  assert(
+    Array.isArray(ledger.recentWindows) && ledger.recentWindows.length <= 10,
+    "Forward-shadow recent-window list is invalid",
+  );
+  assert(
+    ledger.recentWindows.length <= summary.precommittedWindowCount &&
+      new Set(ledger.recentWindows.map((window) => window.windowId)).size ===
+        ledger.recentWindows.length,
+    "Forward-shadow recent windows are duplicated or exceed retained windows",
+  );
+  const verifiedWindows = await Promise.all(
+    ledger.recentWindows.map(async (window) => {
+      assert(window.pair === "WBNB/USDT", `${window.windowId} changed its summary market`);
+      assert(window.horizonMinutes === 15, `${window.windowId} changed its summary horizon`);
+      if (window.simulatedNetOutcomeUsd !== null) {
+        assert(
+          typeof window.simulatedNetOutcomeUsd === "string" &&
+            Number.isFinite(Number(window.simulatedNetOutcomeUsd)),
+          `${window.windowId} has a non-numeric simulated summary outcome`,
+        );
+      }
+      const detail = await fetchJson(
+        `bounded-grid-forward-shadow-window-${window.windowId}`,
+        window.receiptUrl,
+      );
+      return verifyShadowGridWindow(detail, window);
+    }),
+  );
+
+  return {
+    schemaVersion: ledger.schemaVersion,
+    status: ledger.status,
+    model: ledger.model,
+    maturity: ledger.maturity,
+    summary: ledger.summary,
+    claimBoundary: ledger.claimBoundary,
+    verifiedRecentWindows: verifiedWindows,
+  };
 }
 
 async function fetchGithubJson(name, input) {
@@ -571,6 +965,7 @@ const report = {
   status: "FAILED",
   checks,
   providers: [],
+  shadowGridLedger: null,
   error: null,
 };
 
@@ -1407,6 +1802,16 @@ try {
       "get",
       "getVenusTestnetNativeSupplyEvidence",
     ],
+    [
+      "/api/evidence/bounded-grid-forward-shadow",
+      "get",
+      "getBoundedGridForwardShadowLedger",
+    ],
+    [
+      "/api/evidence/bounded-grid-forward-shadow/windows/{runId}",
+      "get",
+      "getBoundedGridForwardShadowWindow",
+    ],
     ["/api/status", "get", "getSystemTelemetry"],
     ["/api/commerce/aacp", "get", "getAacpProductionReadiness"],
     ["/api/operations/production", "get", "getProductionTrackRecord"],
@@ -1528,6 +1933,12 @@ try {
       "inspectPancakePosition",
     "OpenAPI omits the live Pancake position probe",
   );
+
+  const shadowGridLedger = await fetchJson(
+    "bounded-grid-forward-shadow-ledger",
+    "/api/evidence/bounded-grid-forward-shadow",
+  );
+  report.shadowGridLedger = await verifyShadowGridLedger(shadowGridLedger);
 
   const productionRecord = await fetchJson(
     "production-track-record",

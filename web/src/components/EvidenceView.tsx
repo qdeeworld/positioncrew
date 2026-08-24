@@ -20,6 +20,8 @@ import type {
   FounderAgentAdvantagePublicationStatus,
   PublicationLoadState,
   BenchmarkRepeatabilityResponse,
+  BoundedGridForwardShadowLedger,
+  BoundedGridForwardShadowState,
   FixtureJobResponse,
   Erc8183TestnetLedger,
   MarketplaceInvocationEvidence,
@@ -30,6 +32,34 @@ import type {
   TermixBenchmarkService,
 } from "../types";
 import { isVerifiedFounderAgentAdvantagePublication } from "../types";
+
+function shadowStateLabel(state: BoundedGridForwardShadowState): string {
+  return {
+    PRECOMMITTED: "Precommitted",
+    REFUSED: "Refused",
+    CLOSED: "Closed",
+    VOID_SOURCE_GAP: "Void · source gap",
+    RISK_EXIT: "Risk exit",
+  }[state];
+}
+
+function shadowStateTone(state: BoundedGridForwardShadowState): string {
+  return state === "CLOSED"
+    ? "good"
+    : state === "REFUSED" || state === "PRECOMMITTED"
+      ? "neutral"
+      : "warn";
+}
+
+function simulatedUsd(value: string | null): string {
+  if (value === null) return "-";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "-";
+  return `${amount >= 0 ? "+" : "-"}$${Math.abs(amount).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
 export function EvidenceView({
   providers,
@@ -45,6 +75,7 @@ export function EvidenceView({
   advantagePublicationLoadState,
   founderAdvantagePublicationLoadState,
   productionTrackRecord,
+  forwardShadowLedger,
 }: {
   providers: ProviderListing[];
   matrix: Map<ServiceId, FixtureJobResponse>;
@@ -59,6 +90,7 @@ export function EvidenceView({
   advantagePublicationLoadState: PublicationLoadState;
   founderAdvantagePublicationLoadState: PublicationLoadState;
   productionTrackRecord: ProductionTrackRecord | null;
+  forwardShadowLedger: BoundedGridForwardShadowLedger | null;
 }) {
   const publishedAdvantage = advantagePublication?.status === "PUBLISHED"
     ? advantagePublication
@@ -128,6 +160,24 @@ export function EvidenceView({
     : productionTrackRecord?.status === "DEGRADED" || productionTrackRecord?.status === "SOURCE_UNAVAILABLE"
       ? "warn"
       : "neutral";
+  const forwardShadowStatusLabel = forwardShadowLedger?.status === "MATURE"
+    ? "Mature"
+    : forwardShadowLedger?.status === "DEGRADED"
+      ? "Degraded"
+      : forwardShadowLedger?.status === "SOURCE_UNAVAILABLE"
+        ? "Source unavailable"
+        : forwardShadowLedger?.status === "COLLECTING"
+          ? "Collecting"
+          : "Loading";
+  const forwardShadowStatusTone = forwardShadowLedger?.status === "MATURE"
+    ? "good"
+    : forwardShadowLedger?.status === "DEGRADED" ||
+        forwardShadowLedger?.status === "SOURCE_UNAVAILABLE"
+      ? "warn"
+      : "neutral";
+  const matureShadowAggregate = forwardShadowLedger?.status === "MATURE"
+    ? forwardShadowLedger.summary.simulatedNetOutcomeUsd
+    : null;
   const aacpStatus = aacpReadiness?.state === "PROVIDERS_ONLINE"
     ? { label: "Providers online", tone: "good" }
     : aacpReadiness?.state === "LISTINGS_PUBLISHED_RUNTIME_PENDING"
@@ -332,6 +382,101 @@ export function EvidenceView({
             </div>
           </>
         ) : <div className="infrastructure-loading">The immutable marketplace delivery record is loading.</div>}
+      </section>
+
+      <section className="evidence-section forward-shadow-section" aria-labelledby="forward-shadow-title">
+        <div className="section-bar">
+          <div>
+            <span className="section-kicker">Forward-only high-stakes evidence</span>
+            <h2 id="forward-shadow-title">Bounded Grid shadow outcome ledger</h2>
+          </div>
+          <span className={`state-label ${forwardShadowStatusTone}`}>
+            <Radio size={13} /> {forwardShadowStatusLabel}
+          </span>
+        </div>
+        {forwardShadowLedger ? (
+          <>
+            <div className="forward-shadow-facts">
+              <div>
+                <strong>{forwardShadowLedger.summary.precommittedWindowCount}</strong>
+                <span>precommitted windows</span>
+                <small>One hourly WBNB/USDT window</small>
+              </div>
+              <div>
+                <strong>{forwardShadowLedger.summary.terminalWindowCount}</strong>
+                <span>terminal windows</span>
+                <small>{forwardShadowLedger.summary.refusedWindowCount} refused · {forwardShadowLedger.summary.voidWindowCount} void</small>
+              </div>
+              <div>
+                <strong>{forwardShadowLedger.maturity.nonVoidRatePct === null ? "-" : `${forwardShadowLedger.maturity.nonVoidRatePct}%`}</strong>
+                <span>non-void rate</span>
+                <small>Minimum {forwardShadowLedger.maturity.minimumNonVoidRatePct}% at maturity</small>
+              </div>
+              <div>
+                <strong>{forwardShadowLedger.status === "MATURE" ? simulatedUsd(matureShadowAggregate) : "WITHHELD"}</strong>
+                <span>aggregate simulated outcome</span>
+                <small>
+                  {forwardShadowLedger.status === "MATURE"
+                    ? `${forwardShadowLedger.summary.positiveWindowCount} positive · ${forwardShadowLedger.summary.negativeWindowCount} negative`
+                    : `${forwardShadowLedger.maturity.observedDays}/${forwardShadowLedger.maturity.minimumObservedDays} days · ${forwardShadowLedger.maturity.terminalWindowCount}/${forwardShadowLedger.maturity.minimumTerminalWindows} terminal`}
+                </small>
+              </div>
+            </div>
+            <div className="forward-shadow-model">
+              <span><strong>Strategy</strong><code>{forwardShadowLedger.model.strategyVersion}</code></span>
+              <span><strong>Fill model</strong><code>{forwardShadowLedger.model.name}</code></span>
+              <span><strong>Sampling</strong>{forwardShadowLedger.model.sampleCadenceMinutes} min samples · {forwardShadowLedger.model.horizonMinutes} min horizon</span>
+              <span><strong>Integrity</strong>{forwardShadowLedger.maturity.hashChainValid ? "Hash chain valid" : "Hash chain invalid"}</span>
+            </div>
+            {forwardShadowLedger.recentWindows.length > 0 ? (
+              <div className="forward-shadow-windows" aria-label="Recent bounded grid forward shadow windows">
+                {forwardShadowLedger.recentWindows.map((window) => (
+                  <article key={window.windowId} className={`forward-shadow-window ${window.state.toLowerCase()}`}>
+                    <div>
+                      <span className={`state-label ${shadowStateTone(window.state)}`}>{shadowStateLabel(window.state)}</span>
+                      <time dateTime={window.startedAt}>
+                        {new Date(window.startedAt).toLocaleString([], {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </time>
+                    </div>
+                    <strong>
+                      {window.state === "CLOSED" || window.state === "RISK_EXIT"
+                        ? simulatedUsd(window.simulatedNetOutcomeUsd)
+                        : shadowStateLabel(window.state)}
+                    </strong>
+                    <small>
+                      {window.sampledCrossings} sampled crossings · BSC block {window.sourceBlockNumber}
+                    </small>
+                    <code>Hire {shortHash(window.sourceHireId, 14)}</code>
+                    <a href={window.receiptUrl} target="_blank" rel="noreferrer">
+                      Window evidence <ExternalLink size={12} />
+                    </a>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="infrastructure-loading">
+                The first forward-only window is waiting for its protected scheduled tick.
+              </div>
+            )}
+            <div className="operations-boundary">
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span>
+                <strong>Zero-fund simulation boundary.</strong>
+                {forwardShadowLedger.claimBoundary.join(" ")}
+              </span>
+              <a href={forwardShadowLedger.publicUrl} target="_blank" rel="noreferrer">
+                Public ledger <ExternalLink size={12} />
+              </a>
+            </div>
+          </>
+        ) : (
+          <div className="infrastructure-loading">The public forward shadow ledger is loading.</div>
+        )}
       </section>
 
       <section className="evidence-section operations-section" aria-labelledby="operations-title">

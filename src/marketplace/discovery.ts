@@ -385,6 +385,33 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
         },
       },
     },
+    "/api/evidence/bounded-grid-forward-shadow": {
+      get: {
+        summary: "Read the forward-only zero-fund Bounded Grid shadow ledger",
+        operationId: "getBoundedGridForwardShadowLedger",
+        responses: {
+          "200": {
+            description: "Precommitted current hires, actual sampled observations, retained refusals, voids, and conservative simulated outcomes",
+          },
+        },
+      },
+    },
+    "/api/evidence/bounded-grid-forward-shadow/windows/{runId}": {
+      get: {
+        summary: "Read one immutable or in-progress Bounded Grid shadow window",
+        operationId: "getBoundedGridForwardShadowWindow",
+        parameters: [{
+          name: "runId",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^bg-[0-9]{8}-[0-9]{2}$" },
+        }],
+        responses: {
+          "200": { description: "Full ordered event chain and exact current-hire binding" },
+          "404": { description: "Unknown forward shadow window" },
+        },
+      },
+    },
     "/api/benchmarks/status": {
       get: {
         summary: "Read the truthful Agent Advantage publication status",

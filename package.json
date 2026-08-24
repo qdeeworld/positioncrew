@@ -16,7 +16,8 @@
     "preview": "npm run db:migrate:local && wrangler dev --local --config dist/server/wrangler.local.json --port 4175",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json && tsc -p tsconfig.worker.json",
     "test": "vitest run",
-    "test:integration:d1": "npm run build && node test/integration/d1-current-hire.mjs",
+    "test:integration:d1": "npm run build && npm run test:integration:d1:built",
+    "test:integration:d1:built": "node test/integration/d1-current-hire.mjs && node test/integration/d1-shadow-grid-ledger.mjs",
     "test:e2e": "npm run build && node test/integration/run-playwright-with-d1.mjs",
     "benchmark:verify-lock": "tsx src/cli/verify-benchmark-lock.ts",
     "benchmark:verify-locks": "tsx src/cli/verify-benchmark-lock.ts",
@@ -37,6 +38,7 @@
     "verify:gate2a": "tsx src/cli/run-lending-rescue.ts",
     "verify:all": "tsx src/cli/verify-all-providers.ts",
     "verify:production": "node scripts/verify-production.mjs",
+    "shadow-grid:collect": "node scripts/collect-bounded-grid-shadow-ledger.mjs",
     "build:termix-renewer": "esbuild src/cli/renew-termix-runtime-token.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/runtime/renew-termix-runtime-token.mjs"
   },
   "engines": {

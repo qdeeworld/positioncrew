@@ -230,7 +230,7 @@ describe("public fixture job boundary", () => {
       },
     });
     expect(openApi).toMatchObject({ openapi: "3.1.0", servers: [{ url: origin }] });
-    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(20);
+    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(22);
     expect(openApi.paths).toMatchObject({
       [EXTERNAL_COMPARISON_SNAPSHOT_ROUTE]: {
         get: { operationId: "getExternalComparisonSnapshot" },
@@ -244,6 +244,12 @@ describe("public fixture job boundary", () => {
       "/api/status": { get: { operationId: "getSystemTelemetry" } },
       "/api/operations/production": {
         get: { operationId: "getProductionTrackRecord" },
+      },
+      "/api/evidence/bounded-grid-forward-shadow": {
+        get: { operationId: "getBoundedGridForwardShadowLedger" },
+      },
+      "/api/evidence/bounded-grid-forward-shadow/windows/{runId}": {
+        get: { operationId: "getBoundedGridForwardShadowWindow" },
       },
       "/api/benchmarks/status": {
         get: { operationId: "getBenchmarkPublicationStatus" },
@@ -270,6 +276,9 @@ describe("public fixture job boundary", () => {
     });
     expect(Object.keys((openApi.paths as Record<string, object>)[EXTERNAL_COMPARISON_SNAPSHOT_ROUTE] ?? {})).toEqual(["get"]);
     expect(Object.keys((openApi.paths as Record<string, object>)[VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE] ?? {})).toEqual(["get"]);
+    expect(Object.keys((openApi.paths as Record<string, object>)["/api/evidence/bounded-grid-forward-shadow"] ?? {})).toEqual(["get"]);
+    expect(Object.keys((openApi.paths as Record<string, object>)["/api/evidence/bounded-grid-forward-shadow/windows/{runId}"] ?? {})).toEqual(["get"]);
+    expect(openApi.paths).not.toHaveProperty("/api/internal/bounded-grid-forward-shadow/tick");
     expect(
       ((openApi.paths as Record<string, { post: { requestBody: { content: { "application/json": { schema: { properties: { mode: { default: string } } } } } } } }>)[provider.endpoint]
         ?.post.requestBody.content["application/json"].schema.properties.mode.default),

@@ -35,6 +35,8 @@ import type {
   FounderAgentAdvantagePublicationStatus,
   PublicationLoadState,
   BenchmarkRepeatabilityResponse,
+  BoundedGridForwardShadowLedger,
+  BoundedGridForwardShadowWindow,
   CurrentMarketplaceObservation,
   FixtureJobResponse,
   FreshMarketplaceChain,
@@ -588,9 +590,11 @@ function SummaryResult({
 function ReceiptView({
   response,
   marketplaceTrace,
+  shadowWindow,
 }: {
   response: FixtureJobResponse;
   marketplaceTrace: FreshMarketplaceChain | null;
+  shadowWindow: BoundedGridForwardShadowWindow | null;
 }) {
   const { job, evaluation } = response.result;
   function downloadReceipt() {
@@ -607,6 +611,7 @@ function ReceiptView({
       <div className="receipt-actions">
         <span><ShieldCheck size={14} /> {response.receipt.mode.replaceAll("_", " ")}</span>
         <div>
+          {shadowWindow && <a href={shadowWindow.receiptUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Separate shadow evidence</a>}
           {marketplaceTrace?.receipt && <a href={marketplaceTrace.receipt.publicUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Reload durable receipt</a>}
           {response.receipt.path && <a href={response.receipt.path} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Public receipt</a>}
           <button type="button" onClick={downloadReceipt}><Download size={14} /> Download</button>
@@ -622,6 +627,8 @@ function ReceiptView({
         {marketplaceTrace?.receipt && <div><dt>Result hash</dt><dd>{marketplaceTrace.receipt.responseHash}</dd></div>}
         {marketplaceTrace?.job.apiDurationMilliseconds != null && <div><dt>Provider API time</dt><dd>{marketplaceTrace.job.apiDurationMilliseconds} ms</dd></div>}
         {marketplaceTrace?.job.completedAt && <div><dt>Completed at</dt><dd>{formatTimestamp(marketplaceTrace.job.completedAt)} UTC</dd></div>}
+        {shadowWindow && <div><dt>Shadow evidence</dt><dd>{shadowWindow.state.replaceAll("_", " ")}</dd></div>}
+        {shadowWindow && <div><dt>Shadow window</dt><dd>{shadowWindow.windowId}</dd></div>}
         <div><dt>Job ID</dt><dd>{job.jobId}</dd></div>
         <div><dt>Provider</dt><dd>{job.providerId}</dd></div>
         <div><dt>Conformance scorer</dt><dd>{job.evaluatorId}</dd></div>
@@ -1044,6 +1051,7 @@ export function JobWorkspace({
   founderAdvantagePublication,
   advantagePublicationLoadState,
   founderAdvantagePublicationLoadState,
+  forwardShadowLedger,
   onClearJobs,
 }: {
   provider: ProviderListing | undefined;
@@ -1067,6 +1075,7 @@ export function JobWorkspace({
   founderAdvantagePublication: FounderAgentAdvantagePublicationStatus | null;
   advantagePublicationLoadState: PublicationLoadState;
   founderAdvantagePublicationLoadState: PublicationLoadState;
+  forwardShadowLedger: BoundedGridForwardShadowLedger | null;
   onClearJobs: () => void;
 }) {
   const service = selectedService;
@@ -1078,6 +1087,17 @@ export function JobWorkspace({
   const [liveObservation, setLiveObservation] = useState<CurrentMarketplaceObservation | null>(null);
   const liveRequestRef = useRef<JobRequest | null>(null);
   const shownResponse = activeJob?.response ?? null;
+  const receiptTrace = activeJob?.marketplaceTrace ?? marketplaceTrace;
+  const matchedForwardShadowWindow = service === "BOUNDED_GRID" &&
+    receiptTrace?.hire.service === "BOUNDED_GRID" &&
+    receiptTrace.hire.evidenceMode === "CURRENT_BLOCK_PINNED" &&
+    receiptTrace.job.status === "COMPLETED"
+    ? forwardShadowLedger?.recentWindows.find(
+        (window) =>
+          window.sourceHireId === receiptTrace.hire.hireId &&
+          window.sourceRequestHash === receiptTrace.hire.requestHash,
+      ) ?? null
+    : null;
   const fixtureRequest = fixture?.result.request;
   const inputRequest = inputMode === "locked"
     ? fixtureRequest
@@ -1318,6 +1338,19 @@ export function JobWorkspace({
               </span>
             </div>
           )}
+          {matchedForwardShadowWindow && (
+            <div className="shadow-evidence-link" role="status">
+              <ShieldCheck size={15} aria-hidden="true" />
+              <span>
+                <strong>Separate forward shadow evidence</strong>
+                {" · "}{matchedForwardShadowWindow.state.replaceAll("_", " ")}
+                {" · "}This zero-fund sampled outcome references the same persisted hire and request hash; it is not part of the provider receipt or a transaction.
+              </span>
+              <a href={matchedForwardShadowWindow.receiptUrl} target="_blank" rel="noreferrer">
+                Open window <ExternalLink size={11} />
+              </a>
+            </div>
+          )}
           <div className="composer-footer">
             <span>
               <strong>$0.00</strong>
@@ -1365,7 +1398,7 @@ export function JobWorkspace({
               />
             ) :
               resultView === "json" ? <MachineJson response={shownResponse} /> :
-                <ReceiptView response={shownResponse} marketplaceTrace={activeJob?.marketplaceTrace ?? marketplaceTrace} />
+                <ReceiptView response={shownResponse} marketplaceTrace={receiptTrace} shadowWindow={matchedForwardShadowWindow} />
           ) : (
             <div className="empty-result-state">
               <span className="empty-result-icon"><ShieldCheck size={28} strokeWidth={1.6} /></span>

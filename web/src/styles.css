@@ -1086,3 +1086,166 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   }
   .task-deck button:hover { transform: none; }
 }
+
+.shadow-evidence-link {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid #b8ddd1;
+  border-radius: 6px;
+  color: #194e3f;
+  background: var(--green-soft);
+}
+.shadow-evidence-link > svg { color: var(--green); }
+.shadow-evidence-link span { font-size: 10px; line-height: 1.5; }
+.shadow-evidence-link strong { display: block; color: var(--ink); }
+.shadow-evidence-link a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 750;
+  text-decoration: none;
+}
+.forward-shadow-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+.forward-shadow-facts > div {
+  display: flex;
+  min-width: 0;
+  min-height: 92px;
+  padding: 15px;
+  border-right: 1px solid var(--line);
+  flex-direction: column;
+}
+.forward-shadow-facts > div:last-child { border-right: 0; }
+.forward-shadow-facts strong {
+  color: var(--ink);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.forward-shadow-facts span {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 750;
+}
+.forward-shadow-facts small {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+.forward-shadow-model {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+  background: #fafbf9;
+}
+.forward-shadow-model > span {
+  display: flex;
+  min-width: 0;
+  min-height: 66px;
+  padding: 12px 15px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+  flex-direction: column;
+}
+.forward-shadow-model > span:last-child { border-right: 0; }
+.forward-shadow-model strong {
+  margin-bottom: 5px;
+  color: var(--ink);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.forward-shadow-model code {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 9px;
+}
+.forward-shadow-windows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+.forward-shadow-window {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  min-width: 0;
+  padding: 14px 15px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.forward-shadow-window:nth-child(2n) { border-right: 0; }
+.forward-shadow-window > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.forward-shadow-window time {
+  color: var(--muted);
+  font-size: 9px;
+}
+.forward-shadow-window > strong {
+  align-self: center;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.forward-shadow-window > small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.forward-shadow-window > code {
+  color: var(--muted);
+  font-size: 9px;
+  text-align: right;
+}
+.forward-shadow-window > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 750;
+  text-decoration: none;
+}
+.forward-shadow-window.closed > strong { color: var(--green-dark); }
+.forward-shadow-window.risk_exit > strong,
+.forward-shadow-window.void_source_gap > strong { color: #9b3a30; }
+
+@media (max-width: 1180px) {
+  .forward-shadow-facts,
+  .forward-shadow-model { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .forward-shadow-facts > div:nth-child(2),
+  .forward-shadow-model > span:nth-child(2) { border-right: 0; }
+  .forward-shadow-facts > div:nth-child(-n + 2),
+  .forward-shadow-model > span:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+}
+
+@media (max-width: 680px) {
+  .shadow-evidence-link {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .shadow-evidence-link a { grid-column: 2; }
+  .forward-shadow-facts,
+  .forward-shadow-model,
+  .forward-shadow-windows { grid-template-columns: 1fr; }
+  .forward-shadow-facts > div,
+  .forward-shadow-model > span,
+  .forward-shadow-window {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .forward-shadow-window {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
