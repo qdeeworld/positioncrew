@@ -38,6 +38,10 @@ import {
   sha256Commitment,
   type FreshMarketplaceChain,
 } from "../src/commerce/fresh-hire-schema.js";
+import {
+  VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE,
+  VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE,
+} from "../src/commerce/venus-testnet-native-supply-publication.js";
 import { PositionCrewRequestSchema } from "../src/contracts/index.js";
 import { canonicalHash } from "../src/core/canonical.js";
 import { PROVIDER_CATALOG } from "../src/marketplace/catalog.js";
@@ -649,6 +653,11 @@ async function api(
     if (url.pathname === EXTERNAL_COMPARISON_SNAPSHOT_ROUTE) {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
       return json(EXTERNAL_COMPARISON_SNAPSHOT, 200, "public, max-age=31536000, immutable");
+    }
+
+    if (url.pathname === VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE) {
+      if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
+      return json(VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE, 200, "public, max-age=31536000, immutable");
     }
 
     if (url.pathname === "/api/benchmark-hires") {

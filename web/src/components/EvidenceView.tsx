@@ -216,6 +216,22 @@ export function EvidenceView({
         </div>
       </section>
 
+      <section className="evidence-section" aria-labelledby="venus-native-supply-title">
+        <div className="section-bar">
+          <div><span className="section-kicker">Optional execution evidence</span><h2 id="venus-native-supply-title">Bounded Venus testnet supply receipt</h2></div>
+          <span className="state-label warn"><Coins size={13} /> BSC Testnet · 0.0001 tBNB</span>
+        </div>
+        <div className="operations-boundary">
+          <ShieldCheck size={16} aria-hidden="true" />
+          <span><strong>One disclosed-operator integration action.</strong> The immutable receipt binds the exact vBNB mint, block, events, before/after balance, Venus source commit, and transaction cost. Its frozen preflight records zero BSC mainnet native balance and pending nonce.</span>
+          <span className="delivery-links"><a href="/api/evidence/venus-testnet-native-supply/2026-08-24" target="_blank" rel="noreferrer">Receipt JSON <ExternalLink size={12} /></a><a href="https://testnet.bscscan.com/tx/0xf2b4a8790ff7f81fc832a365d89eb84f0554d2242c45faa886ba6819acb1773b" target="_blank" rel="noreferrer">Explorer <ExternalLink size={12} /></a><a href="https://github.com/VenusProtocol/venus-protocol/blob/2ef5ebeff8062bbc8b6cfcda67c2c176299373c0/contracts/Tokens/VTokens/VBNB.sol" target="_blank" rel="noreferrer">Pinned Venus source <ExternalLink size={12} /></a></span>
+        </div>
+        <div className="claim-warning">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span><strong>Claim boundary.</strong> Optional sponsor and execution evidence only. The preflight observed zero BSC-mainnet native BNB balance and pending nonce at one timestamp but did not inventory tokens or NFTs. It proves no external buyer, revenue, autonomous custody, strategy return, repeated track record, marketplace demand, or financial performance.</span>
+        </div>
+      </section>
+
       <section className="evidence-section aacp-section" aria-labelledby="aacp-title">
         <div className="section-bar">
           <div><span className="section-kicker">TermiX production rail</span><h2 id="aacp-title">AACP deployment and provider onboarding</h2></div>

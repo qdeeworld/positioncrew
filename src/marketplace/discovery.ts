@@ -19,6 +19,11 @@ import {
   FreshMarketplaceChainSchema,
   FreshMarketplaceHireRequestSchema,
 } from "../commerce/fresh-hire-schema.js";
+import {
+  VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE,
+  VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
+} from "../commerce/venus-testnet-native-supply-publication.js";
+import { VenusTestnetNativeSupplyEvidenceSchema } from "../commerce/venus-testnet-native-supply-evidence.js";
 
 type ServiceId = PositionCrewRequest["service"];
 
@@ -151,6 +156,7 @@ export function buildMarketplaceManifest(
     operatingRecordUrl: absolute(origin, "/api/operations/production"),
     marketplaceDeliveryEvidenceUrl: absolute(origin, "/api/benchmarks/marketplace-provenance"),
     externalComparisonSnapshotUrl: absolute(origin, EXTERNAL_COMPARISON_SNAPSHOT_ROUTE),
+    venusTestnetNativeSupplyEvidenceUrl: absolute(origin, VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE),
     aacpReadinessUrl: absolute(origin, "/api/commerce/aacp"),
     freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
     providers: PROVIDER_CATALOG.map((provider) => ({
@@ -168,6 +174,7 @@ export function buildMarketplaceManifest(
       judgeTrial: "NO_WALLET_PROVIDER_CALL",
       freshHistoricalHire: "D1_PERSISTED_ZERO_COST_HISTORICAL_FIXTURE",
       externalComparisons: "FOUR_THIRD_PARTY_EVIDENCE_ONLY_NON_ACTIVATABLE",
+      venusTestnetNativeSupply: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
       agentAdvantage: "PENDING_INDEPENDENT_BLIND_EVALUATION",
     },
   };
@@ -190,6 +197,10 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
   );
   schemas.ExternalComparisonSnapshot = z.toJSONSchema(
     ExternalComparisonSnapshotSchema,
+    { target: "draft-2020-12" },
+  );
+  schemas.VenusTestnetNativeSupplyEvidence = z.toJSONSchema(
+    VenusTestnetNativeSupplyEvidenceSchema,
     { target: "draft-2020-12" },
   );
   const providerPaths = Object.fromEntries(
@@ -251,6 +262,23 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/ExternalComparisonSnapshot" },
+              },
+            },
+          },
+        },
+      },
+    },
+    [VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE]: {
+      get: {
+        summary: "Read the immutable bounded Venus BSC Testnet native-supply receipt",
+        description: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
+        operationId: "getVenusTestnetNativeSupplyEvidence",
+        responses: {
+          "200": {
+            description: "One founder-controlled 0.0001 tBNB integration receipt with strict claim boundaries",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/VenusTestnetNativeSupplyEvidence" },
               },
             },
           },
