@@ -187,6 +187,12 @@ export async function runShadowGridScheduledSession(options = {}) {
     epochStartedAt: null,
     horizonEndsAt: null,
     targets: OFFSETS.map((offsetMinutes) => ({ offsetMinutes, targetAt: null })),
+    retryPolicy: {
+      ambiguousFetchFailure: "FAIL_CLOSED_NO_RETRY",
+      completedHttp5xxMaxRetriesPerTarget: 1,
+      retryDelayMilliseconds: retryDelay,
+      requestTimeoutMilliseconds: requestTimeout,
+    },
     attempts: [],
     claimBoundary: [],
     failure: null,
@@ -242,17 +248,15 @@ export async function runShadowGridScheduledSession(options = {}) {
             attemptNumber,
             requestedAt,
             completedAt: iso(milliseconds(now)),
-            outcome: "NETWORK_ERROR",
+            outcome: "AMBIGUOUS_FETCH_FAILURE",
             httpStatus: null,
             response: null,
             error: message(error),
           });
           await persist();
-          if (attemptNumber === 1) {
-            await sleep(retryDelay);
-            continue;
-          }
-          throw new Error(`Forward-shadow tick failed after one retry: ${message(error)}`);
+          throw new Error(
+            `Forward-shadow tick had an ambiguous fetch failure and was not retried: ${message(error)}`,
+          );
         }
 
         let body = null;
@@ -274,7 +278,12 @@ export async function runShadowGridScheduledSession(options = {}) {
             error: parseError ?? `HTTP ${response.status}`,
           });
           await persist();
-          if (response.status >= 500 && response.status <= 599 && attemptNumber === 1) {
+          if (
+            response.status >= 500 &&
+            response.status <= 599 &&
+            parseError === null &&
+            attemptNumber === 1
+          ) {
             await sleep(retryDelay);
             continue;
           }

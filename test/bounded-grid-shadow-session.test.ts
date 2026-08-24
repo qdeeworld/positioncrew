@@ -28,6 +28,10 @@ interface SessionArtifact {
   finalStatus: string | null;
   runId: string | null;
   targets: Array<{ targetAt: string | null }>;
+  retryPolicy: {
+    ambiguousFetchFailure: string;
+    completedHttp5xxMaxRetriesPerTarget: number;
+  };
   attempts: Array<{ outcome: string; response: unknown }>;
   claimBoundary: string[];
   failure: string | null;
@@ -178,10 +182,10 @@ describe("bounded-grid scheduled session collector", () => {
     expect(result.claimBoundary).toEqual(BOUNDARY);
   });
 
-  it("retries one network failure identically without shifting later targets", async () => {
+  it("retries one completed HTTP 5xx identically without shifting later targets", async () => {
     const runtime = harness([
       { body: tick("PRECOMMITTED", 2) },
-      { error: new Error("temporary outage") },
+      { body: { error: "temporary upstream failure" }, status: 503 },
       { body: tick("PRECOMMITTED", 3) },
       { body: tick("PRECOMMITTED", 4) },
       { body: tick("CLOSED", 5) },
@@ -204,11 +208,37 @@ describe("bounded-grid scheduled session collector", () => {
     expect(runtime.calls[4]!.requestedAt).toBe(HORIZON);
     expect(result.attempts.map((attempt: { outcome: string }) => attempt.outcome)).toEqual([
       "ACCEPTED",
-      "NETWORK_ERROR",
+      "HTTP_ERROR",
       "ACCEPTED",
       "ACCEPTED",
       "ACCEPTED",
     ]);
+    expect(result.retryPolicy).toMatchObject({
+      ambiguousFetchFailure: "FAIL_CLOSED_NO_RETRY",
+      completedHttp5xxMaxRetriesPerTarget: 1,
+    });
+  });
+
+  it.each([
+    ["timeout", "AbortError", "request timed out"],
+    ["socket reset", "Error", "socket reset by peer"],
+  ])("does not retry an ambiguous %s", async (_label, errorName, errorMessage) => {
+    const failure = new Error(errorMessage);
+    failure.name = errorName;
+    const runtime = harness([{ error: failure }]);
+
+    await expect(
+      runShadowGridScheduledSession({ environment: environment(), ...runtime }),
+    ).rejects.toThrow(/ambiguous fetch failure and was not retried/u);
+    expect(runtime.calls).toHaveLength(1);
+    expect(runtime.artifacts.at(-1)).toMatchObject({
+      status: "FAILED",
+      retryPolicy: {
+        ambiguousFetchFailure: "FAIL_CLOSED_NO_RETRY",
+        completedHttp5xxMaxRetriesPerTarget: 1,
+      },
+      attempts: [{ outcome: "AMBIGUOUS_FETCH_FAILURE" }],
+    });
   });
 
   it.each(["LATE_START_SKIPPED", "REFUSED", "VOID_SOURCE_GAP", "RISK_EXIT", "CLOSED"])(
@@ -252,10 +282,11 @@ describe("bounded-grid scheduled session collector", () => {
   });
 
   it("preserves accepted and failed attempts in a partial-failure artifact", async () => {
+    const timeout = new Error("request timed out after reaching the server");
+    timeout.name = "AbortError";
     const runtime = harness([
       { body: tick("PRECOMMITTED") },
-      { error: new Error("first outage") },
-      { error: new Error("second outage") },
+      { error: timeout },
     ]);
     await expect(
       runShadowGridScheduledSession({
@@ -263,19 +294,22 @@ describe("bounded-grid scheduled session collector", () => {
         retryDelayMilliseconds: 1_000,
         ...runtime,
       }),
-    ).rejects.toThrow(/after one retry/u);
+    ).rejects.toThrow(/ambiguous fetch failure and was not retried/u);
 
     const finalArtifact = runtime.artifacts.at(-1)!;
+    expect(runtime.calls).toHaveLength(2);
+    expect(
+      runtime.calls.filter((call) => call.requestedAt === "2026-08-24T12:22:00.000Z"),
+    ).toHaveLength(1);
     expect(finalArtifact.status).toBe("FAILED");
     expect(finalArtifact.attempts.map((attempt) => attempt.outcome)).toEqual([
       "ACCEPTED",
-      "NETWORK_ERROR",
-      "NETWORK_ERROR",
+      "AMBIGUOUS_FETCH_FAILURE",
     ]);
     expect(finalArtifact.attempts[0]!.response).toMatchObject({
       headHash: HEAD_HASH,
       eventCount: 2,
     });
-    expect(finalArtifact.failure).toMatch(/after one retry/u);
+    expect(finalArtifact.failure).toMatch(/ambiguous fetch failure and was not retried/u);
   });
 });
