@@ -438,7 +438,14 @@ function currentLendingResponse(
 
 async function installCurrentLendingHireRoutes(
   page: Page,
-  options: { abortCreate?: boolean; abortRun?: boolean; refused?: boolean; safeRefusal?: boolean } = {},
+  options: {
+    abortCreate?: boolean;
+    abortRun?: boolean;
+    refused?: boolean;
+    safeRefusal?: boolean;
+    staleRunning?: boolean;
+    getDelayMs?: number;
+  } = {},
 ) {
   const now = new Date();
   const account = options.safeRefusal
@@ -579,7 +586,11 @@ async function installCurrentLendingHireRoutes(
     await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(chain("RUNNING")) });
   });
   await page.route(new RegExp(`/api/benchmark-hires/${hireId}$`), async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(chain("COMPLETED")) });
+    if (options.getDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, options.getDelayMs));
+    }
+    const state = options.staleRunning && runCount === 0 ? "RUNNING" : "COMPLETED";
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(chain(state)) });
   });
   await page.context().route(`**/api/benchmark-receipts/${receiptId}`, async (route) => {
     receiptLoadCount += 1;
@@ -1632,4 +1643,42 @@ test("restores a server-backed recent job on the same device without caching its
   await panel.getByRole("button", { name: "Clear device list" }).click();
   await expect(panel.getByText("No saved jobs on this device.", { exact: false })).toBeVisible();
   expect(await page.evaluate(() => window.localStorage.getItem("positioncrew.recent-jobs.v1"))).toBeNull();
+});
+
+test("reclaims a stale running job through the existing hire instead of creating a replacement", async ({ page }) => {
+  const routes = await installCurrentLendingHireRoutes(page, { safeRefusal: true, staleRunning: true });
+  await page.addInitScript(({ hireId }) => {
+    window.localStorage.setItem("positioncrew.recent-jobs.v1", JSON.stringify({
+      schemaVersion: "positioncrew.recent-jobs.v1",
+      entries: [{ hireId, service: "LENDING_RESCUE", rememberedAt: "2026-08-24T12:00:00.000Z" }],
+    }));
+  }, { hireId: routes.hireId });
+
+  await page.goto("/#jobs");
+  const panel = page.getByTestId("recent-jobs-device");
+  await expect(panel.getByText("Running", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "Recover run" }).click();
+  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  expect(routes.runCount).toBe(1);
+});
+
+test("does not reinsert a device reference cleared while server hydration is in flight", async ({ page }) => {
+  const routes = await installCurrentLendingHireRoutes(page, { safeRefusal: true, getDelayMs: 300 });
+  await page.addInitScript(({ hireId }) => {
+    window.localStorage.setItem("positioncrew.recent-jobs.v1", JSON.stringify({
+      schemaVersion: "positioncrew.recent-jobs.v1",
+      entries: [{ hireId, service: "LENDING_RESCUE", rememberedAt: "2026-08-24T12:00:00.000Z" }],
+    }));
+  }, { hireId: routes.hireId });
+
+  await page.goto("/#jobs");
+  const panel = page.getByTestId("recent-jobs-device");
+  await expect(panel.getByText("Checking", { exact: true })).toBeVisible();
+  await page.evaluate((key) => {
+    window.localStorage.removeItem(key);
+    window.dispatchEvent(new StorageEvent("storage", { key, newValue: null }));
+  }, "positioncrew.recent-jobs.v1");
+  await expect(panel.getByText("No saved jobs on this device.", { exact: false })).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(panel.getByText("Lending Rescue", { exact: true })).toHaveCount(0);
 });

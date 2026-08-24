@@ -88,6 +88,7 @@ function stateCopy(item: RecentJobItem): { label: string; detail: string } {
 export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) => void }) {
   const mounted = useRef(true);
   const suppressedIds = useRef(new Set<string>());
+  const trackedIds = useRef(new Set<string>());
   const [items, setItems] = useState<RecentJobItem[]>([]);
   const [initializing, setInitializing] = useState(true);
   const [storageAvailable, setStorageAvailable] = useState(true);
@@ -140,7 +141,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
     try {
       let chain = await retrieveChain(reference);
       updateItem(reference, { phase: "READY", chain, busy: true, error: null });
-      if (chain.job.state === "RUNNING" || (watchNewCreation && chain.job.state === "CREATED")) {
+      if (watchNewCreation && (chain.job.state === "RUNNING" || chain.job.state === "CREATED")) {
         chain = await followJob(reference, chain, watchNewCreation);
       }
       updateItem(reference, { phase: "READY", chain, busy: false, error: null });
@@ -152,6 +153,16 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
   }, [followJob, updateItem]);
 
   const hydrate = useCallback((history: RecentJobHistoryRead) => {
+    const nextIds = new Set(history.entries.map((entry) => entry.hireId));
+    for (const hireId of trackedIds.current) {
+      if (!nextIds.has(hireId)) {
+        suppressedIds.current.add(hireId);
+      }
+    }
+    for (const hireId of nextIds) {
+      suppressedIds.current.delete(hireId);
+    }
+    trackedIds.current = nextIds;
     setStorageAvailable(history.available);
     setCorruptCount(history.corruptCount);
     setItems(history.entries.map((reference) => ({
@@ -186,6 +197,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
         return;
       }
       suppressedIds.current.delete(detail.reference.hireId);
+      trackedIds.current.add(detail.reference.hireId);
       updateItem(detail.reference, { phase: "LOADING", chain: null, busy: true, error: null });
       void refresh(detail.reference, true);
     };
@@ -242,6 +254,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
     setStorageAvailable(result.ok);
     if (result.ok) {
       suppressedIds.current.add(item.reference.hireId);
+      trackedIds.current.delete(item.reference.hireId);
       setItems((current) => current.filter((candidate) => candidate.reference.hireId !== item.reference.hireId));
     }
   };
@@ -253,6 +266,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
       for (const item of items) {
         suppressedIds.current.add(item.reference.hireId);
       }
+      trackedIds.current.clear();
       setItems([]);
       setCorruptCount(0);
     }
@@ -329,12 +343,12 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
                           </a>
                         </>
                       )}
-                      {item.phase === "READY" && chain?.job.state === "CREATED" && (
+                      {item.phase === "READY" && (chain?.job.state === "CREATED" || chain?.job.state === "RUNNING") && (
                         <button type="button" onClick={() => void resume(item)} disabled={item.busy}>
-                          <Play size={16} aria-hidden="true" /> Resume run
+                          <Play size={16} aria-hidden="true" /> {chain.job.state === "RUNNING" ? "Recover run" : "Resume run"}
                         </button>
                       )}
-                      {(item.phase === "UNAVAILABLE" || (item.phase === "READY" && chain?.job.state === "RUNNING")) && (
+                      {item.phase === "UNAVAILABLE" && (
                         <button type="button" onClick={() => void refresh(item.reference)} disabled={item.busy}>
                           <RefreshCw className={item.busy ? "spin" : undefined} size={16} aria-hidden="true" /> Retry status
                         </button>

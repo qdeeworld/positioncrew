@@ -1523,6 +1523,7 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .recent-device-table td {
     display: grid;
     grid-template-columns: minmax(96px, 0.36fr) 1fr;
+    height: auto;
     gap: 12px;
     padding: 7px 0;
     border: 0;

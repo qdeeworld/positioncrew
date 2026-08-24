@@ -1,4 +1,4 @@
-import type { FreshMarketplaceChain, ServiceId, SessionJob } from "./types.js";
+import type { FixtureJobResponse, FreshMarketplaceChain, ServiceId, SessionJob } from "./types.js";
 
 export const RECENT_JOB_STORAGE_KEY = "positioncrew.recent-jobs.v1";
 export const RECENT_JOB_CHANGED_EVENT = "positioncrew:recent-job-changed";
@@ -56,6 +56,101 @@ function hasExactKeys(value: Record<string, unknown>, keys: string[]): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function isFixtureJobResponseForChain(
+  value: unknown,
+  reference: RecentJobReference,
+  expectedJobId: string,
+  expectedProviderId: string,
+  expectedDeliverableHash: string,
+  expectedEvaluationHash: string,
+): value is FixtureJobResponse {
+  if (!isRecord(value) ||
+    value.schemaVersion !== "positioncrew.fixture-job-response.v1" ||
+    !["FROZEN_BSC_TEST_FIXTURE", "CALLER_SUPPLIED_OBSERVATIONS"].includes(String(value.evidenceMode)) ||
+    value.commerceMode !== "IN_MEMORY_CONFORMANCE" ||
+    value.advantageStatus !== "PENDING_INDEPENDENT_BLIND_EVALUATION" ||
+    typeof value.generatedAt !== "string" ||
+    !Number.isFinite(Date.parse(value.generatedAt)) ||
+    !isStringArray(value.claimBoundary)) {
+    return false;
+  }
+
+  const benchmarkLock = value.benchmarkLock;
+  if (benchmarkLock !== null && (!isRecord(benchmarkLock) ||
+    typeof benchmarkLock.fixtureHash !== "string" ||
+    typeof benchmarkLock.rubricHash !== "string" ||
+    typeof benchmarkLock.protocolHash !== "string")) {
+    return false;
+  }
+
+  const embeddedReceipt = value.receipt;
+  const result = value.result;
+  if (!isRecord(embeddedReceipt) ||
+    !["PUBLIC_REPRODUCIBLE", "SESSION_EMBEDDED"].includes(String(embeddedReceipt.mode)) ||
+    !(embeddedReceipt.path === null || typeof embeddedReceipt.path === "string") ||
+    embeddedReceipt.evaluationHash !== expectedEvaluationHash ||
+    !isRecord(result)) {
+    return false;
+  }
+
+  const responseJob = result.job;
+  const request = result.request;
+  const deliverable = result.deliverable;
+  const evaluation = result.evaluation;
+  if (!isRecord(responseJob) ||
+    responseJob.jobId !== expectedJobId ||
+    typeof responseJob.state !== "string" ||
+    typeof responseJob.envelopeHash !== "string" ||
+    responseJob.providerId !== expectedProviderId ||
+    typeof responseJob.evaluatorId !== "string" ||
+    !Array.isArray(responseJob.history) ||
+    !responseJob.history.every((entry) => isRecord(entry) &&
+      typeof entry.state === "string" &&
+      typeof entry.at === "string" &&
+      typeof entry.reference === "string") ||
+    !isRecord(responseJob.deliverable) ||
+    responseJob.deliverable.deliverableHash !== expectedDeliverableHash) {
+    return false;
+  }
+
+  if (!isRecord(request) ||
+    request.service !== reference.service ||
+    typeof request.account !== "string" ||
+    ![56, 97].includes(Number(request.chainId)) ||
+    typeof request.maxActionUsd !== "string" ||
+    typeof request.maxGasUsd !== "string" ||
+    typeof request.maxSlippageBps !== "number" ||
+    !Number.isFinite(request.maxSlippageBps) ||
+    typeof request.maxDataAgeSeconds !== "number" ||
+    !Number.isFinite(request.maxDataAgeSeconds)) {
+    return false;
+  }
+
+  if (!isRecord(deliverable) ||
+    deliverable.service !== reference.service ||
+    typeof deliverable.status !== "string" ||
+    typeof deliverable.decision !== "string" ||
+    typeof deliverable.summary !== "string" ||
+    typeof deliverable.expiresAt !== "string") {
+    return false;
+  }
+
+  return isRecord(evaluation) &&
+    typeof evaluation.score === "number" &&
+    Number.isFinite(evaluation.score) &&
+    typeof evaluation.passed === "boolean" &&
+    evaluation.evaluationHash === expectedEvaluationHash &&
+    Array.isArray(evaluation.checks) &&
+    evaluation.checks.every((check) => isRecord(check) &&
+      typeof check.id === "string" &&
+      typeof check.passed === "boolean" &&
+      typeof check.critical === "boolean");
 }
 
 export function isRecentJobReference(value: unknown): value is RecentJobReference {
@@ -210,6 +305,7 @@ export function isFreshMarketplaceChainForReference(
   }
 
   if (hire.hireId !== reference.hireId || hire.service !== reference.service ||
+    typeof hire.providerId !== "string" ||
     typeof job.jobId !== "string" ||
     !["CREATED", "RUNNING", "COMPLETED", "FAILED"].includes(String(job.state))) {
     return false;
@@ -217,7 +313,21 @@ export function isFreshMarketplaceChainForReference(
 
   if (job.state === "COMPLETED") {
     const receipt = value.receipt;
-    if (!isRecord(receipt) || typeof receipt.publicUrl !== "string" || !isRecord(receipt.response)) {
+    if (!isRecord(receipt) ||
+      typeof receipt.receiptId !== "string" ||
+      typeof receipt.publicUrl !== "string" ||
+      typeof receipt.responseHash !== "string" ||
+      typeof receipt.deliverableHash !== "string" ||
+      typeof receipt.evaluationHash !== "string" ||
+      typeof receipt.createdAt !== "string" ||
+      !isFixtureJobResponseForChain(
+        receipt.response,
+        reference,
+        job.jobId,
+        hire.providerId,
+        receipt.deliverableHash,
+        receipt.evaluationHash,
+      )) {
       return false;
     }
   }

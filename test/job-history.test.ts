@@ -96,14 +96,70 @@ describe("recent job device index", () => {
 
   it("accepts only a server chain bound to the saved hire and service", () => {
     const saved = reference(1);
+    const deliverableHash = `sha256:${"b".repeat(64)}`;
+    const evaluationHash = `sha256:${"e".repeat(64)}`;
+    const response = {
+      schemaVersion: "positioncrew.fixture-job-response.v1",
+      evidenceMode: "CALLER_SUPPLIED_OBSERVATIONS",
+      commerceMode: "IN_MEMORY_CONFORMANCE",
+      advantageStatus: "PENDING_INDEPENDENT_BLIND_EVALUATION",
+      generatedAt: "2026-08-24T12:00:00.000Z",
+      claimBoundary: ["Unsigned output."],
+      benchmarkLock: null,
+      receipt: { mode: "SESSION_EMBEDDED", path: null, evaluationHash },
+      result: {
+        job: {
+          jobId: "job-1",
+          state: "COMPLETED",
+          envelopeHash: `sha256:${"a".repeat(64)}`,
+          providerId: "positioncrew:lending-rescue:v1",
+          evaluatorId: "positioncrew:conformance:v1",
+          history: [{ state: "COMPLETED", at: "2026-08-24T12:00:00.000Z", reference: deliverableHash }],
+          deliverable: { deliverableHash },
+        },
+        request: {
+          service: saved.service,
+          account: "0x0000000000000000000000000000000000000000",
+          chainId: 56,
+          maxActionUsd: "100",
+          maxGasUsd: "1",
+          maxSlippageBps: 30,
+          maxDataAgeSeconds: 120,
+        },
+        deliverable: {
+          service: saved.service,
+          status: "REFUSED_CONSTRAINTS",
+          decision: "REFUSED_CONSTRAINTS",
+          summary: "No position was found.",
+          expiresAt: "2026-08-24T12:05:00.000Z",
+        },
+        evaluation: { score: 100, passed: true, evaluationHash, checks: [] },
+      },
+    };
     const chain = {
       schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
-      hire: { hireId: saved.hireId, service: saved.service },
+      hire: { hireId: saved.hireId, service: saved.service, providerId: "positioncrew:lending-rescue:v1" },
       job: { jobId: "job-1", state: "COMPLETED" },
-      receipt: { publicUrl: "/receipt/1", response: {} },
+      receipt: {
+        receiptId: "receipt-1",
+        publicUrl: "/receipt/1",
+        responseHash: `sha256:${"9".repeat(64)}`,
+        deliverableHash,
+        evaluationHash,
+        createdAt: "2026-08-24T12:00:00.000Z",
+        response,
+      },
     };
     expect(isFreshMarketplaceChainForReference(chain, saved)).toBe(true);
     expect(isFreshMarketplaceChainForReference({ ...chain, hire: { ...chain.hire, hireId: reference(2).hireId } }, saved)).toBe(false);
     expect(isFreshMarketplaceChainForReference({ ...chain, receipt: null }, saved)).toBe(false);
+    expect(isFreshMarketplaceChainForReference({
+      ...chain,
+      receipt: { ...chain.receipt, response: { ...response, result: { ...response.result, request: { ...response.result.request, service: "BOUNDED_GRID" } } } },
+    }, saved)).toBe(false);
+    expect(isFreshMarketplaceChainForReference({
+      ...chain,
+      receipt: { ...chain.receipt, response: { ...response, result: { ...response.result, job: { ...response.result.job, jobId: "other-job" } } } },
+    }, saved)).toBe(false);
   });
 });
