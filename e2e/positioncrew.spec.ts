@@ -626,7 +626,9 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.locator(".result-boundary")).toContainText(
     "Block-pinned Venus input. The provider output is unsigned and must be revalidated against current protocol state before execution.",
   );
-  await expect(page.getByText("100/100", { exact: true }).first()).toBeVisible();
+  const recentJobs = page.getByTestId("recent-jobs-device");
+  await expect(recentJobs.getByText("1 saved job", { exact: true })).toBeVisible();
+  await expect(recentJobs.getByText("Completed", { exact: true })).toBeVisible();
   const advantageStatus = page.getByRole("region", { name: "Founder Agent Advantage comparison status" });
   await expect(advantageStatus.getByText("Founder comparison published", { exact: true })).toBeVisible();
   await expect(advantageStatus).toContainText("Bounded lending-position rescue: exact canonical output match");
@@ -1015,7 +1017,7 @@ test("all three non-lending current hires return category-specific durable resul
     await expect(page.getByRole("heading", { name: candidate.output })).toBeVisible();
     await expect(page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" })).toBeVisible();
   }
-  await expect(page.getByText("3 jobs", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("recent-jobs-device").getByText("3 saved jobs", { exact: true })).toBeVisible();
   expect(hires.every((hire) => hire.createBodies.length === 1)).toBe(true);
 });
 
@@ -1594,3 +1596,40 @@ async function installCurrentCategoryHireRoutes(
     get receiptLoadCount() { return receiptLoadCount; },
   };
 }
+
+test("restores a server-backed recent job on the same device without caching its financial payload", async ({ page }) => {
+  const routes = await installCurrentLendingHireRoutes(page, { safeRefusal: true });
+  await page.addInitScript(({ hireId }) => {
+    window.localStorage.setItem("positioncrew.recent-jobs.v1", JSON.stringify({
+      schemaVersion: "positioncrew.recent-jobs.v1",
+      entries: [{
+        hireId,
+        service: "LENDING_RESCUE",
+        rememberedAt: "2026-08-24T12:00:00.000Z",
+      }],
+    }));
+  }, { hireId: routes.hireId });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#jobs");
+
+  const panel = page.getByTestId("recent-jobs-device");
+  await expect(panel.getByRole("heading", { name: "Recent jobs on this device" })).toBeVisible();
+  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(panel.getByText("This browser stores job references only.", { exact: false })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Open result" })).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Open receipt" })).toBeVisible();
+
+  const serialized = await page.evaluate(() => window.localStorage.getItem("positioncrew.recent-jobs.v1") ?? "");
+  expect(serialized).not.toMatch(/request|response|account|collateral|wallet/i);
+  expect(serialized).toContain(routes.hireId);
+
+  await page.reload();
+  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "Open result" }).click();
+  await expect(page).toHaveURL(/#jobs/);
+
+  await panel.getByRole("button", { name: "Clear device list" }).click();
+  await expect(panel.getByText("No saved jobs on this device.", { exact: false })).toBeVisible();
+  expect(await page.evaluate(() => window.localStorage.getItem("positioncrew.recent-jobs.v1"))).toBeNull();
+});

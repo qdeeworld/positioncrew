@@ -1,3 +1,4 @@
+import { rememberRecentJobOnDevice } from "./job-history";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { PROVIDER_CATALOG } from "../../src/marketplace/catalog.js";
@@ -347,6 +348,11 @@ export default function App() {
         if (!trace) throw new Error("Persisted marketplace hire did not return a chain");
         let activeTrace: FreshMarketplaceChain = trace;
         setMarketplaceTrace(activeTrace);
+        rememberRecentJobOnDevice({
+          hireId: activeTrace.hire.hireId,
+          service: activeTrace.hire.service,
+          rememberedAt: activeTrace.hire.createdAt,
+        });
         const runResponse = await fetch("/api/benchmark-hires/" + encodeURIComponent(activeTrace.hire.hireId) + "/jobs", {
           method: "POST",
           headers: { Accept: "application/json" },
@@ -418,7 +424,6 @@ export default function App() {
           fixture={fixture}
           activeJob={activeJob}
           marketplaceTrace={marketplaceTrace}
-          sessionJobs={sessionJobs}
           loading={loading}
           onRun={runJob}
           onSelectJob={selectSessionJob}
@@ -437,10 +442,6 @@ export default function App() {
           advantagePublicationLoadState={advantagePublicationLoadState}
           founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState}
           forwardShadowLedger={forwardShadowLedger}
-          onClearJobs={() => {
-            setSessionJobs([]);
-            setActiveJob(null);
-          }}
         />
       );
     }
