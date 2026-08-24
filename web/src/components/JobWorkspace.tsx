@@ -1099,7 +1099,11 @@ export function JobWorkspace({
     (service === "LENDING_RESCUE" && (!liveRequest || !liveLendingObservation)) ||
     (!liveRequest && (service === "BOUNDED_GRID" || service === "YIELD_OPTIMIZATION"))
   );
-  const inputsDisabled = !fixture || loading || inputMode === "locked" || liveMarketPending || service === "LENDING_RESCUE";
+  const currentLendingHireReady = service === "LENDING_RESCUE" &&
+    inputMode === "interactive" &&
+    Boolean(liveRequest && liveLendingObservation);
+  const inputsDisabled = (!fixture && !currentLendingHireReady) ||
+    loading || inputMode === "locked" || liveMarketPending || service === "LENDING_RESCUE";
 
   function updateDraft<K extends keyof JobDraft>(key: K, value: JobDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -1296,7 +1300,7 @@ export function JobWorkspace({
                   ? "No persisted marketplace hire"
                   : `${provider?.price.amount ?? "5"} ${provider?.price.token ?? "TEST_USDC"} listed price · no wallet required`}</small>
             </span>
-            <button className="primary-action" type="button" onClick={submitJob} aria-describedby="request-boundary" disabled={loading || !fixture || liveMarketPending || (service === "LENDING_RESCUE" && !draft.allowRepay && !draft.allowCollateral)}>
+            <button className="primary-action" type="button" onClick={submitJob} aria-describedby="request-boundary" disabled={loading || (!fixture && !currentLendingHireReady) || liveMarketPending || (service === "LENDING_RESCUE" && !draft.allowRepay && !draft.allowCollateral)}>
               {loading ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
               {loading ? (marketplaceTrace?.job.status.replaceAll("_", " ") ?? "Recording hire") : service === "LENDING_RESCUE" && inputMode === "interactive" ? "Hire and run current position" : inputMode === "locked" && service !== "YIELD_OPTIMIZATION" ? "Replay historical receipt" : `Run ${serviceLabel(service).toLowerCase()} simulation`}
               {!loading && <ArrowRight size={15} />}

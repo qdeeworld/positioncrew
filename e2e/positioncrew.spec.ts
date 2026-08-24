@@ -560,6 +560,33 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
+test("a current lending hire does not depend on the historical fixture matrix", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page);
+  await page.route("**/api/matrix", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Historical fixture matrix unavailable" }),
+    });
+  });
+
+  await page.goto("/#jobs");
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
+  await expect(page.getByText("Current request loaded", { exact: true })).toBeVisible();
+  const hireButton = page.getByRole("button", { name: "Hire and run current position" });
+  await expect(hireButton).toBeEnabled();
+  await hireButton.click();
+
+  await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
+  await expect(page.locator('.request-boundary[role="status"]')).toContainText("COMPLETED");
+  expect(mockedHire.createBodies).toHaveLength(1);
+  expect(mockedHire.createBodies[0]).toMatchObject({
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+  });
+});
+
 test("a lost hire response reuses the unresolved idempotency key", async ({ page }) => {
   const mockedHire = await installCurrentLendingHireRoutes(page, { abortCreate: true });
   await page.goto("/#marketplace");
