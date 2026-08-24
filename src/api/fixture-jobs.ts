@@ -228,11 +228,11 @@ export async function runSuppliedLendingRequest(
   return runSuppliedProviderRequest(request, now);
 }
 
-export async function runCurrentBlockPinnedLendingRequest(
+export async function runCurrentBlockPinnedProviderRequest(
   input: unknown,
   now: Date,
 ): Promise<FixtureJobResponse> {
-  const request = LendingRescueRequestSchema.parse(input);
+  const request = PositionCrewRequestSchema.parse(input);
   const result = await runProviderJob(new MemoryCommerceAdapter(), request, now, {
     persistExpiredRefusal: true,
   });
@@ -243,9 +243,9 @@ export async function runCurrentBlockPinnedLendingRequest(
     advantageStatus: "PENDING_INDEPENDENT_BLIND_EVALUATION",
     generatedAt: now.toISOString(),
     claimBoundary: [
-      "The exact block-pinned Venus request was persisted before this provider run and is committed by the durable hire receipt.",
-      "The provider evaluates the persisted observation without independently re-fetching BSC state and does not broadcast a transaction.",
-      "The run costs $0.00, requires no wallet, creates no settlement, and must be revalidated before any financial action.",
+      "The exact block-referenced BSC request was persisted before this provider run and is committed by the durable hire receipt.",
+      "The provider evaluates the persisted caller-supplied observation without independently re-fetching BSC state and does not sign or broadcast a transaction.",
+      "The run costs $0.00, requires no wallet, creates no payment or settlement, and must be revalidated before any financial action.",
     ],
     benchmarkLock: null,
     receipt: {

@@ -65,8 +65,6 @@ export function MarketplaceView({
   const selectedTask = TASKS.find((task) => task.id === selectedService);
   const SelectedIcon = selectedTask?.icon;
   const catalogLoading = providers.length === 0;
-  const selectedIsCurrentLending = selectedService === "LENDING_RESCUE";
-  const selectedIsSimulation = selectedService === "YIELD_OPTIMIZATION";
 
   return (
     <main className="marketplace-page">
@@ -108,7 +106,7 @@ export function MarketplaceView({
               <span className="task-deck-top"><span>{task.index}</span><Icon size={19} aria-hidden="true" /></span>
               <strong>{task.title}</strong>
               <small>{task.description}</small>
-              <span className="task-deck-foot"><span><b>{task.id === "LENDING_RESCUE" ? "$0 current hire" : task.id === "YIELD_OPTIMIZATION" ? "Simulation" : "$0 evidence replay"}</b><small>{task.id === "LENDING_RESCUE" ? "Block-pinned Venus · no wallet" : task.id === "YIELD_OPTIMIZATION" ? "No frozen comparison task" : "Historical fixture · no wallet"}</small></span><ArrowUpRight size={15} aria-hidden="true" /></span>
+              <span className="task-deck-foot"><span><b>$0 current hire</b><small>{task.currentSource} · no wallet</small></span><ArrowUpRight size={15} aria-hidden="true" /></span>
             </button>
           );
         })}
@@ -207,7 +205,7 @@ export function MarketplaceView({
                   <div><span>{selected.category}</span><h2>{selected.name}</h2></div>
                 </div>
                 <div className="provider-detail-meta">
-                  <strong>{selectedIsCurrentLending ? "$0.00" : selectedIsSimulation ? "Free simulation" : "$0 replay"}<small>{selectedIsCurrentLending ? "current block-pinned hire · no wallet" : selectedIsSimulation ? "not marketplace evidence" : "historical evidence · no wallet"}</small></strong>
+                  <strong>$0.00<small>current block-pinned hire · no wallet</small></strong>
                   <span className={`availability-label ${selectedResult ? "ready" : "pending"}`}><i /> {selectedResult ? "Reachable" : "Checking"}</span>
                 </div>
                 <p className="provider-summary">{selected.summary}</p>
@@ -221,7 +219,7 @@ export function MarketplaceView({
                   <div><dt><BadgeCheck size={14} /> Conformance</dt><dd>{selectedResult?.result.evaluation.score ?? "-"}/100 · {selectedResult?.result.job.state ?? "Checking"}</dd></div>
                 </dl>
                 <button className="primary-action" type="button" onClick={() => onCreateJob(selected.service)}>
-                  {selectedIsCurrentLending ? "Load current position and hire" : selectedIsSimulation ? `Open ${serviceLabel(selected.service).toLowerCase()} simulation` : `Open ${serviceLabel(selected.service).toLowerCase()} workspace`}
+                  {selectedTask?.currentAction ?? `Open current ${serviceLabel(selected.service).toLowerCase()} hire`}
                   <ArrowRight size={16} aria-hidden="true" />
                 </button>
                 {selectedResult?.receipt.path ? (
@@ -233,11 +231,7 @@ export function MarketplaceView({
                 ) : null}
                 <div className="provider-boundary">
                   <strong>Trial boundary</strong>
-                  <span>{selectedIsCurrentLending
-                    ? "$0 · no wallet · current block-pinned read · persisted request/result receipt · unsigned plan or refusal · no transaction execution or payment"
-                    : selectedIsSimulation
-                      ? "Interactive simulation only · no persisted marketplace-hire claim"
-                      : "$0 · no wallet · historical evidence replay · no current-action, payment, or external-demand claim"}</span>
+                  <span>$0 · no wallet · current block-pinned read · persisted request/result receipt · unsigned plan or refusal · no transaction execution, payment, or external-demand claim</span>
                 </div>
               </>
             ) : (

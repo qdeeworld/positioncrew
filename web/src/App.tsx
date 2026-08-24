@@ -13,7 +13,7 @@ import type {
   PublicationLoadState,
   BenchmarkRepeatabilityMatrixResponse,
   BenchmarkRepeatabilityResponse,
-  CurrentLendingObservation,
+  CurrentMarketplaceObservation,
   Erc8183TestnetLedger,
   ExternalComparisonSnapshot,
   FixtureJobResponse,
@@ -30,7 +30,14 @@ import type {
   SystemTelemetry,
 } from "./types";
 
-const FRESH_BENCHMARK_BY_SERVICE: Partial<Record<ServiceId, FreshMarketplaceBenchmarkSlug>> = {
+const CURRENT_HIRE_SLUG_BY_SERVICE: Record<ServiceId, FreshMarketplaceBenchmarkSlug> = {
+  LENDING_RESCUE: "lending-rescue",
+  LP_REBALANCE: "lp-rebalance",
+  YIELD_OPTIMIZATION: "yield-optimization",
+  BOUNDED_GRID: "bounded-grid",
+};
+
+const HISTORICAL_HIRE_SLUG_BY_SERVICE: Partial<Record<ServiceId, FreshMarketplaceBenchmarkSlug>> = {
   LENDING_RESCUE: "lending-rescue",
   LP_REBALANCE: "lp-rebalance",
   BOUNDED_GRID: "bounded-grid",
@@ -176,22 +183,30 @@ export default function App() {
   async function runJob(
     request: Record<string, unknown>,
     mode: JobRequestMode,
-    observation?: CurrentLendingObservation,
+    observation?: CurrentMarketplaceObservation,
   ) {
     setLoading(true);
     setError(null);
     const startedAt = performance.now();
     try {
-      const benchmarkSlug = FRESH_BENCHMARK_BY_SERVICE[request.service as ServiceId];
+      const service = request.service as ServiceId;
+      const currentPinnedHire = mode === "CALLER_SUPPLIED_OBSERVATIONS";
+      if (currentPinnedHire && !observation) {
+        throw new Error("Current marketplace hire is missing its block-pinned observation");
+      }
+      const benchmarkSlug = currentPinnedHire
+        ? CURRENT_HIRE_SLUG_BY_SERVICE[service]
+        : HISTORICAL_HIRE_SLUG_BY_SERVICE[service];
       const selectedProvider = providers.find((candidate) => candidate.service === request.service);
-      const currentPinnedLending = mode === "CALLER_SUPPLIED_OBSERVATIONS" &&
-        request.service === "LENDING_RESCUE";
       const historicalFixture = mode === "FROZEN_FIXTURE";
-      if ((currentPinnedLending || historicalFixture) && benchmarkSlug && selectedProvider) {
-        if (currentPinnedLending && !observation) {
-          throw new Error("Current lending hire is missing its block-pinned observation");
-        }
-        const requestKey = currentPinnedLending
+      if (currentPinnedHire && (!benchmarkSlug || !selectedProvider)) {
+        throw new Error("Current persisted hiring is unavailable for this provider");
+      }
+      if (historicalFixture && (!benchmarkSlug || !selectedProvider)) {
+        throw new Error("Historical persisted replay is unavailable for this provider");
+      }
+      if ((currentPinnedHire || historicalFixture) && benchmarkSlug && selectedProvider) {
+        const requestKey = currentPinnedHire
           ? JSON.stringify({ request, observation })
           : `historical-fixture:${benchmarkSlug}`;
         const pendingHire = unresolvedFreshHire.current?.benchmarkSlug === benchmarkSlug &&
@@ -211,7 +226,7 @@ export default function App() {
           const createResponse = await fetch("/api/benchmark-hires", {
             method: "POST",
             headers: { Accept: "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify(currentPinnedLending
+            body: JSON.stringify(currentPinnedHire
               ? {
                   schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
                   idempotencyKey: logicalHire.idempotencyKey,

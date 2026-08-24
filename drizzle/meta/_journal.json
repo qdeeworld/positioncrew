@@ -15,6 +15,13 @@
       "when": 1787531465087,
       "tag": "0001_current_block_pinned_hires",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787535065087,
+      "tag": "0002_four_category_current_hires",
+      "breakpoints": true
     }
   ]
 }

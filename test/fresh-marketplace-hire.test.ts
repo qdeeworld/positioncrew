@@ -41,6 +41,7 @@ const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function semanticSqlStatements(sql: string): string[] {
   return sql
+    .replaceAll("--> statement-breakpoint", "")
     .split(";")
     .map((statement) => statement.replace(/\s+/g, " ").trim())
     .filter(Boolean);
@@ -998,14 +999,17 @@ describe("fresh marketplace hire contract", () => {
     const drizzleRoot = resolve(PROJECT_ROOT, "drizzle");
     const generatedMigrationName = "0000_fresh_benchmark_hires.sql";
     const generatedCurrentMigrationName = "0001_current_block_pinned_hires.sql";
+    const generatedFourCategoryMigrationName = "0002_four_category_current_hires.sql";
     expect(readdirSync(drizzleRoot).sort()).toEqual([
       generatedMigrationName,
       generatedCurrentMigrationName,
+      generatedFourCategoryMigrationName,
       "meta",
     ]);
     expect(readdirSync(resolve(drizzleRoot, "meta")).sort()).toEqual([
       "0000_snapshot.json",
       "0001_snapshot.json",
+      "0002_snapshot.json",
       "_journal.json",
     ]);
 
@@ -1028,6 +1032,7 @@ describe("fresh marketplace hire contract", () => {
     expect(journal.entries?.map(({ idx, tag }) => ({ idx, tag }))).toEqual([
       { idx: 0, tag: "0000_fresh_benchmark_hires" },
       { idx: 1, tag: "0001_current_block_pinned_hires" },
+      { idx: 2, tag: "0002_four_category_current_hires" },
     ]);
 
     const currentMigration = readFileSync(
@@ -1047,5 +1052,185 @@ describe("fresh marketplace hire contract", () => {
         .replace(/\s+/g, " ")
         .trim(),
     ).toBe(currentMigration.replace(/\s+/g, " ").trim());
+  });
+});
+
+
+const FOUR_CATEGORY_CURRENT_CASES = [
+  {
+    service: "BOUNDED_GRID",
+    benchmarkSlug: "bounded-grid",
+    providerSlug: "bounded-grid",
+    fixturePath: "fixtures/bounded-grid/bnb-usdt-grid.v1.json",
+    blockNumber: "117112307",
+    sourceId: "pancake-v3-mainnet-block-117112307",
+    protocol: "PancakeSwap V3 bounded grid policy",
+    requestId: "pancake-grid-117112307",
+  },
+  {
+    service: "LP_REBALANCE",
+    benchmarkSlug: "lp-rebalance",
+    providerSlug: "lp-rebalance",
+    fixturePath: "fixtures/lp-rebalance/out-of-range-v3-position.v1.json",
+    blockNumber: "115618500",
+    sourceId: "pancake-position-mainnet-block-115618500",
+    protocol: "PancakeSwap V3 position analysis",
+    requestId: "pancake-position-1456267-115618500",
+  },
+  {
+    service: "YIELD_OPTIMIZATION",
+    benchmarkSlug: "yield-optimization",
+    providerSlug: "yield-optimization",
+    fixturePath: "fixtures/yield-optimization/venus-to-beefy.v1.json",
+    blockNumber: "117112308",
+    sourceId: "venus-yield-mainnet-block-117112308",
+    protocol: "Venus Core Pool stablecoin supply",
+    requestId: "venus-yield-117112308",
+  },
+  {
+    service: "LENDING_RESCUE",
+    benchmarkSlug: "lending-rescue",
+    providerSlug: "lending-rescue",
+    fixturePath: null,
+    blockNumber: "117112309",
+    sourceId: "venus-mainnet-block-117112309",
+    protocol: "Venus Classic",
+    requestId: "venus-live-schema-117112309",
+  },
+] as const;
+
+function rebaseCurrentSchemaValue(value: unknown, observedAt: string, sourceId: string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => rebaseCurrentSchemaValue(item, observedAt, sourceId));
+  }
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => {
+      if (key === "observedAt") return [key, observedAt];
+      if (key === "sourceId") return [key, sourceId];
+      return [key, rebaseCurrentSchemaValue(child, observedAt, sourceId)];
+    }),
+  );
+}
+
+function fourCategoryCurrentBody(
+  definition: (typeof FOUR_CATEGORY_CURRENT_CASES)[number],
+  ordinal: number,
+) {
+  const observedAt = `2026-08-24T12:0${ordinal}:00.000Z`;
+  const explorerUrl = `https://bscscan.com/block/${definition.blockNumber}`;
+  const fixture = definition.fixturePath === null
+    ? lendingFixture()
+    : JSON.parse(readFileSync(resolve(PROJECT_ROOT, definition.fixturePath), "utf8"));
+  const providerRequest = rebaseCurrentSchemaValue(
+    structuredClone(fixture),
+    observedAt,
+    definition.sourceId,
+  ) as Record<string, unknown>;
+  providerRequest.requestId = definition.requestId;
+  providerRequest.chainId = 56;
+  providerRequest.protocol = definition.protocol;
+  providerRequest.requestedAt = new Date(Date.parse(observedAt) + 5_000).toISOString();
+  providerRequest.deadline = new Date(Date.parse(observedAt) + 5 * 60_000).toISOString();
+  providerRequest.sources = [{
+    sourceId: definition.sourceId,
+    label: `Deterministic current-schema observation for ${definition.service}`,
+    uri: explorerUrl,
+    observedAt,
+  }];
+  if (definition.service === "LENDING_RESCUE") {
+    providerRequest.market = "0xfD36E2c2a6789Db23113685031d7F16329158384";
+  }
+
+  return {
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2" as const,
+    idempotencyKey: `${ordinal + 5}${ordinal + 5}${ordinal + 5}${ordinal + 5}${ordinal + 5}${ordinal + 5}${ordinal + 5}${ordinal + 5}-2222-4222-8222-222222222222`,
+    benchmarkSlug: definition.benchmarkSlug,
+    providerSlug: definition.providerSlug,
+    evidenceMode: "CURRENT_BLOCK_PINNED" as const,
+    observation: {
+      blockNumber: definition.blockNumber,
+      observedAt,
+      explorerUrl,
+    },
+    request: providerRequest,
+  };
+}
+
+describe("four-category current persisted-hire schema", () => {
+  it.each(FOUR_CATEGORY_CURRENT_CASES)(
+    "accepts only the exact current $service source and provider/task binding",
+    (definition) => {
+      const ordinal = FOUR_CATEGORY_CURRENT_CASES.indexOf(definition);
+      const body = fourCategoryCurrentBody(definition, ordinal);
+      const parsed = FreshMarketplaceHireRequestSchema.parse(body) as {
+        evidenceMode: string;
+        benchmarkSlug: string;
+        providerSlug: string;
+        request: {
+          service: string;
+          requestId: string;
+          sources: Array<{ sourceId: string; uri: string; observedAt: string }>;
+        };
+      };
+
+      expect(parsed.evidenceMode).toBe("CURRENT_BLOCK_PINNED");
+      expect(parsed.benchmarkSlug).toBe(definition.benchmarkSlug);
+      expect(parsed.providerSlug).toBe(definition.providerSlug);
+      expect(parsed.request.service).toBe(definition.service);
+      expect(parsed.request.requestId).toBe(definition.requestId);
+      const source = parsed.request.sources[0];
+      if (!source) throw new Error(`${definition.service} request omitted its bound source`);
+      expect(source.sourceId).toBe(definition.sourceId);
+      expect(source.uri).toBe(body.observation.explorerUrl);
+      expect(source.observedAt).toBe(body.observation.observedAt);
+
+      const mismatched = FOUR_CATEGORY_CURRENT_CASES[(ordinal + 1) % FOUR_CATEGORY_CURRENT_CASES.length];
+      if (!mismatched) throw new Error("Current-hire mismatch case is unavailable");
+      expect(FreshMarketplaceHireRequestSchema.safeParse({
+        ...body,
+        providerSlug: mismatched.providerSlug,
+      }).success).toBe(false);
+      expect(FreshMarketplaceHireRequestSchema.safeParse({
+        ...body,
+        observation: { ...body.observation, observedAt: "2026-08-24T11:59:00.000Z" },
+      }).success).toBe(false);
+      expect(FreshMarketplaceHireRequestSchema.safeParse({
+        ...body,
+        observation: { ...body.observation, explorerUrl: "https://bscscan.com/block/1" },
+      }).success).toBe(false);
+    },
+  );
+
+  it.each(FOUR_CATEGORY_CURRENT_CASES.slice(0, 3))(
+    "rejects a historical-style requestId for current $service",
+    (definition) => {
+      const ordinal = FOUR_CATEGORY_CURRENT_CASES.indexOf(definition);
+      const body = fourCategoryCurrentBody(definition, ordinal);
+      expect(FreshMarketplaceHireRequestSchema.safeParse({
+        ...body,
+        request: { ...body.request, requestId: `fixture-${definition.service.toLowerCase()}` },
+      }).success).toBe(false);
+    },
+  );
+
+  it("binds the generated four-category migration to exact reference SQL", () => {
+    const reference = semanticSqlStatements(
+      readFileSync(resolve(PROJECT_ROOT, "migrations/0003_four_category_current_hires.sql"), "utf8"),
+    );
+    const generated = semanticSqlStatements(
+      readFileSync(resolve(PROJECT_ROOT, "drizzle/0002_four_category_current_hires.sql"), "utf8"),
+    );
+    expect(generated).toEqual(reference);
+    const sql = reference.join("\n");
+    for (const definition of FOUR_CATEGORY_CURRENT_CASES) {
+      expect(sql).toContain(`'${definition.benchmarkSlug}'`);
+      expect(sql).toContain(`'${definition.providerSlug}'`);
+      expect(sql).toContain(`'${definition.service}'`);
+    }
+    expect(sql).toContain("CURRENT_BLOCK_PINNED");
+    expect(sql).toContain("provider_hash");
+    expect(sql).toContain("evidence_json");
+    expect(sql).toContain("evidence_hash");
   });
 });

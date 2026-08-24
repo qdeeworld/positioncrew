@@ -9,6 +9,8 @@ export interface TaskConfig {
   shortTitle: string;
   action: string;
   description: string;
+  currentSource: string;
+  currentAction: string;
   icon: LucideIcon;
   inputs: Array<{ label: string; value: string; emphasis?: boolean }>;
 }
@@ -21,6 +23,8 @@ export const TASKS: TaskConfig[] = [
     shortTitle: "Lending rescue",
     action: "Run rescue check",
     description: "Find the smallest allowed action that restores a stressed lending position.",
+    currentSource: "Block-pinned Venus position",
+    currentAction: "Load current position and hire",
     icon: Activity,
     inputs: [
       { label: "Protocol", value: "Venus" },
@@ -38,6 +42,8 @@ export const TASKS: TaskConfig[] = [
     shortTitle: "LP rebalance",
     action: "Run range check",
     description: "Move an out-of-range position only when net benefit clears hard costs.",
+    currentSource: "Block-pinned PancakeSwap V3 position",
+    currentAction: "Load current LP and hire",
     icon: RefreshCw,
     inputs: [
       { label: "Current tick", value: "150", emphasis: true },
@@ -55,6 +61,8 @@ export const TASKS: TaskConfig[] = [
     shortTitle: "Yield optimise",
     action: "Compare allocation",
     description: "Choose an allowlisted destination after costs, liquidity, lockup, and risk checks.",
+    currentSource: "Block-pinned Venus markets",
+    currentAction: "Load current markets and hire",
     icon: ChartNoAxesCombined,
     inputs: [
       { label: "Capital", value: "$1,000" },
@@ -72,6 +80,8 @@ export const TASKS: TaskConfig[] = [
     shortTitle: "Bounded grid",
     action: "Build bounded grid",
     description: "Construct orders only inside inventory, loss, liquidity, and volatility limits.",
+    currentSource: "Block-pinned PancakeSwap market",
+    currentAction: "Load current market and hire",
     icon: Grid3X3,
     inputs: [
       { label: "Pair", value: "WBNB / USDT" },

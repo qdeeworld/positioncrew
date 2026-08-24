@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -330,6 +330,168 @@ async function postJson(name, input, payload) {
   assert(response.ok, `${name} returned HTTP ${response.status}`);
   assert(body && typeof body === "object", `${name} did not return a JSON object`);
   return body;
+}
+
+async function postCurrentHireJson(name, input, payload, acceptedStatuses) {
+  const url = localUrl(input);
+  url.searchParams.set("positioncrew_monitor", monitorRunId);
+  const startedAt = performance.now();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Origin: baseUrl.origin,
+      "User-Agent": "PositionCrew-Production-Monitor/1.0",
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(monitorRequestTimeoutMs),
+  });
+  const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
+  const body = await response.json().catch(() => null);
+  checks.push({ name, url: url.toString(), status: response.status, latencyMs });
+  assert(
+    acceptedStatuses.includes(response.status),
+    `${name} returned HTTP ${response.status}: ${JSON.stringify(body)}`,
+  );
+  assert(body && typeof body === "object", `${name} did not return a JSON object`);
+  return body;
+}
+
+function currentPersistedHireEnvelope(definition, probe) {
+  const request = structuredClone(probe[definition.requestKey]);
+  assert(request?.service === definition.service, `${definition.service} probe request mismatch`);
+  assert(probe.source?.blockNumber, `${definition.service} probe omitted its pinned block`);
+  assert(probe.source?.explorerUrl, `${definition.service} probe omitted its explorer URL`);
+  assert(request.sources?.length === 1, `${definition.service} request does not have one source`);
+  const blockNumber = String(probe.source.blockNumber);
+  const source = request.sources[0];
+  const observedAt = probe.source.blockTimestamp ?? source.observedAt;
+  const explorerUrl = `https://bscscan.com/block/${blockNumber}`;
+  assert(observedAt, `${definition.service} probe omitted its observation time`);
+  assert(request.chainId === 56, `${definition.service} probe request is not BSC mainnet`);
+  assert(request.protocol === definition.protocol, `${definition.service} probe protocol mismatch`);
+  assert(source.sourceId === definition.sourceId(blockNumber), `${definition.service} sourceId mismatch`);
+  assert(source.uri === explorerUrl, `${definition.service} request source explorer mismatch`);
+  assert(source.observedAt === observedAt, `${definition.service} request source timestamp mismatch`);
+  assert(probe.source.explorerUrl === explorerUrl, `${definition.service} probe explorer mismatch`);
+  assert(
+    definition.validRequestId(request.requestId, blockNumber),
+    `${definition.service} requestId is not bound to the live probe`,
+  );
+  return {
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    idempotencyKey: randomUUID(),
+    benchmarkSlug: definition.benchmarkSlug,
+    providerSlug: definition.providerSlug,
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    observation: {
+      blockNumber,
+      observedAt,
+      explorerUrl,
+    },
+    request,
+  };
+}
+
+async function waitForCurrentPersistedHire(definition, hireId) {
+  const expiresAt = Date.now() + 20_000;
+  while (Date.now() < expiresAt) {
+    const chain = await fetchJson(
+      `${definition.service}:current-hire-poll`,
+      `/api/benchmark-hires/${hireId}`,
+    );
+    assert(chain.job?.state !== "FAILED", `${definition.service} persisted hire failed`);
+    if (chain.job?.state === "COMPLETED" && chain.receipt) return chain;
+    await sleep(250);
+  }
+  throw new Error(`${definition.service} persisted hire did not complete before timeout`);
+}
+
+async function verifyCurrentPersistedHire(definition, probe) {
+  const envelope = currentPersistedHireEnvelope(definition, probe);
+  const created = await postCurrentHireJson(
+    `${definition.service}:current-hire-create`,
+    "/api/benchmark-hires",
+    envelope,
+    [200, 201],
+  );
+  assert(created.hire?.service === definition.service, `${definition.service} hire routed incorrectly`);
+  assert(created.hire?.evidenceMode === "CURRENT_BLOCK_PINNED", `${definition.service} hire changed evidence mode`);
+  assert(created.job?.state === "CREATED", `${definition.service} hire did not start in CREATED`);
+  assert(created.receipt === null, `${definition.service} hire created a premature receipt`);
+  assert(
+    created.hire?.requestHash === canonicalSha256(envelope.request),
+    `${definition.service} request commitment is invalid`,
+  );
+  assert(created.hire?.providerHash, `${definition.service} provider binding is uncommitted`);
+  assert(created.hire?.evidenceHash, `${definition.service} current evidence is uncommitted`);
+  assert(
+    created.hire?.evidence?.freshnessAtCreation === "FRESH" &&
+      created.hire.evidenceHash === canonicalSha256(created.hire.evidence),
+    `${definition.service} current evidence commitment is stale or invalid`,
+  );
+
+  await postCurrentHireJson(
+    `${definition.service}:current-hire-run`,
+    `/api/benchmark-hires/${created.hire.hireId}/jobs`,
+    {},
+    [200, 202],
+  );
+  const completed = await waitForCurrentPersistedHire(definition, created.hire.hireId);
+  assert(
+    completed.hire?.requestHash === created.hire.requestHash &&
+      completed.hire?.providerHash === created.hire.providerHash &&
+      completed.hire?.evidenceHash === created.hire.evidenceHash,
+    `${definition.service} hire commitments changed during execution`,
+  );
+  assert(
+    completed.receipt?.response?.result?.request?.service === definition.service,
+    `${definition.service} receipt contains the wrong provider request`,
+  );
+  assert(
+    JSON.stringify(completed.receipt?.response?.result?.request) === JSON.stringify(envelope.request),
+    `${definition.service} receipt request differs from the committed live probe request`,
+  );
+  assert(
+    completed.receipt?.response?.result?.evaluation?.score === 100,
+    `${definition.service} persisted-hire conformance score is not 100/100`,
+  );
+
+  const publicChain = await fetchJson(
+    `${definition.service}:current-hire-receipt`,
+    completed.receipt.publicUrl,
+  );
+  assert(publicChain.hire?.hireId === created.hire.hireId, `${definition.service} public receipt changed hire`);
+  assert(publicChain.job?.state === "COMPLETED", `${definition.service} public receipt is not complete`);
+  assert(
+    publicChain.hire?.requestHash === completed.hire.requestHash &&
+      publicChain.hire?.providerHash === completed.hire.providerHash &&
+      publicChain.hire?.evidenceHash === completed.hire.evidenceHash,
+    `${definition.service} public receipt changed hire commitments`,
+  );
+  assert(
+    JSON.stringify(publicChain.receipt) === JSON.stringify(completed.receipt),
+    `${definition.service} public receipt changed after reload`,
+  );
+  if (definition.service === "LENDING_RESCUE") {
+    assert(
+      publicChain.receipt?.response?.result?.deliverable?.status === "REFUSED_CONSTRAINTS",
+      "Zero-position lending monitor hire did not refuse constraints",
+    );
+  }
+
+  return {
+    service: definition.service,
+    hireId: created.hire.hireId,
+    receiptId: completed.receipt.receiptId,
+    publicUrl: completed.receipt.publicUrl,
+    requestHash: completed.hire.requestHash,
+    providerHash: completed.hire.providerHash,
+    evidenceHash: completed.hire.evidenceHash,
+    jobState: completed.job.state,
+    conformanceScore: completed.receipt.response.result.evaluation.score,
+  };
 }
 
 function rebaseObservationTimes(value, observedAt) {
@@ -1599,6 +1761,73 @@ try {
   );
   assert(venusYieldJob.result?.job?.state === "COMPLETED", "Venus yield job did not complete");
   assert(venusYieldJob.result?.evaluation?.score === 100, "Venus yield job score is not 100/100");
+
+  const currentPersistedHireDefinitions = [
+    {
+      service: "BOUNDED_GRID",
+      benchmarkSlug: "bounded-grid",
+      providerSlug: "bounded-grid",
+      requestKey: "gridRequest",
+      protocol: "PancakeSwap V3 bounded grid policy",
+      sourceId: (blockNumber) => `pancake-v3-mainnet-block-${blockNumber}`,
+      validRequestId: (requestId, blockNumber) => requestId === `pancake-grid-${blockNumber}`,
+      probe: pancakeGrid,
+    },
+    {
+      service: "LP_REBALANCE",
+      benchmarkSlug: "lp-rebalance",
+      providerSlug: "lp-rebalance",
+      requestKey: "lpRequest",
+      protocol: "PancakeSwap V3 position analysis",
+      sourceId: (blockNumber) => `pancake-position-mainnet-block-${blockNumber}`,
+      validRequestId: (requestId, blockNumber) =>
+        new RegExp(`^pancake-position-[1-9]\\d*-${blockNumber}$`).test(requestId),
+      probe: pancakePosition,
+    },
+    {
+      service: "YIELD_OPTIMIZATION",
+      benchmarkSlug: "yield-optimization",
+      providerSlug: "yield-optimization",
+      requestKey: "yieldRequest",
+      protocol: "Venus Core Pool stablecoin supply",
+      sourceId: (blockNumber) => `venus-yield-mainnet-block-${blockNumber}`,
+      validRequestId: (requestId, blockNumber) => requestId === `venus-yield-${blockNumber}`,
+      probe: venusYield,
+    },
+    {
+      service: "LENDING_RESCUE",
+      benchmarkSlug: "lending-rescue",
+      providerSlug: "lending-rescue",
+      requestKey: "rescueRequest",
+      protocol: "Venus Classic",
+      sourceId: (blockNumber) => `venus-mainnet-block-${blockNumber}`,
+      validRequestId: (requestId) => typeof requestId === "string" && requestId.length > 0,
+      probe: zeroVenus,
+    },
+  ];
+  const currentPersistedHires = [];
+  for (const definition of currentPersistedHireDefinitions) {
+    currentPersistedHires.push(
+      await verifyCurrentPersistedHire(definition, definition.probe),
+    );
+  }
+  assert(
+    new Set(currentPersistedHires.map((hire) => hire.service)).size === 4,
+    "Current persisted hires do not cover four unique services",
+  );
+  assert(
+    new Set(currentPersistedHires.map((hire) => hire.hireId)).size === 4 &&
+      new Set(currentPersistedHires.map((hire) => hire.receiptId)).size === 4,
+    "Current persisted hire or receipt IDs are duplicated",
+  );
+  report.currentPersistedHires = {
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    relationship: "OPERATOR_PRODUCTION_MONITOR",
+    executionBoundary: "READ_ONLY_RECOMMENDATION_ONLY",
+    claimBoundary:
+      "Verifies current request binding, durable execution, and public receipt reload. It does not prove an external buyer, payment, revenue, autonomous execution, strategy return, or historical performance.",
+    hires: currentPersistedHires,
+  };
 
   for (const entry of marketplace.providers) {
     assert(expectedServices.has(entry.service), `Unexpected provider service: ${entry.service}`);

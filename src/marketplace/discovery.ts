@@ -129,8 +129,9 @@ export function buildProviderManifest(
       adapter: "AACP_PRODUCTION_RUNTIME_PENDING",
       readinessUrl: absolute(origin, "/api/commerce/aacp"),
       freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
+      freshCurrentHireUrl: absolute(origin, "/api/benchmark-hires"),
       boundary:
-        "The public endpoint offers a no-wallet provider simulation. Three frozen benchmark tasks also support a distinct $0 historical-fixture hire with a server-persisted request and receipt. Neither path collects the listed price or proves external demand, paid settlement, or live advice.",
+        "The public endpoint supports three frozen historical-fixture hires and four current block-referenced BSC hires. Both are $0 no-wallet analysis paths with server-persisted request and result receipts; neither collects the listed price, independently verifies caller-supplied observations, executes a protocol transaction, or proves external demand.",
     },
   };
 }
@@ -159,6 +160,7 @@ export function buildMarketplaceManifest(
     venusTestnetNativeSupplyEvidenceUrl: absolute(origin, VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE),
     aacpReadinessUrl: absolute(origin, "/api/commerce/aacp"),
     freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
+    freshCurrentHireUrl: absolute(origin, "/api/benchmark-hires"),
     providers: PROVIDER_CATALOG.map((provider) => ({
       providerId: provider.providerId,
       service: provider.service,
@@ -173,6 +175,7 @@ export function buildMarketplaceManifest(
       aacp: "PRODUCTION_RUNTIME_PENDING",
       judgeTrial: "NO_WALLET_PROVIDER_CALL",
       freshHistoricalHire: "D1_PERSISTED_ZERO_COST_HISTORICAL_FIXTURE",
+      freshCurrentHire: "D1_PERSISTED_ZERO_COST_CURRENT_BLOCK_PINNED",
       externalComparisons: "FOUR_THIRD_PARTY_EVIDENCE_ONLY_NON_ACTIVATABLE",
       venusTestnetNativeSupply: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
       agentAdvantage: "PENDING_INDEPENDENT_BLIND_EVALUATION",
@@ -287,7 +290,7 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
     },
     "/api/benchmark-hires": {
       post: {
-        summary: "Persist a $0 no-wallet historical-fixture hire before provider computation",
+        summary: "Persist a $0 no-wallet historical or current block-referenced hire before provider computation",
         operationId: "createFreshMarketplaceHire",
         requestBody: {
           required: true,
@@ -302,9 +305,9 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
           "200": { description: "Idempotent replay of an existing hire" },
           "400": { description: "Request body is not valid JSON" },
           "409": { description: "Idempotency key or frozen provider binding conflict" },
-          "413": { description: "Request body exceeds 4096 bytes" },
+          "413": { description: "Request body exceeds 32768 bytes" },
           "429": { description: "Public durable-hire creation boundary reached" },
-          "422": { description: "Request is not one of the three frozen task shapes" },
+          "422": { description: "Request is not one of the three historical or four current task bindings" },
         },
       },
     },
@@ -329,7 +332,7 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
     },
     "/api/benchmark-hires/{hireId}/jobs": {
       post: {
-        summary: "Claim and run the already-persisted frozen benchmark job",
+        summary: "Claim and run the already-persisted provider job",
         operationId: "runFreshMarketplaceHire",
         parameters: [{
           name: "hireId",
@@ -356,7 +359,7 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
         }],
         responses: {
           "200": {
-            description: "$0 historical-fixture receipt with exact response commitments",
+            description: "$0 historical or current block-referenced receipt with exact response commitments",
             content: { "application/json": { schema: { $ref: "#/components/schemas/FreshMarketplaceChain" } } },
           },
           "404": { description: "Unknown receipt" },
