@@ -1379,9 +1379,10 @@ try {
   }
   report.productionTrackRecord = productionRecord;
 
+  const zeroAddress = "0x0000000000000000000000000000000000000000";
   const zeroVenus = await fetchJson(
     "venus-zero-position",
-    "/api/wallets/0x0000000000000000000000000000000000000000/venus",
+    `/api/wallets/${zeroAddress}/venus`,
   );
   assert(
     zeroVenus.schemaVersion === "positioncrew.venus-account-probe.v1",
@@ -1393,7 +1394,17 @@ try {
     zeroVenus.position?.collateralValueUsd === "0",
     "Zero address Venus collateral is nonzero",
   );
-  assert(zeroVenus.rescueRequest === null, "Zero address produced a rescue request");
+  assert(
+    zeroVenus.account === zeroAddress &&
+      zeroVenus.rescueRequest?.account === zeroAddress &&
+      zeroVenus.rescueRequest?.chainId === 56,
+    "Zero-position refusal request is not bound to the requested account and chain",
+  );
+  assert(
+    zeroVenus.rescueRequest?.position?.collateral?.length === 0 &&
+      zeroVenus.rescueRequest?.position?.debt?.length === 0,
+    "Zero-position refusal request unexpectedly contains collateral or debt",
+  );
   assert(
     /^https:\/\/bscscan\.com\/block\/\d+$/.test(zeroVenus.source?.explorerUrl ?? ""),
     "Venus account probe is not linked to its pinned BSC block",
