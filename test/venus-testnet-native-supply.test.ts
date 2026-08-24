@@ -1,0 +1,321 @@
+import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  encodeAbiParameters,
+  encodeEventTopics,
+  getAddress,
+  keccak256,
+  parseAbi,
+  parseAbiParameters,
+  type Address,
+  type Hash,
+  type Hex,
+} from "viem";
+import {
+  VENUS_TESTNET_NATIVE_SUPPLY,
+  VenusTestnetNativeSupplyEvidenceSchema,
+  VenusTestnetNativeSupplyIntentSchema,
+  VenusTestnetNativeSupplySubmissionSchema,
+  verifyVenusTestnetNativeSupplyEvidence,
+} from "../src/commerce/venus-testnet-native-supply-evidence.js";
+import {
+  broadcastIdenticalVenusSubmission,
+  prepareVenusTestnetNativeSupply,
+  reconcileVenusTestnetNativeSupply,
+  signVenusTestnetNativeSupply,
+  verifyVenusTestnetNativeSupplyOnchain,
+  type VenusNativeSupplyRpc,
+  type VenusRpcReceipt,
+  type VenusRpcTransaction,
+} from "../src/commerce/venus-testnet-native-supply-operator.js";
+import { atomicWriteNew0600 } from "../src/cli/venus-testnet-native-supply.js";
+
+const ACTOR = getAddress(VENUS_TESTNET_NATIVE_SUPPLY.actor);
+const VBNB = getAddress(VENUS_TESTNET_NATIVE_SUPPLY.vBnb);
+const UNITROLLER = getAddress(VENUS_TESTNET_NATIVE_SUPPLY.unitroller);
+const NOW = new Date("2026-08-24T12:00:00.000Z");
+const RAW_TRANSACTION = "0x0102" as Hex;
+const TRANSACTION_HASH = keccak256(RAW_TRANSACTION);
+const MINT_TOKENS = 500_000n;
+const EVENT_ABI = parseAbi([
+  "event Mint(address minter, uint256 mintAmount, uint256 mintTokens)",
+  "event Transfer(address indexed from, address indexed to, uint256 amount)",
+]);
+
+function supplyLogs(): VenusRpcReceipt["logs"] {
+  return [
+    {
+      address: VBNB,
+      topics: encodeEventTopics({ abi: EVENT_ABI, eventName: "Mint" }) as [Hex, ...Hex[]],
+      data: encodeAbiParameters(
+        parseAbiParameters("address minter, uint256 mintAmount, uint256 mintTokens"),
+        [ACTOR, BigInt(VENUS_TESTNET_NATIVE_SUPPLY.amountWei), MINT_TOKENS],
+      ),
+      logIndex: 2,
+    },
+    {
+      address: VBNB,
+      topics: encodeEventTopics({
+        abi: EVENT_ABI,
+        eventName: "Transfer",
+        args: { from: "0x0000000000000000000000000000000000000000", to: ACTOR },
+      }) as [Hex, ...Hex[]],
+      data: encodeAbiParameters(parseAbiParameters("uint256 amount"), [MINT_TOKENS]),
+      logIndex: 3,
+    },
+  ];
+}
+
+class FakeRpc implements VenusNativeSupplyRpc {
+  chainId = 97;
+  blockNumber = 111n;
+  nativeBalance = 1_000_000_000_000_000_000n;
+  pendingNonce = 7;
+  vTokenCodeHash: Hash | null = VENUS_TESTNET_NATIVE_SUPPLY.vBnbRuntimeCodeHash;
+  unitrollerCodeHash: Hash | null = VENUS_TESTNET_NATIVE_SUPPLY.unitrollerRuntimeCodeHash;
+  comptroller = UNITROLLER;
+  market = { isListed: true, isVenus: true };
+  gasEstimate = 50_000n;
+  gasPrice = 1_000_000_000n;
+  simulateCalls = 0;
+  sentRaw: Hex[] = [];
+  balanceBefore = 0n;
+  balanceAfter = MINT_TOKENS;
+  transaction: VenusRpcTransaction = {
+    hash: TRANSACTION_HASH,
+    chainId: 97,
+    type: "legacy",
+    blockNumber: 100n,
+    blockHash: `0x${"ab".repeat(32)}` as Hash,
+    from: ACTOR,
+    to: VBNB,
+    input: VENUS_TESTNET_NATIVE_SUPPLY.mintSelector,
+    value: BigInt(VENUS_TESTNET_NATIVE_SUPPLY.amountWei),
+    nonce: 7,
+  };
+  receipt: VenusRpcReceipt = {
+    transactionHash: TRANSACTION_HASH,
+    blockNumber: 100n,
+    blockHash: `0x${"ab".repeat(32)}` as Hash,
+    status: "success",
+    gasUsed: 20_000n,
+    effectiveGasPrice: 1_000_000_000n,
+    logs: supplyLogs(),
+  };
+
+  getChainId = async () => this.chainId;
+  getBlockNumber = async () => this.blockNumber;
+  getBalance = async (_address: Address, _blockNumber?: bigint) => this.nativeBalance;
+  getPendingNonce = async (_address: Address) => this.pendingNonce;
+  getCodeHash = async (address: Address, _blockNumber?: bigint) =>
+    getAddress(address) === VBNB ? this.vTokenCodeHash : this.unitrollerCodeHash;
+  getComptroller = async (_vToken: Address, _blockNumber?: bigint) => this.comptroller;
+  getMarket = async (_comptroller: Address, _vToken: Address, _blockNumber?: bigint) => this.market;
+  getVTokenBalance = async (_vToken: Address, _account: Address, blockNumber?: bigint) =>
+    blockNumber === 99n ? this.balanceBefore : blockNumber === 100n ? this.balanceAfter : this.balanceBefore;
+  getAccountSnapshot = async (_vToken: Address, _account: Address, blockNumber?: bigint) => {
+    const balance = blockNumber === 100n ? this.balanceAfter : this.balanceBefore;
+    return [0n, balance, 0n, 20_000_000_000_000_000_000_000_000n] as const;
+  };
+  simulateMint = async (_vToken: Address, _account: Address, _value: bigint) => { this.simulateCalls += 1; };
+  estimateMintGas = async (_vToken: Address, _account: Address, _value: bigint) => this.gasEstimate;
+  getGasPrice = async () => this.gasPrice;
+  sendRawTransaction = async (rawTransaction: Hex) => {
+    this.sentRaw.push(rawTransaction);
+    return keccak256(rawTransaction);
+  };
+  getTransaction = async (_hash: Hash) => this.transaction;
+  getTransactionReceipt = async (_hash: Hash) => this.receipt;
+}
+
+function dependencies(testnet = new FakeRpc(), mainnet = new FakeRpc()) {
+  mainnet.chainId = 56;
+  mainnet.nativeBalance = 0n;
+  mainnet.pendingNonce = 0;
+  return { testnet, mainnet };
+}
+
+async function prepared(deps = dependencies()) {
+  return prepareVenusTestnetNativeSupply({
+    actor: ACTOR,
+    amountTbnb: "0.0001",
+    operationId: "11111111-1111-4111-8111-111111111111",
+    now: NOW,
+  }, deps);
+}
+
+async function signed(deps = dependencies()) {
+  const intent = await prepared(deps);
+  let signCalls = 0;
+  const submission = await signVenusTestnetNativeSupply(intent, {
+    address: ACTOR,
+    signLegacyTransaction: async (transaction) => {
+      signCalls += 1;
+      expect(transaction).toMatchObject({
+        chainId: 97,
+        to: VBNB,
+        data: "0x1249c58b",
+        value: 100_000_000_000_000n,
+        nonce: 7,
+      });
+      return RAW_TRANSACTION;
+    },
+  }, deps, new Date("2026-08-24T12:01:00.000Z"));
+  return { intent, submission, signCalls };
+}
+
+describe("bounded Venus BSC Testnet native supply", () => {
+  it("creates frozen state with 0600 permissions and never replaces it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "positioncrew-venus-state-"));
+    const path = join(directory, "submission.json");
+    await atomicWriteNew0600(path, { version: 1 });
+
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    await expect(atomicWriteNew0600(path, { version: 2 })).rejects.toMatchObject({ code: "EEXIST" });
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ version: 1 });
+  });
+
+  it("prepares one exact, canonical, simulate-first legacy intent", async () => {
+    const deps = dependencies();
+    const intent = await prepared(deps);
+
+    expect(intent.chainId).toBe(97);
+    expect(intent.actor).toBe(ACTOR);
+    expect(intent.transaction).toMatchObject({
+      type: "legacy",
+      to: VBNB,
+      data: "0x1249c58b",
+      amountTbnb: "0.0001",
+      valueWei: "100000000000000",
+      maxGasCostWei: "100000000000000",
+      nonce: "7",
+    });
+    expect(intent.preflight.mainnetIsolation).toMatchObject({
+      chainId: 56,
+      nativeBalanceWei: "0",
+      pendingNonce: "0",
+    });
+    expect(deps.testnet.simulateCalls).toBe(1);
+    expect(VenusTestnetNativeSupplyIntentSchema.parse(intent)).toEqual(intent);
+
+    const tampered = structuredClone(intent);
+    (tampered.transaction as { valueWei: string }).valueWei = "100000000000001";
+    expect(() => VenusTestnetNativeSupplyIntentSchema.parse(tampered)).toThrow();
+  });
+
+  it("rejects amount, mainnet exposure, nonce, code, market, and gas-cap mutations", async () => {
+    const wrongAmount = dependencies();
+    await expect(prepareVenusTestnetNativeSupply({ actor: ACTOR, amountTbnb: "0.0002", now: NOW }, wrongAmount)).rejects.toThrow("exactly 0.0001");
+
+    const mainnetValue = dependencies();
+    mainnetValue.mainnet.nativeBalance = 1n;
+    await expect(prepared(mainnetValue)).rejects.toThrow("non-zero BSC mainnet native balance");
+
+    const mainnetNonce = dependencies();
+    mainnetNonce.mainnet.pendingNonce = 1;
+    await expect(prepared(mainnetNonce)).rejects.toThrow("non-zero BSC mainnet pending nonce");
+
+    const wrongCode = dependencies();
+    wrongCode.testnet.vTokenCodeHash = `0x${"00".repeat(32)}`;
+    await expect(prepared(wrongCode)).rejects.toThrow("bytecode hash mismatch");
+
+    const unlisted = dependencies();
+    unlisted.testnet.market = { isListed: false, isVenus: true };
+    await expect(prepared(unlisted)).rejects.toThrow("active listed Venus market");
+
+    const expensive = dependencies();
+    expensive.testnet.gasPrice = 2_000_000_000n;
+    await expect(prepared(expensive)).rejects.toThrow("hard 0.0001 tBNB cap");
+  });
+
+  it("repeats safety checks immediately before signing and signs exactly once", async () => {
+    const deps = dependencies();
+    const result = await signed(deps);
+    expect(result.signCalls).toBe(1);
+    expect(result.submission.transactionHash).toBe(TRANSACTION_HASH);
+    expect(deps.testnet.simulateCalls).toBe(2);
+    expect(VenusTestnetNativeSupplySubmissionSchema.parse(result.submission)).toEqual(result.submission);
+
+    const changedNonce = dependencies();
+    const intent = await prepared(changedNonce);
+    changedNonce.testnet.pendingNonce = 8;
+    await expect(signVenusTestnetNativeSupply(intent, {
+      address: ACTOR,
+      signLegacyTransaction: async () => RAW_TRANSACTION,
+    }, changedNonce, new Date("2026-08-24T12:01:00.000Z"))).rejects.toThrow("Pending nonce changed");
+
+    const mainnetChanged = dependencies();
+    const reviewed = await prepared(mainnetChanged);
+    mainnetChanged.mainnet.nativeBalance = 1n;
+    await expect(signVenusTestnetNativeSupply(reviewed, {
+      address: ACTOR,
+      signLegacyTransaction: async () => RAW_TRANSACTION,
+    }, mainnetChanged, new Date("2026-08-24T12:01:00.000Z"))).rejects.toThrow("mainnet native balance");
+  });
+
+  it("only retries the identical frozen raw transaction", async () => {
+    const deps = dependencies();
+    const { submission } = await signed(deps);
+    const first = await broadcastIdenticalVenusSubmission(submission, deps.testnet);
+    const second = await broadcastIdenticalVenusSubmission(submission, deps.testnet);
+
+    expect(first).toBe(TRANSACTION_HASH);
+    expect(second).toBe(TRANSACTION_HASH);
+    expect(deps.testnet.sentRaw).toEqual([RAW_TRANSACTION, RAW_TRANSACTION]);
+
+    const mutated = structuredClone(submission);
+    (mutated as { rawTransaction: string }).rawTransaction = "0x0304";
+    expect(() => VenusTestnetNativeSupplySubmissionSchema.parse(mutated)).toThrow();
+  });
+
+  it("reconciles Mint, Transfer, confirmations, cost, and pinned balance delta", async () => {
+    const deps = dependencies();
+    const { submission } = await signed(deps);
+    const evidence = await reconcileVenusTestnetNativeSupply(
+      submission,
+      deps.testnet,
+      new Date("2026-08-24T12:05:00.000Z"),
+    );
+
+    expect(evidence.relationship).toBe("FOUNDER_CONTROLLED_TESTNET_ACTION");
+    expect(evidence.network.confirmationsObserved).toBe(12);
+    expect(evidence.proof.mintEvent).toMatchObject({
+      minter: ACTOR,
+      mintAmountWei: "100000000000000",
+      mintTokensRaw: MINT_TOKENS.toString(),
+    });
+    expect(evidence.proof.vTokenBalanceDeltaRaw).toBe(MINT_TOKENS.toString());
+    expect(JSON.stringify(evidence)).not.toContain("rawTransaction");
+    expect(VenusTestnetNativeSupplyEvidenceSchema.parse(evidence)).toEqual(evidence);
+    expect(verifyVenusTestnetNativeSupplyEvidence(evidence)).toEqual(evidence);
+    await expect(verifyVenusTestnetNativeSupplyOnchain(evidence, deps.testnet)).resolves.toEqual(evidence);
+
+    const tampered = structuredClone(evidence);
+    (tampered.proof as { vTokenBalanceAfterRaw: string }).vTokenBalanceAfterRaw = "500001";
+    expect(() => verifyVenusTestnetNativeSupplyEvidence(tampered)).toThrow();
+  });
+
+  it("fails closed on reverted, immature, missing-event, and balance-mismatch receipts", async () => {
+    const reverted = dependencies();
+    const revertedSubmission = (await signed(reverted)).submission;
+    reverted.testnet.receipt = { ...reverted.testnet.receipt, status: "reverted" };
+    await expect(reconcileVenusTestnetNativeSupply(revertedSubmission, reverted.testnet)).rejects.toThrow("reverted");
+
+    const immature = dependencies();
+    const immatureSubmission = (await signed(immature)).submission;
+    immature.testnet.blockNumber = 110n;
+    await expect(reconcileVenusTestnetNativeSupply(immatureSubmission, immature.testnet)).rejects.toThrow("fewer than 12");
+
+    const missingEvent = dependencies();
+    const missingSubmission = (await signed(missingEvent)).submission;
+    missingEvent.testnet.receipt = { ...missingEvent.testnet.receipt, logs: [] };
+    await expect(reconcileVenusTestnetNativeSupply(missingSubmission, missingEvent.testnet)).rejects.toThrow("missing the required");
+
+    const wrongDelta = dependencies();
+    const wrongDeltaSubmission = (await signed(wrongDelta)).submission;
+    wrongDelta.testnet.balanceAfter = MINT_TOKENS + 1n;
+    await expect(reconcileVenusTestnetNativeSupply(wrongDeltaSubmission, wrongDelta.testnet)).rejects.toThrow("balance delta");
+  });
+});
