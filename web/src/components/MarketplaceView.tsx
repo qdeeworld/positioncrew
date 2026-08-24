@@ -73,9 +73,9 @@ export function MarketplaceView({
           <div className="market-intro-copy">
             <span className="page-kicker">BSC capital operations</span>
             <h1>Hire a capital operator.</h1>
-            <p>Load a current, block-pinned Venus position and hire a provider to return either a bounded unsigned rescue plan or a provable refusal with a durable receipt.</p>
+            <p>Use your Venus address or start with a safe zero-position example. The provider returns either a bounded unsigned rescue plan or a provable refusal with a durable receipt.</p>
             <button className="market-intro-action" type="button" onClick={() => onCreateJob("LENDING_RESCUE")}>
-              Check a current Venus position <ArrowRight size={17} aria-hidden="true" />
+              Open live Lending Rescue <ArrowRight size={17} aria-hidden="true" />
             </button>
           </div>
           <div className="market-system-panel" aria-label="Marketplace system status">

@@ -122,6 +122,7 @@ const EMPTY_DRAFT: JobDraft = {
 };
 
 const REFERENCE_PANCAKE_POSITION_ID = "1456267";
+const SAFE_REFUSAL_ACCOUNT = "0x0000000000000000000000000000000000000000";
 
 type JobRequest = FixtureJobResponse["result"]["request"];
 
@@ -695,14 +696,18 @@ function WalletRiskProbe({
   const [probe, setProbe] = useState<VenusAccountProbe | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [safeExample, setSafeExample] = useState(false);
 
-  async function inspect() {
+  async function inspect(address: string, mode: "ACCOUNT" | "SAFE_REFUSAL") {
+    const requestedAccount = address.trim();
     onClearRequest();
     setLoading(true);
     setError(null);
     setProbe(null);
+    setSafeExample(mode === "SAFE_REFUSAL");
+    if (mode === "SAFE_REFUSAL") setAccount(SAFE_REFUSAL_ACCOUNT);
     try {
-      const response = await fetch(`/api/wallets/${account.trim()}/venus`, {
+      const response = await fetch(`/api/wallets/${requestedAccount}/venus`, {
         headers: { Accept: "application/json" },
       });
       if (!response.ok) {
@@ -748,20 +753,31 @@ function WalletRiskProbe({
             placeholder="0x account address"
             value={account}
             aria-invalid={Boolean(error)}
-            aria-describedby={error ? "wallet-probe-error" : undefined}
+            aria-describedby={error ? "wallet-probe-help wallet-probe-error" : "wallet-probe-help"}
             onChange={(event) => {
               setAccount(event.target.value);
               setProbe(null);
               setError(null);
+              setSafeExample(false);
               onClearRequest();
             }}
           />
         </label>
-        <button type="button" onClick={inspect} disabled={loading || account.trim().length !== 42}>
+        <button type="button" onClick={() => void inspect(account, "ACCOUNT")} disabled={loading || account.trim().length !== 42}>
           {loading ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}
           {loading ? "Loading" : "Load position"}
         </button>
+        <button
+          className="safe-refusal-action"
+          type="button"
+          onClick={() => void inspect(SAFE_REFUSAL_ACCOUNT, "SAFE_REFUSAL")}
+          disabled={loading}
+        >
+          <ShieldCheck size={15} aria-hidden="true" />
+          Try a safe live refusal
+        </button>
       </div>
+      <p className="wallet-probe-help" id="wallet-probe-help">No address ready? Query the zero address at a fresh BSC block. It has no reconstructable Venus lending position and is used only to demonstrate the provider's explicit refusal path.</p>
       {error && <div className="wallet-probe-error" id="wallet-probe-error" role="alert"><AlertTriangle size={14} /> {error}</div>}
       {probe && (
         <div className="wallet-probe-result" aria-live="polite">
@@ -776,6 +792,12 @@ function WalletRiskProbe({
             <div><dt>Markets</dt><dd>{probe.position.markets.length}</dd></div>
           </dl>
           <p>{probe.boundary}</p>
+          {safeExample && (
+            <div className="safe-refusal-status" role="status">
+              <ShieldCheck size={14} aria-hidden="true" />
+              <span><strong>Safe live refusal example</strong> Fresh zero-address read only. Hiring persists the expected no-position refusal; it does not rescue a position or send a transaction.</span>
+            </div>
+          )}
           {probe.rescueRequest
             ? <span className="wallet-probe-loaded" role="status"><CheckCircle2 size={14} aria-hidden="true" /> Current request loaded</span>
             : <p role="status">No current rescue request was returned. Reload the account before hiring.</p>}
@@ -1143,6 +1165,8 @@ export function JobWorkspace({
     objectValue((liveRequest?.sources as unknown[] | undefined)?.[0]).sourceId ?? "",
   );
   const liveBlockNumber = liveObservation?.blockNumber ?? liveSourceId.match(/-block-(\d+)/)?.[1] ?? "";
+  const safeLiveRefusal = service === "LENDING_RESCUE" &&
+    String(objectValue(liveRequest).account ?? "").toLowerCase() === SAFE_REFUSAL_ACCOUNT;
   const liveSourceLabel = liveSourceId.startsWith("pancake-position-mainnet-block-")
     ? "PancakeSwap position"
     : liveSourceId.startsWith("pancake-v3-mainnet-block-")
@@ -1348,7 +1372,9 @@ export function JobWorkspace({
             <span>{inputMode === "locked"
               ? "Historical August 12 fixture. The public receipt is reproducible, but the instruction is no longer executable."
               : liveRequest
-                ? `Block-pinned ${liveSourceLabel} from BSC block ${liveBlockNumber || "unknown"}. The exact submitted request and pinned observation are persisted; the result is an unsigned plan or refusal, not a wallet transaction.`
+                ? safeLiveRefusal
+                  ? `Safe live refusal example from BSC block ${liveBlockNumber || "unknown"}. The zero address has no reconstructable Venus lending position; the exact current request and observation are persisted so the provider can return a refusal. No rescue or transaction is executed.`
+                  : `Block-pinned ${liveSourceLabel} from BSC block ${liveBlockNumber || "unknown"}. The exact submitted request and pinned observation are persisted; the result is an unsigned plan or refusal, not a wallet transaction.`
               : liveMarketPending
                 ? service === "LENDING_RESCUE"
                   ? "Enter a Venus account and load its current block-pinned position. Hire remains disabled until the exact request and block evidence are ready."
@@ -1392,7 +1418,9 @@ export function JobWorkspace({
             <span>
               <strong>$0.00</strong>
               <small>{inputMode === "interactive"
-                ? "No wallet · no payment · current request and result persist"
+                ? safeLiveRefusal
+                  ? "No wallet · no value moved · zero-position refusal persists"
+                  : "No wallet · no payment · current request and result persist"
                 : "No wallet · no payment · historical evidence replay"}</small>
             </span>
             <button
@@ -1406,7 +1434,9 @@ export function JobWorkspace({
               {loading
                 ? (marketplaceTrace?.job.status.replaceAll("_", " ") ?? "Recording hire")
                 : inputMode === "interactive"
-                  ? "Hire and run current request"
+                  ? safeLiveRefusal
+                    ? "Hire and persist safe refusal"
+                    : "Hire and run current request"
                   : "Replay historical receipt"}
               {!loading && <ArrowRight size={15} />}
             </button>
