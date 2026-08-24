@@ -233,8 +233,43 @@ try {
     "X-GitHub-Run-Attempt": "1",
     "X-GitHub-Sha": "1".repeat(40),
     "X-GitHub-Workflow-Ref":
-      "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+      "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
   };
+  const rejectedOldWorkflow = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    {
+      method: "POST",
+      headers: {
+        ...headers,
+        "X-GitHub-Workflow-Ref":
+          "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+      },
+    },
+  );
+  assert.equal(rejectedOldWorkflow.response.status, 400);
+
+  const rejectedAttemptTwo = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    {
+      method: "POST",
+      headers: { ...headers, "X-GitHub-Run-Attempt": "2" },
+    },
+  );
+  assert.equal(rejectedAttemptTwo.response.status, 400);
+
+  const ledgerBeforeAcceptedIdentity = await requestJson(
+    baseUrl,
+    "/api/evidence/bounded-grid-forward-shadow",
+  );
+  assert.equal(ledgerBeforeAcceptedIdentity.response.status, 200);
+  assert.equal(
+    ledgerBeforeAcceptedIdentity.body.recentWindows.length,
+    0,
+    "Rejected workflow identities must not create shadow-ledger events",
+  );
+
   const expectedRunId = shadowGridRunId(testNow);
   const legacyPublicKey = deterministicUuid(
     `positioncrew:${expectedRunId}:current-grid-hire`,
@@ -263,6 +298,12 @@ try {
   );
   assert.equal(first.body.accepted, true);
   assert.match(first.body.headHash, /^sha256:[a-f0-9]{64}$/u);
+  assert(Number.isFinite(Date.parse(first.body.epochStartedAt)));
+  assert(Number.isFinite(Date.parse(first.body.horizonEndsAt)));
+  assert.equal(
+    Date.parse(first.body.horizonEndsAt) - Date.parse(first.body.epochStartedAt),
+    15 * 60_000,
+  );
 
   const retry = await requestJson(
     baseUrl,
@@ -270,7 +311,11 @@ try {
     { method: "POST", headers },
   );
   assert.equal(retry.response.status, 200);
+  assert.equal(retry.body.runId, first.body.runId);
   assert.equal(retry.body.headHash, first.body.headHash);
+  assert.equal(retry.body.eventCount, first.body.eventCount);
+  assert.equal(retry.body.epochStartedAt, first.body.epochStartedAt);
+  assert.equal(retry.body.horizonEndsAt, first.body.horizonEndsAt);
 
   const summaryBeforeRestart = await requestJson(
     baseUrl,
@@ -291,6 +336,14 @@ try {
   assert.equal(windowBeforeRestart.response.status, 200);
   assert.equal(windowBeforeRestart.body.window.windowId, runId);
   assert(windowBeforeRestart.body.events.length >= 1);
+  assert.equal(windowBeforeRestart.body.window.startedAt, first.body.epochStartedAt);
+  assert.equal(
+    new Date(
+      Date.parse(windowBeforeRestart.body.window.startedAt) +
+        windowBeforeRestart.body.window.horizonMinutes * 60_000,
+    ).toISOString(),
+    first.body.horizonEndsAt,
+  );
   const precommitStored = windowBeforeRestart.body.events.find(
     (event) => event.eventType === "PRECOMMITTED",
   );
@@ -395,11 +448,11 @@ try {
   cutoffHour.setUTCHours(cutoffHour.getUTCHours() + 2);
   assert(Number.isFinite(cutoffHour.getTime()), "Opening-cutoff hour became invalid");
   const beforeOpeningCutoff = finiteDate(
-    cutoffHour.getTime() + 37 * 60_000 + 59_000,
+    cutoffHour.getTime() + 43 * 60_000 + 59_000,
     "pre-opening-cutoff checkpoint",
   );
   const afterOpeningCutoff = finiteDate(
-    cutoffHour.getTime() + 38 * 60_000 + 1_000,
+    cutoffHour.getTime() + 44 * 60_000 + 1_000,
     "post-opening-cutoff checkpoint",
   );
   const cutoffRunId = shadowGridRunId(beforeOpeningCutoff);
@@ -418,6 +471,8 @@ try {
   assert.equal(cutoffTick.body.state, "LATE_START_SKIPPED");
   assert.equal(cutoffTick.body.headHash, null);
   assert.equal(cutoffTick.body.eventCount, 0);
+  assert.equal(cutoffTick.body.epochStartedAt, null);
+  assert.equal(cutoffTick.body.horizonEndsAt, null);
   const skippedWindow = await requestJson(
     baseUrl,
     `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(cutoffRunId)}`,

@@ -20,7 +20,7 @@ export const SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY = [
 export interface ShadowGridScheduleEvidence {
   event: "schedule";
   repository: "dolepee/positioncrew";
-  workflowPath: ".github/workflows/bounded-grid-shadow-ledger.yml";
+  workflowPath: ".github/workflows/production-smoke.yml";
   runId: string;
   runAttempt: string;
   headSha: string;

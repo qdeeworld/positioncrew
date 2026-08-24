@@ -147,10 +147,10 @@ const API_HEADERS = {
 
 const CANONICAL_PRODUCT_ORIGIN = "https://positioncrew.dolepee.com";
 const MAX_FRESH_MARKETPLACE_REQUEST_BYTES = 32_768;
-const SHADOW_GRID_WORKFLOW_PATH = ".github/workflows/bounded-grid-shadow-ledger.yml";
+const SHADOW_GRID_WORKFLOW_PATH = ".github/workflows/production-smoke.yml";
 const SHADOW_GRID_SAMPLE_GRACE_MILLISECONDS = 3 * 60_000;
 const SHADOW_GRID_SAMPLE_EARLY_TOLERANCE_MILLISECONDS = 90_000;
-const SHADOW_GRID_OPENING_CUTOFF_MINUTE = 38;
+const SHADOW_GRID_OPENING_CUTOFF_MINUTE = 44;
 const SHADOW_GRID_SOURCE_RETRY_DELAYS_MILLISECONDS = [0, 3_000, 9_000] as const;
 
 function isAllowedMutationOrigin(request: Request): boolean {
@@ -320,9 +320,9 @@ function scheduleEvidence(request: Request, now: Date): ShadowGridScheduleEviden
     event !== "schedule" ||
     repository !== "dolepee/positioncrew" ||
     !runId || !/^\d+$/.test(runId) ||
-    !runAttempt || !/^\d+$/.test(runAttempt) ||
+    runAttempt !== "1" ||
     !headSha || !/^[a-f0-9]{40}$/i.test(headSha) ||
-    !workflowRef || !workflowRef.startsWith(`dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@`)
+    workflowRef !== `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
   ) {
     throw new FreshMarketplaceRequestError(
       400,
@@ -828,6 +828,8 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
       state: "LATE_START_SKIPPED",
       headHash: null,
       eventCount: 0,
+      epochStartedAt: null,
+      horizonEndsAt: null,
       previousHourCleanup,
       claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
     });
@@ -843,6 +845,8 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
         state: "LATE_START_SKIPPED",
         headHash: null,
         eventCount: 0,
+        epochStartedAt: null,
+        horizonEndsAt: null,
         previousHourCleanup,
         claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
       });
@@ -861,6 +865,8 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
     state: shadowGridRunState(events),
     headHash: latest.eventHash,
     eventCount: events.length,
+    epochStartedAt: latest.epochStartedAt,
+    horizonEndsAt: latest.horizonEndsAt,
     previousHourCleanup,
     claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
   });
@@ -1402,7 +1408,7 @@ async function api(
     }
 
     if (url.pathname === "/api/internal/bounded-grid-forward-shadow/tick") {
-      return collectShadowGridTick(request, env, url);
+      return await collectShadowGridTick(request, env, url);
     }
 
     if (url.pathname === "/api/benchmarks/status") {

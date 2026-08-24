@@ -95,12 +95,12 @@ function precommittedRun(ordinal = 1): StoredEvent[] {
       schedule: {
         event: "schedule",
         repository: "dolepee/positioncrew",
-        workflowPath: ".github/workflows/bounded-grid-shadow-ledger.yml",
+        workflowPath: ".github/workflows/production-smoke.yml",
         runId: String(10_000 + ordinal),
         runAttempt: "1",
         headSha: String(ordinal).padStart(40, "0"),
         workflowRef:
-          "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+          "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
         recordedAt: startedAt.toISOString(),
       },
       sourceHireId: runBinding.hireId,

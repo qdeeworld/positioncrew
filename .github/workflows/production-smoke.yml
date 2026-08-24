@@ -2,7 +2,8 @@ name: Production smoke
 
 on:
   schedule:
-    - cron: "17,47 * * * *"
+    - cron: "17 * * * *"
+    - cron: "47 * * * *"
   workflow_dispatch:
     inputs:
       operation:
@@ -76,6 +77,33 @@ jobs:
         env:
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
         run: test "$VERIFY_OUTCOME" = "success"
+
+  bounded-grid-shadow-session:
+    if: github.event_name == 'schedule' && github.event.schedule == '17 * * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Collect one protected forward-shadow session
+        env:
+          POSITIONCREW_BASE_URL: https://positioncrew.dolepee.com
+          SHADOW_GRID_TICK_TOKEN: ${{ secrets.POSITIONCREW_SHADOW_GRID_TICK_TOKEN }}
+          POSITIONCREW_SHADOW_GRID_OUTPUT: /tmp/positioncrew-bounded-grid-forward-shadow-session.json
+        run: node scripts/collect-bounded-grid-shadow-ledger.mjs
+      - name: Preserve session evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: positioncrew-bounded-grid-forward-shadow-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/positioncrew-bounded-grid-forward-shadow-session.json
+          if-no-files-found: error
+          retention-days: 30
 
   attest-runtime-rotation-evidence:
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'attest-runtime-rotation-evidence'
