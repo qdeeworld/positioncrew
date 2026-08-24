@@ -77,7 +77,7 @@ function stateCopy(item: RecentJobItem): { label: string; detail: string } {
     case "RUNNING":
       return { label: "Running", detail: "Provider is evaluating." };
     case "FAILED":
-      return { label: "Failed", detail: `Run failed: ${item.chain.job.error ?? "No server detail was provided."}` };
+      return { label: "Failed", detail: `Run failed: ${item.chain.job.error?.message ?? "No server detail was provided."}` };
     case "COMPLETED":
       return { label: "Completed", detail: "Result and receipt are ready." };
     default:

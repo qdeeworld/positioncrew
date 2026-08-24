@@ -137,7 +137,8 @@ function isFixtureJobResponseForChain(
     typeof deliverable.status !== "string" ||
     typeof deliverable.decision !== "string" ||
     typeof deliverable.summary !== "string" ||
-    typeof deliverable.expiresAt !== "string") {
+    typeof deliverable.expiresAt !== "string" ||
+    !Number.isFinite(Date.parse(deliverable.expiresAt))) {
     return false;
   }
 
@@ -308,6 +309,12 @@ export function isFreshMarketplaceChainForReference(
     typeof hire.providerId !== "string" ||
     typeof job.jobId !== "string" ||
     !["CREATED", "RUNNING", "COMPLETED", "FAILED"].includes(String(job.state))) {
+    return false;
+  }
+
+  if (job.error !== null && (!isRecord(job.error) ||
+    typeof job.error.code !== "string" ||
+    typeof job.error.message !== "string")) {
     return false;
   }
 

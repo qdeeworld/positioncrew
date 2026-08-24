@@ -139,7 +139,7 @@ describe("recent job device index", () => {
     const chain = {
       schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
       hire: { hireId: saved.hireId, service: saved.service, providerId: "positioncrew:lending-rescue:v1" },
-      job: { jobId: "job-1", state: "COMPLETED" },
+      job: { jobId: "job-1", state: "COMPLETED", error: null },
       receipt: {
         receiptId: "receipt-1",
         publicUrl: "/receipt/1",
@@ -160,6 +160,24 @@ describe("recent job device index", () => {
     expect(isFreshMarketplaceChainForReference({
       ...chain,
       receipt: { ...chain.receipt, response: { ...response, result: { ...response.result, job: { ...response.result.job, jobId: "other-job" } } } },
+    }, saved)).toBe(false);
+    expect(isFreshMarketplaceChainForReference({
+      ...chain,
+      receipt: {
+        ...chain.receipt,
+        response: {
+          ...response,
+          result: {
+            ...response.result,
+            deliverable: { ...response.result.deliverable, expiresAt: "not-a-date" },
+          },
+        },
+      },
+    }, saved)).toBe(false);
+    expect(isFreshMarketplaceChainForReference({
+      ...chain,
+      job: { ...chain.job, state: "FAILED", error: { code: "PROVIDER_TIMEOUT", message: 42 } },
+      receipt: null,
     }, saved)).toBe(false);
   });
 });

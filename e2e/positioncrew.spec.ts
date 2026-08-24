@@ -445,6 +445,7 @@ async function installCurrentLendingHireRoutes(
     safeRefusal?: boolean;
     staleRunning?: boolean;
     getDelayMs?: number;
+    failedMessage?: string;
   } = {},
 ) {
   const now = new Date();
@@ -475,7 +476,7 @@ async function installCurrentLendingHireRoutes(
   let runCount = 0;
   let receiptLoadCount = 0;
 
-  const chain = (state: "CREATED" | "RUNNING" | "COMPLETED") => ({
+  const chain = (state: "CREATED" | "RUNNING" | "COMPLETED" | "FAILED") => ({
     schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
     claimBoundary: [
       "Current block-pinned input.",
@@ -507,7 +508,7 @@ async function installCurrentLendingHireRoutes(
       startedAt: state === "CREATED" ? null : now.toISOString(),
       completedAt: state === "COMPLETED" ? now.toISOString() : null,
       apiDurationMilliseconds: state === "COMPLETED" ? 43 : null,
-      error: null,
+      error: state === "FAILED" ? { code: "PROVIDER_TIMEOUT", message: options.failedMessage ?? "Provider run failed." } : null,
     },
     receipt: state === "COMPLETED" ? {
       receiptId,
@@ -589,7 +590,11 @@ async function installCurrentLendingHireRoutes(
     if (options.getDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, options.getDelayMs));
     }
-    const state = options.staleRunning && runCount === 0 ? "RUNNING" : "COMPLETED";
+    const state = options.failedMessage
+      ? "FAILED"
+      : options.staleRunning && runCount === 0
+        ? "RUNNING"
+        : "COMPLETED";
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(chain(state)) });
   });
   await page.context().route(`**/api/benchmark-receipts/${receiptId}`, async (route) => {
@@ -1681,4 +1686,23 @@ test("does not reinsert a device reference cleared while server hydration is in 
   await expect(panel.getByText("No saved jobs on this device.", { exact: false })).toBeVisible();
   await page.waitForTimeout(400);
   await expect(panel.getByText("Lending Rescue", { exact: true })).toHaveCount(0);
+});
+
+test("shows the server diagnostic for a restored failed job", async ({ page }) => {
+  const routes = await installCurrentLendingHireRoutes(page, {
+    safeRefusal: true,
+    failedMessage: "The provider timed out before returning a result.",
+  });
+  await page.addInitScript(({ hireId }) => {
+    window.localStorage.setItem("positioncrew.recent-jobs.v1", JSON.stringify({
+      schemaVersion: "positioncrew.recent-jobs.v1",
+      entries: [{ hireId, service: "LENDING_RESCUE", rememberedAt: "2026-08-24T12:00:00.000Z" }],
+    }));
+  }, { hireId: routes.hireId });
+
+  await page.goto("/#jobs");
+  const panel = page.getByTestId("recent-jobs-device");
+  await expect(panel.getByText("Failed", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Run failed: The provider timed out before returning a result.", { exact: true })).toBeVisible();
+  await expect(panel).not.toContainText("[object Object]");
 });
