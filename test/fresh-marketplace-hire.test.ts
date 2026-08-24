@@ -997,9 +997,15 @@ describe("fresh marketplace hire contract", () => {
   it("binds the closed Drizzle inventory to the reference migration and schema truth", () => {
     const drizzleRoot = resolve(PROJECT_ROOT, "drizzle");
     const generatedMigrationName = "0000_fresh_benchmark_hires.sql";
-    expect(readdirSync(drizzleRoot).sort()).toEqual([generatedMigrationName, "meta"]);
+    const generatedCurrentMigrationName = "0001_current_block_pinned_hires.sql";
+    expect(readdirSync(drizzleRoot).sort()).toEqual([
+      generatedMigrationName,
+      generatedCurrentMigrationName,
+      "meta",
+    ]);
     expect(readdirSync(resolve(drizzleRoot, "meta")).sort()).toEqual([
       "0000_snapshot.json",
+      "0001_snapshot.json",
       "_journal.json",
     ]);
 
@@ -1021,6 +1027,7 @@ describe("fresh marketplace hire contract", () => {
     expect(journal.dialect).toBe("sqlite");
     expect(journal.entries?.map(({ idx, tag }) => ({ idx, tag }))).toEqual([
       { idx: 0, tag: "0000_fresh_benchmark_hires" },
+      { idx: 1, tag: "0001_current_block_pinned_hires" },
     ]);
 
     const currentMigration = readFileSync(
@@ -1030,5 +1037,15 @@ describe("fresh marketplace hire contract", () => {
     expect(currentMigration).toContain("CURRENT_BLOCK_PINNED");
     expect(currentMigration).toContain("CREATE TABLE fresh_marketplace_rate_limits");
     expect(currentMigration).not.toContain("COUNT(*) FROM fresh_marketplace_hires");
+    const generatedCurrentMigration = readFileSync(
+      resolve(drizzleRoot, generatedCurrentMigrationName),
+      "utf8",
+    );
+    expect(
+      generatedCurrentMigration
+        .replaceAll("--> statement-breakpoint", "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    ).toBe(currentMigration.replace(/\s+/g, " ").trim());
   });
 });
