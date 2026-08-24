@@ -450,8 +450,8 @@ async function verifyCurrentPersistedHire(definition, probe) {
     `${definition.service} receipt contains the wrong provider request`,
   );
   assert(
-    JSON.stringify(completed.receipt?.response?.result?.request) === JSON.stringify(envelope.request),
-    `${definition.service} receipt request differs from the committed live probe request`,
+    canonicalSha256(completed.receipt?.response?.result?.request) === created.hire.requestHash,
+    `${definition.service} receipt request commitment differs from the live probe request`,
   );
   assert(
     completed.receipt?.response?.result?.evaluation?.score === 100,
