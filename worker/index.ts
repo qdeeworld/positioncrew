@@ -563,6 +563,49 @@ function assertShadowGridScheduleBinding(
   }
 }
 
+function shadowGridScheduleCollisionResponse(
+  events: readonly ShadowGridEvent[],
+  incoming: ShadowGridScheduleEvidence,
+  windowId: string,
+  recordedAt: Date,
+  origin: string,
+): Response | null {
+  if (events.length === 0) return null;
+  verifyShadowGridRun(events);
+  if (events[0]!.runId !== windowId) {
+    throw new Error("Shadow-grid collision probe resolved an unexpected ledger");
+  }
+  const committed = storedScheduleFromShadowGridGenesis(events);
+  if (
+    committed.workflowPath !== SHADOW_GRID_WORKFLOW_PATH ||
+    committed.workflowRef !==
+      `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
+  ) {
+    return null;
+  }
+  if (committed.runId === incoming.runId) {
+    assertShadowGridScheduleBinding(events, incoming);
+    return null;
+  }
+  const latest = events.at(-1)!;
+  return json({
+    schemaVersion: "positioncrew.bounded-grid-forward-shadow-collision.v1",
+    accepted: false,
+    state: "COLLISION_SKIPPED",
+    windowId,
+    reason: "WINDOW_ALREADY_BOUND_TO_ANOTHER_AUTHENTICATED_RUN",
+    incoming,
+    originating: committed,
+    existing: {
+      eventCount: events.length,
+      headHash: latest.eventHash,
+      publicUrl: `${origin}/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(windowId)}`,
+    },
+    recordedAt: recordedAt.toISOString(),
+    claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
+  }, 409);
+}
+
 function assertShadowGridHireBinding(
   events: readonly ShadowGridEvent[],
   chain: FreshMarketplaceChain,
@@ -656,12 +699,12 @@ async function startShadowGridRun(
   collectorRequest: Request,
   openingDeadline: number,
 ): Promise<
-  | { state: "STARTED"; events: readonly ShadowGridEvent[] }
+  | { state: "STARTED"; events: readonly ShadowGridEvent[]; replayed: boolean }
   | { state: "LATE_START_SKIPPED"; recordedAt: Date }
 > {
   const store = shadowGridStore(env);
   const existing = await store.getRun(runId);
-  if (existing.length > 0) return { state: "STARTED", events: existing };
+  if (existing.length > 0) return { state: "STARTED", events: existing, replayed: true };
   const chain = await createCurrentGridHireForShadowRun(env, runId);
   const { request, deliverable } = gridReceiptPayload(chain);
   const receipt = chain.receipt!;
@@ -733,7 +776,7 @@ async function startShadowGridRun(
       },
     });
   }
-  return { state: "STARTED", events };
+  return { state: "STARTED", events, replayed: false };
 }
 
 async function voidShadowGridRun(
@@ -921,6 +964,68 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
     truncated: false,
     failures: [],
   };
+  const runId = expectedRunId ?? currentRunId;
+  let events = await store.getRun(runId);
+  if (expectedRunId !== null && events.length === 0) {
+    throw new FreshMarketplaceRequestError(
+      400,
+      "INVALID_JSON",
+      "Shadow-grid follow-up references an unknown originating run",
+    );
+  }
+  const openingCheckpoint = shadowGridCollectorNow(request, env);
+  let openedFresh = false;
+  let lateStartRecordedAt: Date | null = null;
+  if (expectedRunId === null && events.length > 0) {
+    const collision = shadowGridScheduleCollisionResponse(
+      events,
+      schedule,
+      currentRunId,
+      shadowGridCollectorCheckpointNow(request, env),
+      url.origin,
+    );
+    if (collision) return collision;
+    assertShadowGridScheduleBinding(events, schedule);
+  }
+  if (
+    expectedRunId === null &&
+    events.length === 0 &&
+    openingCheckpoint.getTime() < openingDeadline
+  ) {
+    let started:
+      | Awaited<ReturnType<typeof startShadowGridRun>>
+      | null = null;
+    let startFailure: unknown = null;
+    try {
+      started = await startShadowGridRun(env, runId, schedule, request, openingDeadline);
+    } catch (error) {
+      startFailure = error;
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        events = await store.getRun(runId);
+        if (events.length > 0) break;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+      }
+    }
+    if (started?.state === "LATE_START_SKIPPED") {
+      lateStartRecordedAt = started.recordedAt;
+    } else {
+      if (started?.state === "STARTED") {
+        events = [...started.events];
+        openedFresh = !started.replayed;
+      } else if (events.length === 0) {
+        throw startFailure;
+      }
+      const collision = shadowGridScheduleCollisionResponse(
+        events,
+        schedule,
+        currentRunId,
+        shadowGridCollectorCheckpointNow(request, env),
+        url.origin,
+      );
+      if (collision) return collision;
+      assertShadowGridScheduleBinding(events, schedule);
+    }
+  }
   if (expectedRunId === null) {
     try {
       const discoveredCandidates = await store.listOldestNonterminalEpochs(
@@ -1007,25 +1112,15 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
       ? abandonedRunCleanup.voidedCount > 0 ? "PARTIAL" : "FAILED"
       : abandonedRunCleanup.voidedCount > 0 ? "PROCESSED" : "NOT_REQUIRED";
   }
-  const runId = expectedRunId ?? currentRunId;
-  let events = await store.getRun(runId);
-  if (expectedRunId !== null && events.length === 0) {
-    throw new FreshMarketplaceRequestError(
-      400,
-      "INVALID_JSON",
-      "Shadow-grid follow-up references an unknown originating run",
-    );
-  }
-  const openingCheckpoint = shadowGridCollectorNow(request, env);
   if (
     expectedRunId === null &&
     events.length === 0 &&
-    openingCheckpoint.getTime() >= openingDeadline
+    (openingCheckpoint.getTime() >= openingDeadline || lateStartRecordedAt !== null)
   ) {
     return json({
       schemaVersion: "positioncrew.bounded-grid-forward-shadow-tick.v1",
       accepted: true,
-      recordedAt: openingCheckpoint.toISOString(),
+      recordedAt: (lateStartRecordedAt ?? openingCheckpoint).toISOString(),
       runId,
       state: "LATE_START_SKIPPED",
       headHash: null,
@@ -1038,26 +1133,9 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
     });
   }
   if (events.length === 0) {
-    const started = await startShadowGridRun(env, runId, schedule, request, openingDeadline);
-    if (started.state === "LATE_START_SKIPPED") {
-      return json({
-        schemaVersion: "positioncrew.bounded-grid-forward-shadow-tick.v1",
-        accepted: true,
-        recordedAt: started.recordedAt.toISOString(),
-        runId,
-        state: "LATE_START_SKIPPED",
-        headHash: null,
-        eventCount: 0,
-        epochStartedAt: null,
-        horizonEndsAt: null,
-        previousHourCleanup,
-        abandonedRunCleanup,
-        claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
-      });
-    }
-    events = started.events;
-    assertShadowGridScheduleBinding(events, schedule);
-  } else {
+    throw new Error("Shadow-grid opening did not establish an immutable ledger");
+  }
+  if (!openedFresh) {
     assertShadowGridScheduleBinding(events, schedule);
     events = await processOpenShadowGridRun(env, events, now, request);
   }

@@ -8,7 +8,11 @@ const EPOCH = "2026-08-24T12:17:00.000Z";
 const HORIZON = "2026-08-24T12:32:00.000Z";
 const RUN_ID = "bg-20260824-12";
 const HEAD_HASH = `sha256:${"ab".repeat(32)}`;
-const BOUNDARY = ["Forward-only actual observations.", "Zero-fund simulations are not transactions."];
+const BOUNDARY = [
+  "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
+  "Conservative sampled crossings are simulations, not transactions, executable fills, realised PnL, strategy returns, or audited financial performance.",
+  "The operator-scheduled record proves no external buyer, payment, revenue, demand, or Agent Advantage.",
+];
 
 interface QueueItem {
   body?: unknown;
@@ -34,6 +38,7 @@ interface SessionArtifact {
   };
   attempts: Array<{ outcome: string; response: unknown }>;
   claimBoundary: string[];
+  collision: unknown;
   failure: string | null;
 }
 
@@ -64,6 +69,46 @@ function tick(state: string, eventCount = 2) {
     eventCount: late ? 0 : eventCount,
     epochStartedAt: late ? null : EPOCH,
     horizonEndsAt: late ? null : HORIZON,
+    claimBoundary: BOUNDARY,
+  };
+}
+
+function collision() {
+  return {
+    schemaVersion: "positioncrew.bounded-grid-forward-shadow-collision.v1",
+    accepted: false,
+    state: "COLLISION_SKIPPED",
+    windowId: RUN_ID,
+    reason: "WINDOW_ALREADY_BOUND_TO_ANOTHER_AUTHENTICATED_RUN",
+    incoming: {
+      event: "schedule",
+      repository: "dolepee/positioncrew",
+      workflowPath: ".github/workflows/production-smoke.yml",
+      runId: "123456789",
+      runAttempt: "1",
+      headSha: "1".repeat(40),
+      workflowRef:
+        "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+      recordedAt: EPOCH,
+    },
+    originating: {
+      event: "schedule",
+      repository: "dolepee/positioncrew",
+      workflowPath: ".github/workflows/production-smoke.yml",
+      runId: "987654321",
+      runAttempt: "1",
+      headSha: "2".repeat(40),
+      workflowRef:
+        "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+      recordedAt: EPOCH,
+    },
+    existing: {
+      eventCount: 2,
+      headHash: HEAD_HASH,
+      publicUrl:
+        "https://positioncrew.test/api/evidence/bounded-grid-forward-shadow/windows/bg-20260824-12",
+    },
+    recordedAt: EPOCH,
     claimBoundary: BOUNDARY,
   };
 }
@@ -251,6 +296,113 @@ describe("bounded-grid scheduled session collector", () => {
       expect(result.finalStatus).toBe(state);
     },
   );
+
+  it("turns an authenticated opening collision into a successful zero-follow-up skip artifact", async () => {
+    const response = collision();
+    response.recordedAt = "2026-08-24T12:17:01.000Z";
+    const runtime = harness([{ body: response, status: 409 }]);
+    const result = await runShadowGridScheduledSession({ environment: environment(), ...runtime });
+
+    expect(runtime.calls).toHaveLength(1);
+    expect(runtime.sleeps).toEqual([]);
+    expect(result).toMatchObject({
+      schemaVersion: "positioncrew.bounded-grid-forward-shadow-scheduled-session.v2",
+      status: "SKIPPED",
+      finalStatus: "COLLISION_SKIPPED",
+      runId: RUN_ID,
+      collision: {
+        reason: "WINDOW_ALREADY_BOUND_TO_ANOTHER_AUTHENTICATED_RUN",
+        originating: { runId: "987654321" },
+      },
+      attempts: [{ outcome: "COLLISION_SKIPPED", httpStatus: 409 }],
+    });
+    expect(result.claimBoundary).toEqual(BOUNDARY);
+  });
+
+  it.each([
+    ["generic conflict", () => ({ error: "conflict" })],
+    ["invalid head hash", (response: ReturnType<typeof collision>) => {
+      response.existing.headHash = "not-a-hash";
+      return response;
+    }],
+    ["self-consistent wrong hour", (response: ReturnType<typeof collision>) => {
+      const shifted = "2026-08-24T13:17:00.000Z";
+      response.windowId = "bg-20260824-13";
+      response.recordedAt = shifted;
+      response.incoming.recordedAt = shifted;
+      response.originating.recordedAt = shifted;
+      response.existing.publicUrl =
+        "https://positioncrew.test/api/evidence/bounded-grid-forward-shadow/windows/bg-20260824-13";
+      return response;
+    }],
+    ["incoming time mismatch", (response: ReturnType<typeof collision>) => {
+      response.incoming.recordedAt = "2026-08-24T12:18:00.000Z";
+      return response;
+    }],
+    ["originating time after collision", (response: ReturnType<typeof collision>) => {
+      response.originating.recordedAt = "2026-08-24T12:18:00.000Z";
+      return response;
+    }],
+    ["changed claim boundary", (response: ReturnType<typeof collision>) => {
+      response.claimBoundary = ["Unverified boundary."];
+      return response;
+    }],
+  ])("fails closed on a malformed opening collision: %s", async (_label, mutate) => {
+    const runtime = harness([{ body: mutate(collision()), status: 409 }]);
+
+    await expect(
+      runShadowGridScheduledSession({ environment: environment(), ...runtime }),
+    ).rejects.toThrow(/collision returned an invalid response/u);
+    expect(runtime.calls).toHaveLength(1);
+    expect(runtime.sleeps).toEqual([]);
+    expect(runtime.artifacts.at(-1)).toMatchObject({
+      status: "FAILED",
+      attempts: [{ outcome: "INVALID_RESPONSE", httpStatus: 409 }],
+    });
+  });
+
+  it("rejects a collision response after the opening tick", async () => {
+    const runtime = harness([
+      { body: tick("PRECOMMITTED") },
+      { body: collision(), status: 409 },
+    ]);
+
+    await expect(
+      runShadowGridScheduledSession({ environment: environment(), ...runtime }),
+    ).rejects.toThrow(/only for an unpinned opening request/u);
+    expect(runtime.calls).toHaveLength(2);
+    expect(runtime.artifacts.at(-1)).toMatchObject({
+      status: "FAILED",
+      attempts: [
+        { outcome: "ACCEPTED" },
+        { outcome: "INVALID_RESPONSE", httpStatus: 409 },
+      ],
+    });
+  });
+
+  it("fails closed when a completed opening 5xx is followed by a collision", async () => {
+    const runtime = harness([
+      { body: { error: "concurrent initialization" }, status: 503 },
+      { body: collision(), status: 409 },
+    ]);
+
+    await expect(
+      runShadowGridScheduledSession({
+        environment: environment(),
+        retryDelayMilliseconds: 1_000,
+        ...runtime,
+      }),
+    ).rejects.toThrow(/only on the first opening attempt/u);
+    expect(runtime.calls).toHaveLength(2);
+    expect(runtime.artifacts.at(-1)).toMatchObject({
+      status: "FAILED",
+      finalStatus: null,
+      attempts: [
+        { outcome: "HTTP_ERROR", httpStatus: 503 },
+        { outcome: "INVALID_RESPONSE", httpStatus: 409 },
+      ],
+    });
+  });
 
   it("does not post after crossing the initial run hour", async () => {
     const runtime = harness(

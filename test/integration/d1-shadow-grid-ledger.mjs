@@ -613,7 +613,29 @@ try {
     "post-opening-cutoff checkpoint",
   );
   const cutoffRunId = shadowGridRunId(beforeOpeningCutoff);
+  const cutoffAbandonedNow = finiteDate(
+    cutoffHour.getTime() - 60 * 60_000 + 17 * 60_000,
+    "cutoff cleanup source opening",
+  );
+  const cutoffAbandonedRunId = shadowGridRunId(cutoffAbandonedNow);
+  const cutoffAbandonedHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "1999",
+    "X-GitHub-Sha": "2".repeat(40),
+  };
 
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, cutoffAbandonedNow);
+  const cutoffAbandonedOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: cutoffAbandonedHeaders },
+  );
+  assert.equal(cutoffAbandonedOpen.response.status, 200);
+  assert.equal(cutoffAbandonedOpen.body.runId, cutoffAbandonedRunId);
+  assert.equal(cutoffAbandonedOpen.body.state, "PRECOMMITTED");
   await stopWorker(worker);
   port = await availablePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -630,11 +652,19 @@ try {
   assert.equal(cutoffTick.body.eventCount, 0);
   assert.equal(cutoffTick.body.epochStartedAt, null);
   assert.equal(cutoffTick.body.horizonEndsAt, null);
+  assert.ok(cutoffTick.body.abandonedRunCleanup.voidedCount > 0);
   const skippedWindow = await requestJson(
     baseUrl,
     `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(cutoffRunId)}`,
   );
   assert.equal(skippedWindow.response.status, 404);
+  const cutoffAbandonedWindow = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(cutoffAbandonedRunId)}`,
+  );
+  assert.equal(cutoffAbandonedWindow.response.status, 200);
+  assert.equal(cutoffAbandonedWindow.body.integrity.valid, true);
+  assert.equal(cutoffAbandonedWindow.body.events.at(-1).eventType, "VOID_SOURCE_GAP");
 
   const abandonedPriorNow = finiteDate(
     cutoffHour.getTime() + 60 * 60_000 + 2 * 60_000,
@@ -952,20 +982,54 @@ try {
   await stopWorker(worker);
   port = await availablePort();
   baseUrl = `http://127.0.0.1:${port}`;
-  worker = await startWorker(port, legacyOpeningNow);
-  const legacyOpen = await requestJson(
+  const unrelatedOpeningNow = finiteDate(
+    legacyOpeningNow.getTime() - 60 * 60_000,
+    "unrelated expired opening hour",
+  );
+  const unrelatedRunId = shadowGridRunId(unrelatedOpeningNow);
+  worker = await startWorker(port, unrelatedOpeningNow);
+  const unrelatedOpen = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
-    { method: "POST", headers: legacySeedOriginHeaders },
+    {
+      method: "POST",
+      headers: {
+        ...headers,
+        "X-GitHub-Run-Id": "3999",
+        "X-GitHub-Sha": "6".repeat(40),
+      },
+    },
   );
+  assert.equal(unrelatedOpen.response.status, 200);
+  assert.equal(unrelatedOpen.body.runId, unrelatedRunId);
+  assert.equal(unrelatedOpen.body.state, "PRECOMMITTED");
+  await stopWorker(worker);
+  executeD1SetupMutation(
+    "CREATE TRIGGER shadow_grid_events_hold_void BEFORE INSERT ON shadow_grid_events WHEN NEW.event_type = 'VOID_SOURCE_GAP' BEGIN SELECT RAISE(ABORT, 'test hold unrelated expired epoch'); END",
+  );
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, legacyOpeningNow);
+  let legacyOpen;
+  try {
+    legacyOpen = await requestJson(
+      baseUrl,
+      "/api/internal/bounded-grid-forward-shadow/tick",
+      { method: "POST", headers: legacySeedOriginHeaders },
+    );
+  } finally {
+    await stopWorker(worker);
+    worker = undefined;
+    executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_hold_void");
+  }
   assert.equal(legacyOpen.response.status, 200);
   assert.equal(legacyOpen.body.runId, legacyRunId);
   assert.equal(legacyOpen.body.state, "PRECOMMITTED");
+  assert.ok(legacyOpen.body.abandonedRunCleanup.failedCount > 0);
   const legacyPreSampleFollowNow = finiteDate(
     Date.parse(legacyOpen.body.epochStartedAt) + 3 * 60_000,
     "legacy pre-sample authorized follow",
   );
-  await stopWorker(worker);
   port = await availablePort();
   baseUrl = `http://127.0.0.1:${port}`;
   worker = await startWorker(port, legacyPreSampleFollowNow);
@@ -1000,20 +1064,39 @@ try {
   baseUrl = `http://127.0.0.1:${port}`;
   worker = await startWorker(port, legacyDueNow);
 
-  const rejectedLegacyOriginChange = await requestJson(
+  const unrelatedWindowBeforeMismatch = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(unrelatedRunId)}`,
+  );
+  assert.equal(unrelatedWindowBeforeMismatch.response.status, 200);
+  assert.equal(unrelatedWindowBeforeMismatch.body.integrity.valid, true);
+  assert.equal(unrelatedWindowBeforeMismatch.body.events.at(-1).eventType, "PRECOMMITTED");
+  assert.equal(unrelatedWindowBeforeMismatch.body.events.at(-1).eventHash, unrelatedOpen.body.headHash);
+  assert.equal(unrelatedWindowBeforeMismatch.body.events.length, unrelatedOpen.body.eventCount);
+
+  const rejectedSameRunHeadChange = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
     {
       method: "POST",
       headers: {
         ...legacySeedOriginHeaders,
-        "X-GitHub-Run-Id": "4099",
         "X-GitHub-Sha": "c".repeat(40),
       },
     },
   );
-  assert.equal(rejectedLegacyOriginChange.response.status, 400);
-  const rejectedCurrentPathForLegacyEpoch = await requestJson(
+  assert.equal(rejectedSameRunHeadChange.response.status, 400);
+  const unrelatedWindowAfterMismatch = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(unrelatedRunId)}`,
+  );
+  assert.equal(unrelatedWindowAfterMismatch.response.status, 200);
+  assert.equal(unrelatedWindowAfterMismatch.body.integrity.valid, true);
+  assert.deepEqual(
+    unrelatedWindowAfterMismatch.body.events,
+    unrelatedWindowBeforeMismatch.body.events,
+  );
+  const skippedCurrentPathCollision = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
     {
@@ -1026,7 +1109,8 @@ try {
       },
     },
   );
-  assert.equal(rejectedCurrentPathForLegacyEpoch.response.status, 400);
+  assert.equal(skippedCurrentPathCollision.response.status, 409);
+  assert.equal(skippedCurrentPathCollision.body.state, "COLLISION_SKIPPED");
   const rejectedMalformedLegacyFollow = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
@@ -1070,7 +1154,28 @@ try {
     "/api/internal/bounded-grid-forward-shadow/tick",
     { method: "POST", headers: rejectedCurrentCrossRunHeaders },
   );
-  assert.equal(rejectedCurrentCrossRun.response.status, 400);
+  assert.equal(rejectedCurrentCrossRun.response.status, 409);
+  assert.equal(
+    rejectedCurrentCrossRun.body.schemaVersion,
+    "positioncrew.bounded-grid-forward-shadow-collision.v1",
+  );
+  assert.equal(rejectedCurrentCrossRun.body.accepted, false);
+  assert.equal(rejectedCurrentCrossRun.body.state, "COLLISION_SKIPPED");
+  assert.equal(rejectedCurrentCrossRun.body.windowId, legacyRunId);
+  assert.equal(
+    rejectedCurrentCrossRun.body.reason,
+    "WINDOW_ALREADY_BOUND_TO_ANOTHER_AUTHENTICATED_RUN",
+  );
+  assert.equal(rejectedCurrentCrossRun.body.incoming.runId, "4002");
+  assert.equal(rejectedCurrentCrossRun.body.originating.runId, "4001");
+  assert.equal(rejectedCurrentCrossRun.body.existing.eventCount, legacyOpen.body.eventCount);
+  assert.equal(rejectedCurrentCrossRun.body.existing.headHash, legacyOpen.body.headHash);
+  assert.equal(
+    rejectedCurrentCrossRun.body.existing.publicUrl,
+    `${baseUrl}/api/evidence/bounded-grid-forward-shadow/windows/${legacyRunId}`,
+  );
+  assert.ok(Number.isFinite(Date.parse(rejectedCurrentCrossRun.body.recordedAt)));
+  assert.ok(rejectedCurrentCrossRun.body.claimBoundary.length > 0);
 
   const currentWindowAfterRejectedCrossRun = await requestJson(
     baseUrl,
@@ -1091,6 +1196,15 @@ try {
   assert.equal(
     currentWindowAfterRejectedCrossRun.body.events[0].payload.schedule.workflowRef,
     "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+  );
+  const unrelatedWindowAfterCollisions = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(unrelatedRunId)}`,
+  );
+  assert.equal(unrelatedWindowAfterCollisions.response.status, 200);
+  assert.deepEqual(
+    unrelatedWindowAfterCollisions.body.events,
+    unrelatedWindowBeforeMismatch.body.events,
   );
 
   await stopWorker(worker);
