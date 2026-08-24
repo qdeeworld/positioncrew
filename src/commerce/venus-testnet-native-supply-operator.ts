@@ -423,6 +423,14 @@ export async function inspectVenusSubmissionBroadcastState(
     throw new Error("Dedicated testnet signer cannot fund the exact supply plus frozen gas");
   }
   await dependencies.testnet.simulateMint(getAddress(submission.intent.transaction.to), actor, value);
+  const currentEstimatedGas = await dependencies.testnet.estimateMintGas(
+    getAddress(submission.intent.transaction.to),
+    actor,
+    value,
+  );
+  if (currentEstimatedGas <= 0n || currentEstimatedGas > BigInt(submission.intent.transaction.gasLimit)) {
+    throw new Error("Current Venus mint gas estimate exceeds the frozen gas limit before broadcast");
+  }
   if (clock().getTime() >= Date.parse(submission.intent.expiresAt)) {
     throw new Error("Venus supply intent expired during final broadcast checks");
   }

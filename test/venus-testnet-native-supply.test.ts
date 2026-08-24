@@ -91,6 +91,7 @@ class FakeRpc implements VenusNativeSupplyRpc {
   comptroller = UNITROLLER;
   market = { isListed: true, isVenus: true };
   gasEstimate = 50_000n;
+  gasEstimateCalls = 0;
   gasPrice = 1_000_000_000n;
   simulateCalls = 0;
   simulationError: Error | null = null;
@@ -140,7 +141,10 @@ class FakeRpc implements VenusNativeSupplyRpc {
     this.simulateCalls += 1;
     if (this.simulationError) throw this.simulationError;
   };
-  estimateMintGas = async (_vToken: Address, _account: Address, _value: bigint) => this.gasEstimate;
+  estimateMintGas = async (_vToken: Address, _account: Address, _value: bigint) => {
+    this.gasEstimateCalls += 1;
+    return this.gasEstimate;
+  };
   getGasPrice = async () => this.gasPrice;
   sendRawTransaction = async (rawTransaction: Hex) => {
     this.sentRaw.push(rawTransaction);
@@ -380,11 +384,14 @@ describe("bounded Venus BSC Testnet native supply", () => {
   it("never resends a known hash and rejects expired unknown transactions", async () => {
     const known = dependencies();
     const knownSubmission = (await signed(known)).submission;
+    known.testnet.gasEstimate = 0n;
+    known.testnet.gasEstimateCalls = 0;
     await expect(inspectVenusSubmissionBroadcastState(
       knownSubmission,
       known,
       () => new Date("2026-08-24T12:30:00.000Z"),
     )).resolves.toEqual({ state: "ALREADY_KNOWN", transactionHash: TRANSACTION_HASH });
+    expect(known.testnet.gasEstimateCalls).toBe(0);
     expect(known.testnet.sentRaw).toEqual([]);
 
     const unknown = dependencies();
@@ -398,6 +405,38 @@ describe("bounded Venus BSC Testnet native supply", () => {
     expect(unknown.testnet.sentRaw).toEqual([]);
   });
 
+  it("blocks gas-estimate drift and permits the fake send only after a valid fresh estimate", async () => {
+    const drifted = dependencies();
+    const driftedSubmission = (await signed(drifted)).submission;
+    drifted.testnet.transaction = null;
+    drifted.testnet.gasEstimate = 60_001n;
+    drifted.testnet.gasEstimateCalls = 0;
+    await expect(inspectVenusSubmissionBroadcastState(
+      driftedSubmission,
+      drifted,
+      () => new Date("2026-08-24T12:02:00.000Z"),
+    )).rejects.toThrow("exceeds the frozen gas limit before broadcast");
+    expect(drifted.testnet.gasEstimateCalls).toBe(1);
+    expect(drifted.testnet.sentRaw).toEqual([]);
+
+    const valid = dependencies();
+    const validSubmission = (await signed(valid)).submission;
+    valid.testnet.transaction = null;
+    valid.testnet.gasEstimate = 60_000n;
+    valid.testnet.gasEstimateCalls = 0;
+    const inspection = await inspectVenusSubmissionBroadcastState(
+      validSubmission,
+      valid,
+      () => new Date("2026-08-24T12:02:00.000Z"),
+    );
+    expect(inspection.state).toBe("READY_TO_SEND");
+    expect(valid.testnet.gasEstimateCalls).toBe(1);
+    if (inspection.state === "READY_TO_SEND") {
+      await valid.testnet.sendRawTransaction(validSubmission.rawTransaction as Hex);
+    }
+    expect(valid.testnet.sentRaw).toEqual([RAW_TRANSACTION]);
+  });
+
   it("fails every fresh pre-send invariant without sending", async () => {
     const cases: Array<{ mutate: (deps: ReturnType<typeof dependencies>) => void; message: string }> = [
       { mutate: (deps) => { deps.testnet.chainId = 56; }, message: "not on BSC Testnet" },
@@ -407,6 +446,7 @@ describe("bounded Venus BSC Testnet native supply", () => {
       { mutate: (deps) => { deps.testnet.market = { isListed: false, isVenus: true }; }, message: "active listed Venus market" },
       { mutate: (deps) => { deps.testnet.nativeBalance = 1n; }, message: "cannot fund" },
       { mutate: (deps) => { deps.testnet.simulationError = new Error("simulation rejected"); }, message: "simulation rejected" },
+      { mutate: (deps) => { deps.testnet.gasEstimate = 60_001n; }, message: "exceeds the frozen gas limit before broadcast" },
     ];
     for (const scenario of cases) {
       const deps = dependencies();
