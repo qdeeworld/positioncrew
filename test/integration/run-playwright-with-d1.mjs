@@ -97,7 +97,7 @@ async function waitForWorker(baseUrl, worker) {
   throw new Error(`Local Worker did not become ready:\n${worker.output.join("")}`);
 }
 
-async function runPlaywright(baseUrl) {
+async function runPlaywright(baseUrl, worker) {
   const child = spawn(playwright, ["test"], {
     cwd: root,
     env: { ...process.env, CI: "1", PLAYWRIGHT_BASE_URL: baseUrl },
@@ -108,8 +108,14 @@ async function runPlaywright(baseUrl) {
     child.once("exit", (code, signal) => resolveResult({ code, signal }));
   });
   if (result.code !== 0) {
+    const workerExited = worker.child.exitCode !== null || worker.child.signalCode !== null;
+    const workerFailure = workerExited
+      ? `\nLocal Worker exited during Playwright with ${
+          worker.child.exitCode === null ? `signal ${worker.child.signalCode}` : `code ${worker.child.exitCode}`
+        }:\n${worker.output.join("")}`
+      : "";
     throw new Error(
-      `Playwright exited with ${result.code === null ? `signal ${result.signal}` : `code ${result.code}`}`,
+      `Playwright exited with ${result.code === null ? `signal ${result.signal}` : `code ${result.code}`}${workerFailure}`,
     );
   }
 }
@@ -143,7 +149,7 @@ async function main() {
     worker = startWorker(port, stateDirectory);
     await waitForWorker(baseUrl, worker);
     console.log(`Running Playwright against isolated local D1 at ${baseUrl}`);
-    await runPlaywright(baseUrl);
+    await runPlaywright(baseUrl, worker);
   } finally {
     if (worker) await stopWorker(worker.child);
     await rm(stateDirectory, { recursive: true, force: true });
