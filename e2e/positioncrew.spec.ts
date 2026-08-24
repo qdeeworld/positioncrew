@@ -492,7 +492,7 @@ async function installCurrentLendingHireRoutes(
       evidenceMode: "CURRENT_BLOCK_PINNED",
       commerce: { directCostUsd: "0.00", walletRequired: false, settlement: "NO_PAYMENT" },
       request: rescueRequest,
-      requestHash: `sha256:${"c".repeat(64)}`,
+      requestHash: response.result.evaluation.requestHash,
       evidence: observation,
       evidenceHash: `sha256:${"d".repeat(64)}`,
       providerHash: `sha256:${"f".repeat(64)}`,
@@ -1525,7 +1525,7 @@ async function installCurrentCategoryHireRoutes(
         evidenceMode: "CURRENT_BLOCK_PINNED",
         commerce: { directCostUsd: "0.00", walletRequired: false, settlement: "NO_PAYMENT" },
         request,
-        requestHash: `sha256:${"c".repeat(64)}`,
+        requestHash: providerResponse?.result.evaluation.requestHash ?? `sha256:${"c".repeat(64)}`,
         evidence: {
           schemaVersion: "positioncrew.current-block-pinned-evidence.v1",
           evidenceClass: "CURRENT_BLOCK_PINNED",

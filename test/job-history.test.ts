@@ -112,7 +112,13 @@ describe("recent job device index", () => {
       if (!providerId || !deliverable) throw new Error("Canonical fixture is missing completed provider evidence");
       return {
         schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
-        hire: { hireId, service: "LP_REBALANCE", providerId, evidenceMode },
+        hire: {
+          hireId,
+          service: "LP_REBALANCE",
+          providerId,
+          evidenceMode,
+          requestHash: response.result.evaluation.requestHash,
+        },
         job: {
           jobId: "88888888-8888-4888-8888-888888888888",
           state: "COMPLETED",
@@ -149,6 +155,10 @@ describe("recent job device index", () => {
     const mismatchedHire = structuredClone(chain);
     (mismatchedHire.hire as Record<string, unknown>).hireId = reference(2).hireId;
     expect(isFreshMarketplaceChainForReference(mismatchedHire, saved)).toBe(false);
+
+    const copiedResponse = structuredClone(chain);
+    (copiedResponse.hire as Record<string, unknown>).requestHash = `sha256:${"a".repeat(64)}`;
+    expect(isFreshMarketplaceChainForReference(copiedResponse, saved)).toBe(false);
 
     expect(isFreshMarketplaceChainForReference({ ...chain, receipt: null }, saved)).toBe(false);
 

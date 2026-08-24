@@ -67,6 +67,7 @@ function isFixtureJobResponseForChain(
   value: unknown,
   reference: RecentJobReference,
   expectedProviderId: string,
+  expectedRequestHash: string,
   expectedDeliverableHash: string,
   expectedEvaluationHash: string,
   chainEvidenceMode: "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED",
@@ -123,13 +124,18 @@ function isFixtureJobResponseForChain(
     typeof responseJob.envelopeHash !== "string" ||
     responseJob.providerId !== expectedProviderId ||
     typeof responseJob.evaluatorId !== "string" ||
+    !isRecord(responseJob.envelope) ||
+    responseJob.envelope.requestHash !== expectedRequestHash ||
     !Array.isArray(responseJob.history) ||
     !responseJob.history.every((entry) => isRecord(entry) &&
       typeof entry.state === "string" &&
       typeof entry.at === "string" &&
       typeof entry.reference === "string") ||
     !isRecord(responseJob.deliverable) ||
-    responseJob.deliverable.deliverableHash !== expectedDeliverableHash) {
+    responseJob.deliverable.requestHash !== expectedRequestHash ||
+    responseJob.deliverable.deliverableHash !== expectedDeliverableHash ||
+    !isRecord(responseJob.evaluation) ||
+    responseJob.evaluation.requestHash !== expectedRequestHash) {
     return false;
   }
 
@@ -157,6 +163,7 @@ function isFixtureJobResponseForChain(
   }
 
   return isRecord(evaluation) &&
+    evaluation.requestHash === expectedRequestHash &&
     typeof evaluation.score === "number" &&
     Number.isFinite(evaluation.score) &&
     typeof evaluation.passed === "boolean" &&
@@ -321,6 +328,7 @@ export function isFreshMarketplaceChainForReference(
 
   if (hire.hireId !== reference.hireId || hire.service !== reference.service ||
     typeof hire.providerId !== "string" ||
+    typeof hire.requestHash !== "string" ||
     !["HISTORICAL_FIXTURE", "CURRENT_BLOCK_PINNED"].includes(String(hire.evidenceMode)) ||
     typeof job.jobId !== "string" ||
     !["CREATED", "RUNNING", "COMPLETED", "FAILED"].includes(String(job.state))) {
@@ -346,6 +354,7 @@ export function isFreshMarketplaceChainForReference(
         receipt.response,
         reference,
         hire.providerId,
+        hire.requestHash,
         receipt.deliverableHash,
         receipt.evaluationHash,
         hire.evidenceMode as "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED",
