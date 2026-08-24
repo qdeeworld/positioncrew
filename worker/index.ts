@@ -8,7 +8,7 @@ import agentAdvantagePublicationStatus from "../web/public/evidence/agent-advant
 import founderAgentAdvantagePublicationStatus from "../web/public/evidence/founder-agent-advantage-status.json" with { type: "json" };
 import {
   runBenchmarkRepeatability,
-  runCurrentBlockPinnedLendingRequest,
+  runCurrentBlockPinnedProviderRequest,
   runFixtureRequest,
   runFrozenFixture,
   runFrozenMatrix,
@@ -295,14 +295,14 @@ async function finishFreshMarketplaceJob(
   try {
     const task = FRESH_MARKETPLACE_TASKS[hire.benchmarkSlug];
     const response = hire.evidenceMode === "CURRENT_BLOCK_PINNED"
-      ? await runCurrentBlockPinnedLendingRequest(hire.request, new Date(executionStartedAt))
+      ? await runCurrentBlockPinnedProviderRequest(hire.request, new Date(executionStartedAt))
       : await runFrozenFixture(task.service);
     if (
       response.result.request.service !== task.service ||
       response.result.job.state !== "COMPLETED" ||
       response.result.job.deliverable === null
     ) {
-      throw new Error("Frozen provider response was not a completed result for the persisted service");
+      throw new Error("Provider response was not a completed result for the persisted service");
     }
     if (
       hire.evidenceMode === "CURRENT_BLOCK_PINNED" &&

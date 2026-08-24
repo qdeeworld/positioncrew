@@ -1,7 +1,10 @@
 import { z } from "zod";
+import { BoundedGridRequestSchema } from "../contracts/bounded-grid.js";
 import { LendingRescueRequestSchema } from "../contracts/lending-rescue.js";
+import { LpRebalanceRequestSchema } from "../contracts/lp-rebalance.js";
+import { YieldOptimizationRequestSchema } from "../contracts/yield-optimization.js";
 
-export const FRESH_MARKETPLACE_TASKS = {
+export const FRESH_MARKETPLACE_HISTORICAL_TASKS = {
   "lending-rescue": {
     providerSlug: "lending-rescue",
     service: "LENDING_RESCUE",
@@ -19,6 +22,15 @@ export const FRESH_MARKETPLACE_TASKS = {
   },
 } as const;
 
+export const FRESH_MARKETPLACE_TASKS = {
+  ...FRESH_MARKETPLACE_HISTORICAL_TASKS,
+  "yield-optimization": {
+    providerSlug: "yield-optimization",
+    service: "YIELD_OPTIMIZATION",
+    requestSchema: "positioncrew.yield-optimization.request.v1",
+  },
+} as const;
+
 export const FRESH_MARKETPLACE_HISTORICAL_CLAIM_BOUNDARY = [
   "This is a public-workspace run of a frozen historical benchmark fixture.",
   "The run costs $0.00, requires no wallet, and creates no payment or settlement.",
@@ -27,10 +39,10 @@ export const FRESH_MARKETPLACE_HISTORICAL_CLAIM_BOUNDARY = [
 ] as const;
 
 export const FRESH_MARKETPLACE_CURRENT_CLAIM_BOUNDARY = [
-  "This run evaluates the exact block-pinned Venus observation persisted when the public hire was created.",
-  "The run costs $0.00, requires no wallet, and creates no payment, settlement, custody, or protocol transaction.",
-  "The server receipt commits to the request, provider binding, evidence, bounded result, evaluation, and timing trace.",
-  "The observation is caller-supplied from PositionCrew telemetry and is not independently re-fetched during execution; the result must be revalidated before any financial action.",
+  "This run evaluates the exact block-referenced BSC observation persisted when the public hire was created.",
+  "The run costs $0.00, requires no wallet, and creates no payment, settlement, custody, signature, or protocol transaction.",
+  "The server receipt commits to the request, provider binding, declared block evidence, bounded result, evaluation, and timing trace.",
+  "The observation is caller-supplied and is not independently re-fetched during execution; the result must be revalidated before any financial action.",
 ] as const;
 
 // Backward-compatible name used by the frozen fixture evidence and its tests.
@@ -49,6 +61,60 @@ const CurrentBlockPinnedObservationSchema = z.object({
   explorerUrl: z.string().url(),
 }).strict();
 
+type CurrentBlockBinding = {
+  observation: z.infer<typeof CurrentBlockPinnedObservationSchema>;
+  request: {
+    chainId: number;
+    protocol: string;
+    sources: Array<{
+      sourceId: string;
+      uri: string;
+      observedAt: string;
+    }>;
+  };
+};
+
+function validateCurrentBlockBinding(
+  value: CurrentBlockBinding,
+  context: z.RefinementCtx,
+  expected: { protocol: string; sourceId: string },
+): void {
+  const expectedExplorerUrl = `https://bscscan.com/block/${value.observation.blockNumber}`;
+  const source = value.request.sources[0];
+  if (value.request.chainId !== 56) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "chainId"],
+      message: "Current marketplace hires require BSC mainnet chainId 56",
+    });
+  }
+  if (value.request.protocol !== expected.protocol) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "protocol"],
+      message: `Current marketplace hire protocol must be ${expected.protocol}`,
+    });
+  }
+  if (value.request.sources.length !== 1 || source?.sourceId !== expected.sourceId) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "sources"],
+      message: `Current marketplace hire must contain exactly source ${expected.sourceId}`,
+    });
+  }
+  if (
+    value.observation.explorerUrl !== expectedExplorerUrl ||
+    source?.uri !== value.observation.explorerUrl ||
+    source?.observedAt !== value.observation.observedAt
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["observation"],
+      message: "Observation block, explorer URL, and source timestamp must match exactly",
+    });
+  }
+}
+
 export const CurrentBlockPinnedEvidenceSchema = z.object({
   schemaVersion: z.literal("positioncrew.current-block-pinned-evidence.v1"),
   evidenceClass: z.literal("CURRENT_BLOCK_PINNED"),
@@ -66,7 +132,7 @@ export const HistoricalFixtureEvidenceSchema = z.object({
   requestSchema: z.string().min(1),
 }).strict();
 
-const CurrentLendingMarketplaceHireRequestSchema = z.object({
+export const CurrentLendingMarketplaceHireRequestSchema = z.object({
   schemaVersion: z.literal("positioncrew.fresh-marketplace-hire-request.v2"),
   idempotencyKey: IdempotencyKeySchema,
   benchmarkSlug: z.literal("lending-rescue"),
@@ -75,30 +141,81 @@ const CurrentLendingMarketplaceHireRequestSchema = z.object({
   observation: CurrentBlockPinnedObservationSchema,
   request: LendingRescueRequestSchema,
 }).strict().superRefine((value, context) => {
-  const expectedSourceId = `venus-mainnet-block-${value.observation.blockNumber}`;
-  const expectedExplorerUrl = `https://bscscan.com/block/${value.observation.blockNumber}`;
-  const source = value.request.sources[0];
-  if (value.request.chainId !== 56) {
-    context.addIssue({ code: "custom", path: ["request", "chainId"], message: "Current Venus hires require BSC mainnet chainId 56" });
-  }
-  if (value.request.protocol !== "Venus Classic") {
-    context.addIssue({ code: "custom", path: ["request", "protocol"], message: "Current lending hires require the Venus Classic telemetry contract" });
-  }
+  validateCurrentBlockBinding(value, context, {
+    protocol: "Venus Classic",
+    sourceId: `venus-mainnet-block-${value.observation.blockNumber}`,
+  });
   if (value.request.market.toLowerCase() !== "0xfd36e2c2a6789db23113685031d7f16329158384") {
     context.addIssue({ code: "custom", path: ["request", "market"], message: "Current lending hires require the Venus Classic Comptroller" });
   }
-  if (value.request.sources.length !== 1 || source?.sourceId !== expectedSourceId) {
-    context.addIssue({ code: "custom", path: ["request", "sources"], message: "The request must contain exactly the block-pinned Venus source" });
-  }
-  if (
-    value.observation.explorerUrl !== expectedExplorerUrl ||
-    source?.uri !== value.observation.explorerUrl ||
-    source?.observedAt !== value.observation.observedAt
-  ) {
-    context.addIssue({ code: "custom", path: ["observation"], message: "Observation block, explorer URL, and source timestamp must match exactly" });
-  }
   // Entry-level timestamp/source inconsistencies remain valid persisted inputs so the
   // existing provider and evaluator can return a durable REFUSED_INCONSISTENT_DATA receipt.
+});
+
+export const CurrentLpMarketplaceHireRequestSchema = z.object({
+  schemaVersion: z.literal("positioncrew.fresh-marketplace-hire-request.v2"),
+  idempotencyKey: IdempotencyKeySchema,
+  benchmarkSlug: z.literal("lp-rebalance"),
+  providerSlug: z.literal("lp-rebalance"),
+  evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
+  observation: CurrentBlockPinnedObservationSchema,
+  request: LpRebalanceRequestSchema,
+}).strict().superRefine((value, context) => {
+  validateCurrentBlockBinding(value, context, {
+    protocol: "PancakeSwap V3 position analysis",
+    sourceId: `pancake-position-mainnet-block-${value.observation.blockNumber}`,
+  });
+  if (!new RegExp(`^pancake-position-[1-9]\\d*-${value.observation.blockNumber}$`).test(value.request.requestId)) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "requestId"],
+      message: "LP requestId must bind the position token ID and observation block",
+    });
+  }
+});
+
+export const CurrentYieldMarketplaceHireRequestSchema = z.object({
+  schemaVersion: z.literal("positioncrew.fresh-marketplace-hire-request.v2"),
+  idempotencyKey: IdempotencyKeySchema,
+  benchmarkSlug: z.literal("yield-optimization"),
+  providerSlug: z.literal("yield-optimization"),
+  evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
+  observation: CurrentBlockPinnedObservationSchema,
+  request: YieldOptimizationRequestSchema,
+}).strict().superRefine((value, context) => {
+  validateCurrentBlockBinding(value, context, {
+    protocol: "Venus Core Pool stablecoin supply",
+    sourceId: `venus-yield-mainnet-block-${value.observation.blockNumber}`,
+  });
+  if (value.request.requestId !== `venus-yield-${value.observation.blockNumber}`) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "requestId"],
+      message: "Yield requestId must bind the observation block",
+    });
+  }
+});
+
+export const CurrentGridMarketplaceHireRequestSchema = z.object({
+  schemaVersion: z.literal("positioncrew.fresh-marketplace-hire-request.v2"),
+  idempotencyKey: IdempotencyKeySchema,
+  benchmarkSlug: z.literal("bounded-grid"),
+  providerSlug: z.literal("bounded-grid"),
+  evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
+  observation: CurrentBlockPinnedObservationSchema,
+  request: BoundedGridRequestSchema,
+}).strict().superRefine((value, context) => {
+  validateCurrentBlockBinding(value, context, {
+    protocol: "PancakeSwap V3 bounded grid policy",
+    sourceId: `pancake-v3-mainnet-block-${value.observation.blockNumber}`,
+  });
+  if (value.request.requestId !== `pancake-grid-${value.observation.blockNumber}`) {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "requestId"],
+      message: "Grid requestId must bind the observation block",
+    });
+  }
 });
 
 export const FreshMarketplaceHireRequestSchema = z.union([
@@ -118,6 +235,9 @@ export const FreshMarketplaceHireRequestSchema = z.union([
     providerSlug: z.literal("bounded-grid"),
   }).strict(),
   CurrentLendingMarketplaceHireRequestSchema,
+  CurrentLpMarketplaceHireRequestSchema,
+  CurrentYieldMarketplaceHireRequestSchema,
+  CurrentGridMarketplaceHireRequestSchema,
 ]);
 
 export const FreshMarketplaceJobStateSchema = z.enum([
@@ -146,10 +266,10 @@ export const FreshMarketplaceChainSchema = z.object({
   hire: z.object({
     hireId: z.string().uuid(),
     idempotencyKey: IdempotencyKeySchema,
-    providerSlug: z.enum(["lending-rescue", "lp-rebalance", "bounded-grid"]),
+    providerSlug: z.enum(["lending-rescue", "lp-rebalance", "yield-optimization", "bounded-grid"]),
     providerId: z.string().min(1),
-    benchmarkSlug: z.enum(["lending-rescue", "lp-rebalance", "bounded-grid"]),
-    service: z.enum(["LENDING_RESCUE", "LP_REBALANCE", "BOUNDED_GRID"]),
+    benchmarkSlug: z.enum(["lending-rescue", "lp-rebalance", "yield-optimization", "bounded-grid"]),
+    service: z.enum(["LENDING_RESCUE", "LP_REBALANCE", "YIELD_OPTIMIZATION", "BOUNDED_GRID"]),
     evidenceMode: z.enum(["HISTORICAL_FIXTURE", "CURRENT_BLOCK_PINNED"]),
     commerce: z.object({
       directCostUsd: z.literal("0.00"),
@@ -201,6 +321,7 @@ export const FreshMarketplaceChainSchema = z.object({
 
 export type FreshMarketplaceHireRequest = z.infer<typeof FreshMarketplaceHireRequestSchema>;
 export type FreshMarketplaceChain = z.infer<typeof FreshMarketplaceChainSchema>;
+export type FreshMarketplaceHistoricalBenchmarkSlug = keyof typeof FRESH_MARKETPLACE_HISTORICAL_TASKS;
 export type FreshMarketplaceBenchmarkSlug = keyof typeof FRESH_MARKETPLACE_TASKS;
 export type CurrentBlockPinnedEvidence = z.infer<typeof CurrentBlockPinnedEvidenceSchema>;
 export type HistoricalFixtureEvidence = z.infer<typeof HistoricalFixtureEvidenceSchema>;

@@ -85,6 +85,7 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
   const blockNumber = "117112307";
   const gridSourceId = `pancake-v3-mainnet-block-${blockNumber}`;
   const yieldSourceId = `venus-yield-mainnet-block-${blockNumber}`;
+  const lpTokenId = "1456267";
   const gridRequest = freshProbeRequest(
     gridFixture,
     now,
@@ -99,6 +100,7 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
     `Venus stablecoin markets at BSC block ${blockNumber}`,
     blockNumber,
   );
+  const lpRequest = liveLpRequest(now, lpTokenId, blockNumber);
 
   await page.route("**/api/status", async (route) => {
     const chain = (chainId: 56 | 97, name: string) => ({
@@ -177,6 +179,55 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
       }),
     });
   });
+  await page.route(`**/api/positions/pancake/${lpTokenId}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: "positioncrew.pancake-position-probe.v1",
+        generatedAt: now.toISOString(),
+        chainId: 56,
+        state: "READY",
+        position: {
+          tokenId: lpTokenId,
+          owner: "0x556B9306565093C855AEA9AE92A594704c2Cd59e",
+          custody: "MASTER_CHEF_V3",
+          positionManager: "0x46A15B0b27311cedF172AB29E4f4766fbE7F4364",
+          pool: "0x36696169C63e42cd08ce11f5deeBbCeBae652050",
+          pair: "USDT/WBNB",
+          feeTier: 500,
+          lowerTick: -120,
+          upperTick: 120,
+          currentTick: 150,
+          inRange: false,
+          liquidity: "1000000",
+          token0Amount: "10000",
+          token1Amount: "0",
+          positionValueUsd: "10000",
+          uncollectedFeesUsd: "42",
+        },
+        market: {
+          activeLiquidityUsd: "1000000",
+          realizedVolatilityBps: 400,
+          volumeRunRate24hUsd: "5000000",
+          feesRunRate24hUsd: "2000",
+          measurementWindowSeconds: 3600,
+          swapCount: 240,
+        },
+        lpRequest,
+        source: {
+          blockNumber,
+          blockTimestamp: String(
+            (lpRequest.sources as Array<Record<string, unknown>>)[0].observedAt,
+          ),
+          explorerUrl: `https://bscscan.com/block/${blockNumber}`,
+          positionExplorerUrl: `https://bscscan.com/nft/0x46A15B0b27311cedF172AB29E4f4766fbE7F4364/${lpTokenId}`,
+          poolExplorerUrl: "https://bscscan.com/address/0x36696169C63e42cd08ce11f5deeBbCeBae652050",
+        },
+        boundary: "Deterministic block-pinned PancakeSwap position browser fixture.",
+      }),
+    });
+  });
   await page.route("**/api/markets/pancake/wbnb-usdt/grid", async (route) => {
     await route.fulfill({
       status: 200,
@@ -200,7 +251,9 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
         gridRequest,
         source: {
           blockNumber,
-          blockTimestamp: now.toISOString(),
+          blockTimestamp: String(
+            (gridRequest.sources as Array<Record<string, unknown>>)[0].observedAt,
+          ),
           explorerUrl: `https://bscscan.com/block/${blockNumber}`,
           poolExplorerUrl: "https://bscscan.com/address/0x36696169C63e42cd08ce11f5deeBbCeBae652050",
         },
@@ -228,7 +281,9 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
           comptroller: "0xfD36E2c2a6789Db23113685031d7F16329158384",
           oracle: "0x8888888888888888888888888888888888888888",
           blockNumber,
-          blockTimestamp: now.toISOString(),
+          blockTimestamp: String(
+            (yieldRequest.sources as Array<Record<string, unknown>>)[0].observedAt,
+          ),
           measuredSecondsPerBlock: 3,
           explorerUrl: `https://bscscan.com/block/${blockNumber}`,
         },
@@ -236,6 +291,8 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
       }),
     });
   });
+
+  return { now, blockNumber, gridRequest, yieldRequest, lpRequest, lpTokenId };
 }
 
 function liveLendingRequest(now: Date, account: string, blockNumber: string) {
@@ -527,7 +584,7 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await page.getByRole("button", { name: "Load position" }).click();
   await expect(page.getByText("Current request loaded", { exact: true })).toBeVisible();
   await expect(page.getByText(`Block-pinned Venus position from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Hire and run current position" }).click();
+  await page.getByRole("button", { name: "Hire and run current request" }).click();
 
   await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
   await expect(page.locator(".result-boundary")).toContainText(
@@ -615,7 +672,7 @@ test("a current lending hire does not depend on historical fixtures or external 
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
   await expect(page.getByText("Current request loaded", { exact: true })).toBeVisible();
-  const hireButton = page.getByRole("button", { name: "Hire and run current position" });
+  const hireButton = page.getByRole("button", { name: "Hire and run current request" });
   await expect(hireButton).toBeEnabled();
   await hireButton.click();
 
@@ -634,7 +691,7 @@ test("a lost hire response reuses the unresolved idempotency key", async ({ page
   await page.getByRole("button", { name: "Load current position and hire" }).click();
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
-  const hireButton = page.getByRole("button", { name: "Hire and run current position" });
+  const hireButton = page.getByRole("button", { name: "Hire and run current request" });
   await hireButton.click();
   await expect.poll(() => mockedHire.createBodies.length).toBe(1);
   await expect(hireButton).toBeEnabled();
@@ -649,7 +706,7 @@ test("a lost job response resumes the persisted hire instead of creating another
   await page.getByRole("button", { name: "Load current position and hire" }).click();
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
-  const hireButton = page.getByRole("button", { name: "Hire and run current position" });
+  const hireButton = page.getByRole("button", { name: "Hire and run current request" });
   await hireButton.click();
   await expect.poll(() => mockedHire.runCount).toBe(1);
   await expect(hireButton).toBeEnabled();
@@ -695,131 +752,151 @@ test("a block-pinned Venus position can become the provider request", async ({ p
   await page.getByRole("button", { name: "Load position" }).click();
   await expect(page.getByText("1.04347826", { exact: true })).toBeVisible();
   await expect(page.getByText(`Block-pinned Venus position from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Hire and run current position" }).click();
+  await page.getByRole("button", { name: "Hire and run current request" }).click();
   await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
   await expect(page.getByText(/Block-pinned Venus input/)).toBeVisible();
   expect(mockedHire.createBodies[0].request).toEqual(mockedHire.rescueRequest);
 });
 
 test("a block-pinned Pancake market can become a bounded grid request", async ({ page }) => {
-  await installDeterministicLiveProbeRoutes(page);
+  const live = await installDeterministicLiveProbeRoutes(page);
+  const mockedHire = await installCurrentCategoryHireRoutes(page, {
+    service: "BOUNDED_GRID",
+    benchmarkSlug: "bounded-grid",
+    providerSlug: "bounded-grid",
+    idDigit: "6",
+  });
   await page.goto("/#jobs");
   await page.getByRole("combobox", { name: "Provider" }).selectOption("BOUNDED_GRID");
   await expect(page.getByText("READY", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("PancakeSwap market probe", { exact: true })).toBeVisible();
   await expect(page.getByText(/Block-pinned PancakeSwap market from BSC block/)).toBeVisible();
-  await page.getByRole("button", { name: "Run bounded grid simulation" }).click();
+  await page.getByRole("button", { name: "Hire and run current request" }).click();
   await expect(page.getByRole("heading", { name: /Build [45] bounded orders/ })).toBeVisible();
   await expect(page.getByText(/Block-pinned PancakeSwap input/)).toBeVisible();
-
+  expect(mockedHire.createBodies).toHaveLength(1);
+  expect(mockedHire.createBodies[0]).toMatchObject({
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    benchmarkSlug: "bounded-grid",
+    providerSlug: "bounded-grid",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    observation: {
+      blockNumber: live.blockNumber,
+      observedAt: (live.gridRequest.sources as Array<Record<string, unknown>>)[0].observedAt,
+      explorerUrl: `https://bscscan.com/block/${live.blockNumber}`,
+    },
+    request: live.gridRequest,
+  });
+  const receiptLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" });
+  await expect(receiptLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
+  const [receiptPage] = await Promise.all([page.waitForEvent("popup"), receiptLink.click()]);
+  await expect(receiptPage.locator("body")).toContainText(mockedHire.receiptId);
+  await receiptPage.reload();
+  expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
 test("a block-pinned Pancake position can become an LP rebalance request", async ({ page }) => {
-  const tokenId = "1456267";
-  const blockNumber = "115618500";
-  const now = new Date();
-  const lpRequest = liveLpRequest(now, tokenId, blockNumber);
-  await page.route(`**/api/positions/pancake/${tokenId}`, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        schemaVersion: "positioncrew.pancake-position-probe.v1",
-        generatedAt: now.toISOString(),
-        chainId: 56,
-        state: "READY",
-        position: {
-          tokenId,
-          owner: "0x556B9306565093C855AEA9AE92A594704c2Cd59e",
-          custody: "MASTER_CHEF_V3",
-          positionManager: "0x46A15B0b27311cedF172AB29E4f4766fbE7F4364",
-          pool: "0x36696169C63e42cd08ce11f5deeBbCeBae652050",
-          pair: "USDT/WBNB",
-          feeTier: 500,
-          lowerTick: -120,
-          upperTick: 120,
-          currentTick: 150,
-          inRange: false,
-          liquidity: "1000000",
-          token0Amount: "10000",
-          token1Amount: "0",
-          positionValueUsd: "10000",
-          uncollectedFeesUsd: "42",
-        },
-        market: {
-          activeLiquidityUsd: "1000000",
-          realizedVolatilityBps: 400,
-          volumeRunRate24hUsd: "5000000",
-          feesRunRate24hUsd: "2000",
-          measurementWindowSeconds: 3600,
-          swapCount: 240,
-        },
-        lpRequest,
-        source: {
-          blockNumber,
-          blockTimestamp: now.toISOString(),
-          explorerUrl: `https://bscscan.com/block/${blockNumber}`,
-          positionExplorerUrl: `https://bscscan.com/nft/0x46A15B0b27311cedF172AB29E4f4766fbE7F4364/${tokenId}`,
-          poolExplorerUrl: "https://bscscan.com/address/0x36696169C63e42cd08ce11f5deeBbCeBae652050",
-        },
-        boundary: "Read-only block-pinned position reconstruction with an exact swap window.",
-      }),
-    });
+  const live = await installDeterministicLiveProbeRoutes(page);
+  const mockedHire = await installCurrentCategoryHireRoutes(page, {
+    service: "LP_REBALANCE",
+    benchmarkSlug: "lp-rebalance",
+    providerSlug: "lp-rebalance",
+    idDigit: "7",
   });
-
   await page.goto("/#jobs");
   await page.getByRole("combobox", { name: "Provider" }).selectOption("LP_REBALANCE");
   await expect(page.getByRole("heading", { name: "PancakeSwap LP position" })).toBeVisible();
-  await expect(page.getByLabel("PancakeSwap position NFT ID")).toHaveValue(tokenId);
+  await expect(page.getByLabel("PancakeSwap position NFT ID")).toHaveValue(live.lpTokenId);
   await page.getByRole("button", { name: "Inspect" }).click();
   await expect(page.getByText("OUT OF RANGE", { exact: true })).toBeVisible();
   await expect(page.getByText("$10,000", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Use live position" }).click();
-  await expect(page.getByText(`Block-pinned PancakeSwap position from BSC block ${blockNumber}`, { exact: false })).toBeVisible();
+  await expect(page.getByText(`Block-pinned PancakeSwap position from BSC block ${live.blockNumber}`, { exact: false })).toBeVisible();
   await expect(page.getByLabel("Current tick")).toBeDisabled();
-  await page.getByRole("button", { name: "Run lp rebalance" }).click();
+  await page.getByRole("button", { name: "Hire and run current request" }).click();
   await expect(page.getByRole("heading", { name: "SHIFT range to 0...240" })).toBeVisible();
   await expect(page.locator(".result-boundary")).toContainText("Block-pinned PancakeSwap position");
+  expect(mockedHire.createBodies).toHaveLength(1);
+  expect(mockedHire.createBodies[0]).toMatchObject({
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    benchmarkSlug: "lp-rebalance",
+    providerSlug: "lp-rebalance",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    observation: {
+      blockNumber: live.blockNumber,
+      observedAt: (live.lpRequest.sources as Array<Record<string, unknown>>)[0].observedAt,
+      explorerUrl: `https://bscscan.com/block/${live.blockNumber}`,
+    },
+    request: live.lpRequest,
+  });
+  const receiptLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" });
+  await expect(receiptLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
 });
 
 test("block-pinned Venus stablecoin rates can become a yield request", async ({ page }) => {
-  await installDeterministicLiveProbeRoutes(page);
+  const live = await installDeterministicLiveProbeRoutes(page);
+  const mockedHire = await installCurrentCategoryHireRoutes(page, {
+    service: "YIELD_OPTIMIZATION",
+    benchmarkSlug: "yield-optimization",
+    providerSlug: "yield-optimization",
+    idDigit: "8",
+  });
   await page.goto("/#jobs");
   await page.getByRole("combobox", { name: "Provider" }).selectOption("YIELD_OPTIMIZATION");
   await expect(page.getByText("READY", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Venus stablecoin probe", { exact: true })).toBeVisible();
   await expect(page.getByText(/Block-pinned Venus yield market from BSC block/)).toBeVisible();
   await expect(page.getByLabel("Leading base APY (bps)")).toBeDisabled();
-  await page.getByRole("button", { name: "Run yield optimisation simulation" }).click();
+  await page.getByRole("button", { name: "Hire and run current request" }).click();
   await expect(page.getByRole("heading", { name: /to beefy-usdt-vault/ })).toBeVisible();
   await expect(page.getByText(/Block-pinned Venus yield input/)).toBeVisible();
-
+  expect(mockedHire.createBodies).toHaveLength(1);
+  expect(mockedHire.createBodies[0]).toMatchObject({
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    benchmarkSlug: "yield-optimization",
+    providerSlug: "yield-optimization",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    observation: {
+      blockNumber: live.blockNumber,
+      observedAt: (live.yieldRequest.sources as Array<Record<string, unknown>>)[0].observedAt,
+      explorerUrl: `https://bscscan.com/block/${live.blockNumber}`,
+    },
+    request: live.yieldRequest,
+  });
+  const receiptLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" });
+  await expect(receiptLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
 });
 
-test("all four mandatory capital jobs return category-specific results", async ({ page }) => {
-  await installDeterministicLiveProbeRoutes(page);
+test("all three non-lending current hires return category-specific durable results", async ({ page }) => {
+  const live = await installDeterministicLiveProbeRoutes(page);
+  const hires = [
+    await installCurrentCategoryHireRoutes(page, { service: "LP_REBALANCE", benchmarkSlug: "lp-rebalance", providerSlug: "lp-rebalance", idDigit: "7" }),
+    await installCurrentCategoryHireRoutes(page, { service: "YIELD_OPTIMIZATION", benchmarkSlug: "yield-optimization", providerSlug: "yield-optimization", idDigit: "8" }),
+    await installCurrentCategoryHireRoutes(page, { service: "BOUNDED_GRID", benchmarkSlug: "bounded-grid", providerSlug: "bounded-grid", idDigit: "6" }),
+  ];
   await page.goto("/#jobs");
   const provider = page.getByRole("combobox", { name: "Provider" });
   await expect(provider).toBeVisible();
   const cases = [
-    { value: "LP_REBALANCE", button: "Run lp rebalance simulation", output: "SHIFT range to 0...240" },
-    { value: "YIELD_OPTIMIZATION", button: "Run yield optimisation simulation", output: /to beefy-usdt-vault/ },
-    { value: "BOUNDED_GRID", button: "Run bounded grid simulation", output: "Build 4 bounded orders" },
+    { value: "LP_REBALANCE", output: "SHIFT range to 0...240" },
+    { value: "YIELD_OPTIMIZATION", output: /to beefy-usdt-vault/ },
+    { value: "BOUNDED_GRID", output: /Build [45] bounded orders/ },
   ];
   for (const candidate of cases) {
     await provider.selectOption(candidate.value);
     if (candidate.value === "LP_REBALANCE") {
-      await page.getByRole("button", { name: "Interactive" }).click();
-    }
-    if (candidate.value === "BOUNDED_GRID" || candidate.value === "YIELD_OPTIMIZATION") {
+      await expect(page.getByLabel("PancakeSwap position NFT ID")).toHaveValue(live.lpTokenId);
+      await page.getByRole("button", { name: "Inspect" }).click();
+      await page.getByRole("button", { name: "Use live position" }).click();
+    } else {
       await expect(page.getByText("READY", { exact: true })).toBeVisible({ timeout: 20_000 });
     }
-    await page.getByRole("button", { name: candidate.button }).click();
-    await expect(page.getByRole("heading", {
-      name: candidate.value === "BOUNDED_GRID" ? /Build [45] bounded orders/ : candidate.output,
-    })).toBeVisible();
+    await page.getByRole("button", { name: "Hire and run current request" }).click();
+    await expect(page.getByRole("heading", { name: candidate.output })).toBeVisible();
+    await expect(page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" })).toBeVisible();
   }
   await expect(page.getByText("3 jobs", { exact: true })).toBeVisible();
+  expect(hires.every((hire) => hire.createBodies.length === 1)).toBe(true);
 });
 
 test("a current lending refusal persists and remains inspectable", async ({ page }) => {
@@ -827,7 +904,7 @@ test("a current lending refusal persists and remains inspectable", async ({ page
   await page.goto("/#jobs");
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
-  await page.getByRole("button", { name: "Hire and run current position" }).click();
+  await page.getByRole("button", { name: "Hire and run current request" }).click();
   const durableResult = page.locator(".job-result");
   await expect(durableResult.getByRole("heading", { name: "REFUSED CONSTRAINTS", exact: true })).toBeVisible();
   await expect(durableResult.getByText("No allowed rescue action fits the wallet inventory and safety limits.", { exact: true })).toBeVisible();
@@ -839,7 +916,10 @@ test("a current lending refusal persists and remains inspectable", async ({ page
 });
 
 test("every non-lending provider accepts custom bounds and fails closed", async ({ page }) => {
-  await installDeterministicLiveProbeRoutes(page);
+  const live = await installDeterministicLiveProbeRoutes(page);
+  await installCurrentCategoryHireRoutes(page, { service: "LP_REBALANCE", benchmarkSlug: "lp-rebalance", providerSlug: "lp-rebalance", idDigit: "7" });
+  await installCurrentCategoryHireRoutes(page, { service: "YIELD_OPTIMIZATION", benchmarkSlug: "yield-optimization", providerSlug: "yield-optimization", idDigit: "8" });
+  await installCurrentCategoryHireRoutes(page, { service: "BOUNDED_GRID", benchmarkSlug: "bounded-grid", providerSlug: "bounded-grid", idDigit: "6" });
   await page.goto("/#jobs");
   const provider = page.getByRole("combobox", { name: "Provider" });
   const cases = [
@@ -847,21 +927,18 @@ test("every non-lending provider accepts custom bounds and fails closed", async 
       service: "LP_REBALANCE",
       field: "Minimum net benefit (USD)",
       value: "1000",
-      button: "Run lp rebalance simulation",
       decision: "HOLD",
     },
     {
       service: "YIELD_OPTIMIZATION",
       field: "Minimum net benefit (USD)",
       value: "1000",
-      button: "Run yield optimisation simulation",
       decision: "HOLD",
     },
     {
       service: "BOUNDED_GRID",
       field: "Maximum loss (USD)",
       value: "1",
-      button: "Run bounded grid simulation",
       decision: "NO GRID",
     },
   ];
@@ -869,28 +946,23 @@ test("every non-lending provider accepts custom bounds and fails closed", async 
   for (const candidate of cases) {
     await provider.selectOption(candidate.service);
     if (candidate.service === "LP_REBALANCE") {
-      await page.getByRole("button", { name: "Interactive" }).click();
+      await expect(page.getByLabel("PancakeSwap position NFT ID")).toHaveValue(live.lpTokenId);
+      await page.getByRole("button", { name: "Inspect" }).click();
+      await page.getByRole("button", { name: "Use live position" }).click();
     }
     if (candidate.service === "BOUNDED_GRID" || candidate.service === "YIELD_OPTIMIZATION") {
       await expect(page.getByText("READY", { exact: true })).toBeVisible({ timeout: 20_000 });
     }
     await page.getByLabel(candidate.field).fill(candidate.value);
     await expect(page.getByText(
-      candidate.service === "BOUNDED_GRID"
-        ? /Block-pinned PancakeSwap market/
-        : candidate.service === "YIELD_OPTIMIZATION"
-          ? /Block-pinned Venus yield market/
-          : /Current-clock scenario with custom bounds|Block-pinned PancakeSwap LP position/,
+      /The exact submitted request and pinned observation are persisted/,
     )).toBeVisible();
-    await page.getByRole("button", { name: candidate.button }).click();
+    await page.getByRole("button", { name: "Hire and run current request" }).click();
     await expect(page.getByRole("heading", { name: candidate.decision })).toBeVisible();
+    await expect(page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" })).toBeVisible();
     await page.getByTitle("Reset interactive bounds").click();
     await expect(page.getByText(
-      candidate.service === "BOUNDED_GRID"
-        ? /Block-pinned PancakeSwap market/
-        : candidate.service === "YIELD_OPTIMIZATION"
-          ? /Block-pinned Venus yield market/
-          : /Current-clock simulation seeded from the August 12 fixture|Block-pinned PancakeSwap LP position/,
+      /The exact submitted request and pinned observation are persisted/,
     )).toBeVisible();
   }
 });
@@ -1027,7 +1099,7 @@ test("a published Agent Advantage status exposes the committed report without ch
   await page.goto("/#jobs");
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
-  await page.getByRole("button", { name: "Hire and run current position" }).click();
+  await page.getByRole("button", { name: "Hire and run current request" }).click();
   const resultStatus = page.getByRole("region", { name: "Agent Advantage status" });
   await expect(resultStatus.getByText("Independent report published", { exact: true })).toBeVisible();
   await expect(resultStatus).toContainText("2/3 frozen tasks support the pre-registered advantage rule");
@@ -1171,3 +1243,128 @@ test("providers expose machine-readable manifests and exact schemas", async ({ p
   expect(schema.$id).toBe("positioncrew.lending-rescue.request.v1");
   expect(schema.required).toContain("targetHealthFactor");
 });
+
+async function installCurrentCategoryHireRoutes(
+  page: Page,
+  definition: {
+    service: "BOUNDED_GRID" | "LP_REBALANCE" | "YIELD_OPTIMIZATION";
+    benchmarkSlug: "bounded-grid" | "lp-rebalance" | "yield-optimization";
+    providerSlug: "bounded-grid" | "lp-rebalance" | "yield-optimization";
+    idDigit: "6" | "7" | "8";
+  },
+) {
+  const now = new Date();
+  const hireId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-8${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
+  const jobId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-9${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
+  const receiptId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-a${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
+  const createBodies: Array<Record<string, unknown>> = [];
+  let providerResponse: Record<string, unknown> | null = null;
+  let receiptLoadCount = 0;
+
+  const chain = (state: "CREATED" | "RUNNING" | "COMPLETED") => {
+    const body = createBodies.at(-1)!;
+    const observation = body.observation as Record<string, unknown>;
+    const request = body.request as Record<string, unknown>;
+    return {
+      schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
+      claimBoundary: [
+        "This run evaluates the exact current block-pinned observation persisted when the public hire was created.",
+        "The run costs $0.00, requires no wallet, and creates no payment, settlement, custody, or protocol transaction.",
+        "The server receipt commits to the request, provider binding, evidence, bounded result, evaluation, and timing trace.",
+        "The observation is caller-supplied from PositionCrew telemetry and must be revalidated before any financial action.",
+      ],
+      hire: {
+        hireId,
+        idempotencyKey: body.idempotencyKey,
+        providerSlug: definition.providerSlug,
+        providerId: `positioncrew:${definition.providerSlug}:v1`,
+        benchmarkSlug: definition.benchmarkSlug,
+        service: definition.service,
+        evidenceMode: "CURRENT_BLOCK_PINNED",
+        commerce: { directCostUsd: "0.00", walletRequired: false, settlement: "NO_PAYMENT" },
+        request,
+        requestHash: `sha256:${"c".repeat(64)}`,
+        evidence: {
+          schemaVersion: "positioncrew.current-block-pinned-evidence.v1",
+          evidenceClass: "CURRENT_BLOCK_PINNED",
+          chainId: 56,
+          source: observation,
+          freshnessAtCreation: "FRESH",
+          evaluatedAt: now.toISOString(),
+          maxDataAgeSeconds: request.maxDataAgeSeconds,
+        },
+        evidenceHash: `sha256:${"d".repeat(64)}`,
+        providerHash: `sha256:${"f".repeat(64)}`,
+        createdAt: now.toISOString(),
+      },
+      job: {
+        jobId,
+        state,
+        status: state === "CREATED" ? "HIRE_RECORDED" : state,
+        createdAt: now.toISOString(),
+        startedAt: state === "CREATED" ? null : now.toISOString(),
+        completedAt: state === "COMPLETED" ? now.toISOString() : null,
+        apiDurationMilliseconds: state === "COMPLETED" ? 43 : null,
+        error: null,
+      },
+      receipt: state === "COMPLETED" ? {
+        receiptId,
+        publicUrl: `/api/benchmark-receipts/${receiptId}`,
+        responseHash: `sha256:${"9".repeat(64)}`,
+        deliverableHash: `sha256:${"b".repeat(64)}`,
+        evaluationHash: `sha256:${"e".repeat(64)}`,
+        createdAt: now.toISOString(),
+        response: providerResponse,
+      } : null,
+    };
+  };
+
+  await page.route(/\/api\/benchmark-hires$/, async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    if ((body.request as Record<string, unknown>)?.service !== definition.service) {
+      await route.fallback();
+      return;
+    }
+    createBodies.push(body);
+    const direct = await page.context().request.post(
+      `/api/providers/${definition.providerSlug}/jobs`,
+      { data: { request: body.request } },
+    );
+    expect(direct.status()).toBe(200);
+    providerResponse = await direct.json();
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify(chain("CREATED")),
+    });
+  });
+  await page.route(new RegExp(`/api/benchmark-hires/${hireId}/jobs$`), async (route) => {
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify(chain("RUNNING")),
+    });
+  });
+  await page.route(new RegExp(`/api/benchmark-hires/${hireId}$`), async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(chain("COMPLETED")),
+    });
+  });
+  await page.context().route(`**/api/benchmark-receipts/${receiptId}`, async (route) => {
+    receiptLoadCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(chain("COMPLETED")),
+    });
+  });
+
+  return {
+    hireId,
+    receiptId,
+    createBodies,
+    get receiptLoadCount() { return receiptLoadCount; },
+  };
+}

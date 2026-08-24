@@ -74,11 +74,13 @@ export interface JobHistoryEntry {
 
 export type JobRequestMode = "FROZEN_FIXTURE" | "CALLER_SUPPLIED_OBSERVATIONS";
 
-export interface CurrentLendingObservation {
+export interface CurrentMarketplaceObservation {
   blockNumber: string;
   observedAt: string;
   explorerUrl: string;
 }
+
+export type CurrentLendingObservation = CurrentMarketplaceObservation;
 
 export interface FixtureJobResponse {
   schemaVersion: "positioncrew.fixture-job-response.v1";
@@ -486,7 +488,37 @@ export interface SessionJob {
   marketplaceTrace?: FreshMarketplaceChain;
 }
 
-export type FreshMarketplaceBenchmarkSlug = "lending-rescue" | "lp-rebalance" | "bounded-grid";
+export type FreshMarketplaceBenchmarkSlug =
+  | "lending-rescue"
+  | "lp-rebalance"
+  | "yield-optimization"
+  | "bounded-grid";
+export type HistoricalMarketplaceBenchmarkSlug = Exclude<
+  FreshMarketplaceBenchmarkSlug,
+  "yield-optimization"
+>;
+
+export interface CurrentBlockPinnedMarketplaceEvidence {
+  schemaVersion: "positioncrew.current-block-pinned-evidence.v1";
+  evidenceClass: "CURRENT_BLOCK_PINNED";
+  chainId: 56;
+  source: CurrentMarketplaceObservation;
+  freshnessAtCreation: "FRESH" | "STALE" | "FUTURE_DATED";
+  evaluatedAt: string;
+  maxDataAgeSeconds: number;
+}
+
+export interface HistoricalFixtureMarketplaceEvidence {
+  schemaVersion: "positioncrew.historical-fixture-evidence.v1";
+  evidenceClass: "HISTORICAL_FIXTURE";
+  benchmarkSlug: HistoricalMarketplaceBenchmarkSlug;
+  requestSchema: string;
+}
+
+export type PersistedMarketplaceEvidence =
+  | CurrentBlockPinnedMarketplaceEvidence
+  | HistoricalFixtureMarketplaceEvidence;
+
 export type FreshMarketplaceStatus = "HIRE_RECORDED" | "RUNNING" | "COMPLETED" | "FAILED";
 
 export interface FreshMarketplaceChain {
@@ -495,15 +527,15 @@ export interface FreshMarketplaceChain {
   hire: {
     hireId: string;
     idempotencyKey: string;
-    providerSlug: "lending-rescue" | "lp-rebalance" | "bounded-grid";
+    providerSlug: FreshMarketplaceBenchmarkSlug;
     providerId: string;
     benchmarkSlug: FreshMarketplaceBenchmarkSlug;
-    service: "LENDING_RESCUE" | "LP_REBALANCE" | "BOUNDED_GRID";
+    service: ServiceId;
     evidenceMode: "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED";
     commerce: { directCostUsd: "0.00"; walletRequired: false; settlement: "NO_PAYMENT" };
     request: Record<string, unknown>;
     requestHash: string;
-    evidence?: CurrentLendingObservation;
+    evidence: PersistedMarketplaceEvidence | null;
     evidenceHash?: string;
     providerHash?: string;
     createdAt: string;

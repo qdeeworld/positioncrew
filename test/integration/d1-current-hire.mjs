@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -235,6 +236,184 @@ async function runLifecycle(baseUrl) {
   return { hireId, receiptPath: completed.receipt.publicUrl };
 }
 
+const ADDITIONAL_CURRENT_HIRE_CASES = [
+  {
+    service: "BOUNDED_GRID",
+    benchmarkSlug: "bounded-grid",
+    providerSlug: "bounded-grid",
+    fixturePath: "fixtures/bounded-grid/bnb-usdt-grid.v1.json",
+    requestKey: "gridRequest",
+    blockNumber: "71000001",
+    protocol: "PancakeSwap V3 bounded grid policy",
+    sourceId: "pancake-v3-mainnet-block-71000001",
+    requestId: "pancake-grid-71000001",
+    idempotencyKey: "33333333-3333-4333-8333-444444444444",
+  },
+  {
+    service: "LP_REBALANCE",
+    benchmarkSlug: "lp-rebalance",
+    providerSlug: "lp-rebalance",
+    fixturePath: "fixtures/lp-rebalance/out-of-range-v3-position.v1.json",
+    requestKey: "lpRequest",
+    blockNumber: "71000002",
+    protocol: "PancakeSwap V3 position analysis",
+    sourceId: "pancake-position-mainnet-block-71000002",
+    requestId: "pancake-position-9000001-71000002",
+    idempotencyKey: "44444444-4444-4444-8444-555555555555",
+  },
+  {
+    service: "YIELD_OPTIMIZATION",
+    benchmarkSlug: "yield-optimization",
+    providerSlug: "yield-optimization",
+    fixturePath: "fixtures/yield-optimization/venus-to-beefy.v1.json",
+    requestKey: "yieldRequest",
+    blockNumber: "71000003",
+    protocol: "Venus Core Pool stablecoin supply",
+    sourceId: "venus-yield-mainnet-block-71000003",
+    requestId: "venus-yield-71000003",
+    idempotencyKey: "55555555-5555-4555-8555-666666666666",
+  },
+];
+
+function rebindSyntheticObservation(value, observedAt, sourceId) {
+  if (Array.isArray(value)) {
+    return value.map((item) => rebindSyntheticObservation(item, observedAt, sourceId));
+  }
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => {
+      if (key === "observedAt") return [key, observedAt];
+      if (key === "sourceId") return [key, sourceId];
+      return [key, rebindSyntheticObservation(child, observedAt, sourceId)];
+    }),
+  );
+}
+
+function syntheticCurrentProbe(definition, ordinal) {
+  const now = new Date(Date.now() + ordinal * 10);
+  const observedAt = new Date(now.getTime() - 15_000).toISOString();
+  const explorerUrl = `https://bscscan.com/block/${definition.blockNumber}`;
+  const fixture = JSON.parse(
+    readFileSync(resolve(root, definition.fixturePath), "utf8"),
+  );
+  const request = rebindSyntheticObservation(
+    structuredClone(fixture),
+    observedAt,
+    definition.sourceId,
+  );
+  request.requestId = definition.requestId;
+  request.chainId = 56;
+  request.protocol = definition.protocol;
+  request.requestedAt = now.toISOString();
+  request.deadline = new Date(now.getTime() + 5 * 60_000).toISOString();
+  request.sources = [{
+    sourceId: definition.sourceId,
+    label: `Deterministic offline D1 integration observation for ${definition.service}`,
+    uri: explorerUrl,
+    observedAt,
+  }];
+
+  return {
+    schemaVersion: "positioncrew.synthetic-current-probe.test.v1",
+    relationship: "TEST_ONLY_SYNTHETIC_OBSERVATION",
+    state: "READY",
+    [definition.requestKey]: request,
+    source: {
+      blockNumber: definition.blockNumber,
+      blockTimestamp: observedAt,
+      explorerUrl,
+    },
+  };
+}
+
+async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
+  const probe = syntheticCurrentProbe(definition, ordinal);
+  assert.equal(probe.relationship, "TEST_ONLY_SYNTHETIC_OBSERVATION");
+  assert.equal(probe.state, "READY");
+  const request = structuredClone(probe[definition.requestKey]);
+  assert.equal(request.service, definition.service);
+  assert.equal(request.chainId, 56);
+  assert.equal(request.protocol, definition.protocol);
+  assert.equal(request.requestId, definition.requestId);
+  assert.equal(request.sources?.length, 1);
+
+  const blockNumber = String(probe.source.blockNumber);
+  const explorerUrl = `https://bscscan.com/block/${blockNumber}`;
+  const observedAt = probe.source.blockTimestamp;
+  const source = request.sources[0];
+  assert.match(blockNumber, /^[1-9]\d*$/);
+  assert.equal(probe.source.explorerUrl, explorerUrl);
+  assert.equal(source.sourceId, definition.sourceId);
+  assert.equal(source.uri, explorerUrl);
+  assert.equal(source.observedAt, observedAt);
+
+  const payload = {
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    idempotencyKey: definition.idempotencyKey,
+    benchmarkSlug: definition.benchmarkSlug,
+    providerSlug: definition.providerSlug,
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    observation: { blockNumber, observedAt, explorerUrl },
+    request,
+  };
+  const created = await requestJson(baseUrl, "/api/benchmark-hires", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: baseUrl },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(
+    created.response.status,
+    201,
+    `${definition.service} hire was not created: ${JSON.stringify(created.body)}`,
+  );
+  assert.equal(created.body?.hire?.service, definition.service);
+  assert.equal(created.body?.hire?.evidenceMode, "CURRENT_BLOCK_PINNED");
+  assert.ok(created.body?.hire?.providerHash);
+  assert.ok(created.body?.hire?.evidenceHash);
+  assert.equal(created.body?.job?.state, "CREATED");
+  assert.equal(created.body?.receipt, null);
+
+  const run = await requestJson(
+    baseUrl,
+    `/api/benchmark-hires/${created.body.hire.hireId}/jobs`,
+    { method: "POST", headers: { Origin: baseUrl } },
+  );
+  assert.equal(run.response.status, 202, `${definition.service} job was not accepted`);
+
+  let completed;
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const polled = await requestJson(baseUrl, `/api/benchmark-hires/${created.body.hire.hireId}`);
+    assert.equal(polled.response.status, 200);
+    assert.notEqual(polled.body?.job?.state, "FAILED", `${definition.service} job failed`);
+    if (polled.body?.job?.state === "COMPLETED" && polled.body.receipt) {
+      completed = polled.body;
+      break;
+    }
+    await delay(100);
+  }
+  assert.ok(completed, `${definition.service} job did not complete`);
+  assert.equal(completed.hire.providerHash, created.body.hire.providerHash);
+  assert.equal(completed.hire.evidenceHash, created.body.hire.evidenceHash);
+  assert.deepEqual(completed.receipt.response.result.request, request);
+  assert.equal(completed.receipt.response.result.evaluation.score, 100);
+
+  const publicReceipt = await requestJson(baseUrl, completed.receipt.publicUrl);
+  assert.equal(publicReceipt.response.status, 200);
+  assert.equal(publicReceipt.body?.hire?.hireId, completed.hire.hireId);
+  assert.equal(publicReceipt.body?.job?.state, "COMPLETED");
+  assert.deepEqual(publicReceipt.body?.receipt, completed.receipt);
+
+  return {
+    service: definition.service,
+    hireId: completed.hire.hireId,
+    receiptId: completed.receipt.receiptId,
+    providerHash: completed.hire.providerHash,
+    evidenceHash: completed.hire.evidenceHash,
+    receipt: completed.receipt,
+  };
+}
+
 async function main() {
   const stateDirectory = await mkdtemp(join(tmpdir(), "positioncrew-d1-integration-"));
   let worker;
@@ -264,6 +443,12 @@ async function main() {
     worker = startWorker(port, stateDirectory);
     await waitForWorker(baseUrl, worker);
     const persisted = await runLifecycle(baseUrl);
+    const additionalLifecycles = [];
+    for (const [ordinal, definition] of ADDITIONAL_CURRENT_HIRE_CASES.entries()) {
+      additionalLifecycles.push(
+        await runAdditionalCurrentLifecycle(baseUrl, definition, ordinal),
+      );
+    }
 
     await stopWorker(worker.child);
     worker = startWorker(port, stateDirectory);
@@ -280,12 +465,40 @@ async function main() {
     assert.equal(reloadedReceipt.response.status, 200);
     assert.equal(reloadedReceipt.body.hire.hireId, persisted.hireId);
 
+    for (const lifecycleResult of additionalLifecycles) {
+      const reloadedCategoryHire = await requestJson(
+        baseUrl,
+        `/api/benchmark-hires/${lifecycleResult.hireId}`,
+      );
+      assert.equal(reloadedCategoryHire.response.status, 200);
+      assert.equal(reloadedCategoryHire.body.job.state, "COMPLETED");
+      assert.equal(reloadedCategoryHire.body.hire.service, lifecycleResult.service);
+      assert.equal(
+        reloadedCategoryHire.body.hire.providerHash,
+        lifecycleResult.providerHash,
+      );
+      assert.equal(
+        reloadedCategoryHire.body.hire.evidenceHash,
+        lifecycleResult.evidenceHash,
+      );
+
+      const reloadedCategoryReceipt = await requestJson(
+        baseUrl,
+        `/api/benchmark-receipts/${lifecycleResult.receiptId}`,
+      );
+      assert.equal(reloadedCategoryReceipt.response.status, 200);
+      assert.equal(reloadedCategoryReceipt.body.hire.hireId, lifecycleResult.hireId);
+      assert.deepEqual(reloadedCategoryReceipt.body.receipt, lifecycleResult.receipt);
+    }
+
     console.log(
       JSON.stringify({
         status: "PASS",
         lifecycle: "create->run->poll->receipt->restart->reload",
         evidenceMode: "CURRENT_BLOCK_PINNED",
         outcome: "REFUSED_CONSTRAINTS",
+        categories: 4,
+        persistedAfterRestart: 4,
       }),
     );
   } finally {
