@@ -741,8 +741,8 @@ export interface BoundedGridForwardShadowWindow {
   windowId: string;
   state: BoundedGridForwardShadowState;
   pair: "WBNB/USDT";
-  sourceHireId: string;
-  sourceRequestHash: string;
+  sourceHireId: string | null;
+  sourceRequestHash: string | null;
   sourceReceiptUrl: string | null;
   sourceBlockNumber: string | null;
   startedAt: string;

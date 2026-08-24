@@ -263,8 +263,10 @@ describe("bounded-grid forward shadow evidence", () => {
     expect(projection.recentWindows[0]).toMatchObject({
       windowId: runBinding.runId,
       state: "VOID_SOURCE_GAP",
-      sourceHireId: runBinding.hireId,
-      sourceRequestHash: runBinding.requestHash,
+      initializationState: "VOIDED_BEFORE_PRECOMMIT",
+      precommitPersisted: false,
+      sourceHireId: null,
+      sourceRequestHash: null,
       sourceReceiptUrl: null,
       sourceBlockNumber: null,
       startedAt,
@@ -348,6 +350,12 @@ describe("bounded-grid forward shadow evidence", () => {
       initializationVoidWindowCount: 0,
       precommittedTerminalWindowCount: 1,
       terminalWindowCount: 1,
+    });
+    expect(summary.recentWindows[0]).toMatchObject({
+      initializationState: "PRECOMMITTED",
+      precommitPersisted: true,
+      sourceHireId: runBinding.hireId,
+      sourceRequestHash: runBinding.requestHash,
     });
     expect(summary.summary.negativeWindowCount).toBe(1);
     expect(summary.summary.positiveWindowCount).toBe(0);

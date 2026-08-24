@@ -88,8 +88,8 @@ export interface ShadowGridPublicWindow {
   initializationState: "PRECOMMITTED" | "VOIDED_BEFORE_PRECOMMIT";
   precommitPersisted: boolean;
   pair: "WBNB/USDT";
-  sourceHireId: string;
-  sourceRequestHash: string;
+  sourceHireId: string | null;
+  sourceRequestHash: string | null;
   sourceReceiptUrl: string | null;
   sourceBlockNumber: string | null;
   startedAt: string;
@@ -422,6 +422,13 @@ export function publicShadowGridWindow(
   if (!precommit && latest.eventType !== "VOID_SOURCE_GAP") {
     throw new Error("A public shadow-grid window requires a precommitment unless initialization was terminally voided");
   }
+  if (
+    precommit &&
+    (precommit.sourceHireId !== events[0]!.hireId ||
+      precommit.sourceRequestHash !== events[0]!.requestHash)
+  ) {
+    throw new Error("Shadow-grid public precommitment does not match its immutable run binding");
+  }
   const terminalPayload = TERMINAL_TYPES.has(events.at(-1)!.eventType)
     ? latest.payload as Record<string, unknown>
     : null;
@@ -431,8 +438,8 @@ export function publicShadowGridWindow(
     initializationState: precommit ? "PRECOMMITTED" : "VOIDED_BEFORE_PRECOMMIT",
     precommitPersisted: precommit !== null,
     pair: "WBNB/USDT" as const,
-    sourceHireId: precommit?.sourceHireId ?? events[0]!.hireId,
-    sourceRequestHash: precommit?.sourceRequestHash ?? events[0]!.requestHash,
+    sourceHireId: precommit?.sourceHireId ?? null,
+    sourceRequestHash: precommit?.sourceRequestHash ?? null,
     sourceReceiptUrl: precommit ? new URL(precommit.sourceReceiptUrl, origin).toString() : null,
     sourceBlockNumber: precommit?.sourceBlockNumber ?? null,
     startedAt: events[0]!.epochStartedAt,

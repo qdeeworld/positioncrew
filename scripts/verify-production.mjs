@@ -326,14 +326,6 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
     Number.isFinite(Date.parse(window.startedAt)),
     `${window.windowId} has an invalid start time`,
   );
-  assert(
-    typeof window.sourceHireId === "string" &&
-      window.sourceHireId.length > 0 &&
-    typeof window.sourceRequestHash === "string" &&
-      /^sha256:[a-f0-9]{64}$/.test(window.sourceRequestHash),
-    `${window.windowId} has an invalid source binding`,
-  );
-
   const receiptUrl = localUrl(window.receiptUrl);
   assert(
     receiptUrl.pathname ===
@@ -407,6 +399,8 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
       window.initializationState === "VOIDED_BEFORE_PRECOMMIT" &&
         window.precommitPersisted === false &&
         window.state === "VOID_SOURCE_GAP" &&
+        window.sourceHireId === null &&
+        window.sourceRequestHash === null &&
         window.sourceReceiptUrl === null &&
         window.sourceBlockNumber === null &&
         window.sampledCrossings === 0 &&
@@ -428,6 +422,15 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
       window.initializationState === "PRECOMMITTED" &&
         window.precommitPersisted === true,
       `${window.windowId} weakened its precommitted initialization boundary`,
+    );
+    assert(
+      typeof window.sourceHireId === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          window.sourceHireId,
+        ) &&
+        typeof window.sourceRequestHash === "string" &&
+        /^sha256:[a-f0-9]{64}$/.test(window.sourceRequestHash),
+      `${window.windowId} has an invalid committed source binding`,
     );
     assert(
       typeof window.sourceBlockNumber === "string" &&

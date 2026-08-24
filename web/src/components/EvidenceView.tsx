@@ -432,7 +432,10 @@ export function EvidenceView({
               <div className="forward-shadow-windows" aria-label="Recent bounded grid forward shadow windows">
                 {forwardShadowLedger.recentWindows.map((window) => {
                   const hasSourcePrecommit =
-                    window.sourceReceiptUrl !== null && window.sourceBlockNumber !== null;
+                    window.sourceHireId !== null &&
+                    window.sourceRequestHash !== null &&
+                    window.sourceReceiptUrl !== null &&
+                    window.sourceBlockNumber !== null;
                   return (
                     <article key={window.windowId} className={`forward-shadow-window ${window.state.toLowerCase()}`}>
                       <div>
@@ -460,8 +463,8 @@ export function EvidenceView({
                         </>
                       ) : (
                         <>
-                          <small>Initialization failed before a source receipt or precommit was recorded.</small>
-                          <code>Source receipt not committed</code>
+                          <small>Initialization failed before the source binding and precommit were recorded.</small>
+                          <code>Source binding not committed</code>
                         </>
                       )}
                       <a href={window.receiptUrl} target="_blank" rel="noreferrer">

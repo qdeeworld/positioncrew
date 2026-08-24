@@ -845,6 +845,10 @@ try {
     "VOIDED_BEFORE_PRECOMMIT",
   );
   assert.equal(recoveredGenesisOnlyWindow.body.window.precommitPersisted, false);
+  assert.equal(recoveredGenesisOnlyWindow.body.window.sourceHireId, null);
+  assert.equal(recoveredGenesisOnlyWindow.body.window.sourceRequestHash, null);
+  assert.equal(recoveredGenesisOnlyWindow.body.window.sourceReceiptUrl, null);
+  assert.equal(recoveredGenesisOnlyWindow.body.window.sourceBlockNumber, null);
   assert.equal(recoveredGenesisOnlyWindow.body.integrity.valid, true);
   assert.equal(recoveredGenesisOnlyWindow.body.events.length, 2);
   const recoveredGenesis = recoveredGenesisOnlyWindow.body.events[0];
@@ -889,6 +893,11 @@ try {
   );
   assert.equal(normalReplacementSummaryWindow?.initializationState, "PRECOMMITTED");
   assert.equal(normalReplacementSummaryWindow?.precommitPersisted, true);
+  assert(normalReplacementSummaryWindow);
+  assert.match(normalReplacementSummaryWindow.sourceHireId, /^[0-9a-f-]{36}$/iu);
+  assert.match(normalReplacementSummaryWindow.sourceRequestHash, /^sha256:[a-f0-9]{64}$/u);
+  assert.match(normalReplacementSummaryWindow.sourceReceiptUrl, /^https?:\/\//u);
+  assert.match(normalReplacementSummaryWindow.sourceBlockNumber, /^[1-9][0-9]*$/u);
   assert.equal(
     recoveredGenesisSummary.body.summary.precommittedWindowCount,
     precommittedCountBeforeGenesisOnlyRecovery + 1,
