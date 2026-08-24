@@ -160,6 +160,7 @@ export function isRetryableRpcFailure(error: NonNullable<RpcResult["error"]>): b
   );
   if (executionFailure) return false;
   return (
+    error.code === -32_002 ||
     error.code === -32_005 ||
     /busy|gateway|header not found|internal error|limit|rate|temporar|timeout/i.test(error.message)
   );
