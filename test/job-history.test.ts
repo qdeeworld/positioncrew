@@ -110,15 +110,32 @@ describe("recent job device index", () => {
       const providerId = response.result.job.providerId;
       const deliverable = response.result.job.deliverable;
       if (!providerId || !deliverable) throw new Error("Canonical fixture is missing completed provider evidence");
+      const currentBlockPinned = evidenceMode === "CURRENT_BLOCK_PINNED";
+      const persistedRequest = currentBlockPinned
+        ? structuredClone(response.result.request)
+        : {
+            schemaVersion: "positioncrew.fresh-marketplace-provider-request.v1",
+            benchmarkSlug: "lp-rebalance",
+            providerSlug: "lp-rebalance",
+            providerId,
+            requestSchema: "positioncrew.lp-rebalance.request.v1",
+            evidenceMode: "HISTORICAL_FIXTURE",
+            directCostUsd: "0.00",
+            walletRequired: false,
+          };
       return {
         schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
         hire: {
           hireId,
           service: "LP_REBALANCE",
+          benchmarkSlug: "lp-rebalance",
+          providerSlug: "lp-rebalance",
           providerId,
           evidenceMode,
-          request: structuredClone(response.result.request),
-          requestHash: response.result.evaluation.requestHash,
+          request: persistedRequest,
+          requestHash: currentBlockPinned
+            ? response.result.evaluation.requestHash
+            : `sha256:${"1".repeat(64)}`,
         },
         job: {
           jobId: "88888888-8888-4888-8888-888888888888",
@@ -140,6 +157,8 @@ describe("recent job device index", () => {
     const saved = referenceFor(historicalResponse.generatedAt);
     const chain = chainFor(historicalResponse, "HISTORICAL_FIXTURE");
     expect(isFreshMarketplaceChainForReference(chain, saved)).toBe(true);
+    expect((chain.hire as Record<string, unknown>).requestHash)
+      .not.toBe(historicalResponse.result.evaluation.requestHash);
 
     const currentResponse = await runCurrentBlockPinnedProviderRequest(
       historicalResponse.result.request,
@@ -157,7 +176,7 @@ describe("recent job device index", () => {
     (mismatchedHire.hire as Record<string, unknown>).hireId = reference(2).hireId;
     expect(isFreshMarketplaceChainForReference(mismatchedHire, saved)).toBe(false);
 
-    const copiedResponse = structuredClone(chain);
+    const copiedResponse = structuredClone(current);
     (copiedResponse.hire as Record<string, unknown>).requestHash = `sha256:${"a".repeat(64)}`;
     expect(isFreshMarketplaceChainForReference(copiedResponse, saved)).toBe(false);
 
@@ -179,11 +198,26 @@ describe("recent job device index", () => {
       expect(isFreshMarketplaceChainForReference(alteredHash, saved)).toBe(false);
     }
 
-    const alteredRequestBody = structuredClone(chain);
+    const alteredRequestBody = structuredClone(current);
     const alteredBodyResponse = (alteredRequestBody.receipt as Record<string, unknown>).response as Record<string, unknown>;
     const alteredBodyResult = alteredBodyResponse.result as Record<string, unknown>;
     (alteredBodyResult.request as Record<string, unknown>).account = "0x2222222222222222222222222222222222222222";
     expect(isFreshMarketplaceChainForReference(alteredRequestBody, saved)).toBe(false);
+
+    const alteredFixtureLock = structuredClone(chain);
+    const alteredFixtureResponse = (alteredFixtureLock.receipt as Record<string, unknown>).response as Record<string, unknown>;
+    (alteredFixtureResponse.benchmarkLock as Record<string, unknown>).fixtureHash = `sha256:${"2".repeat(64)}`;
+    expect(isFreshMarketplaceChainForReference(alteredFixtureLock, saved)).toBe(false);
+
+    const alteredFixtureTask = structuredClone(chain);
+    const alteredTaskResponse = (alteredFixtureTask.receipt as Record<string, unknown>).response as Record<string, unknown>;
+    (alteredTaskResponse.benchmarkLock as Record<string, unknown>).taskId = "different-task";
+    expect(isFreshMarketplaceChainForReference(alteredFixtureTask, saved)).toBe(false);
+
+    const alteredHistoricalMetadata = structuredClone(chain);
+    const alteredMetadataHire = alteredHistoricalMetadata.hire as Record<string, unknown>;
+    (alteredMetadataHire.request as Record<string, unknown>).requestSchema = "positioncrew.bounded-grid.request.v1";
+    expect(isFreshMarketplaceChainForReference(alteredHistoricalMetadata, saved)).toBe(false);
 
     expect(isFreshMarketplaceChainForReference({ ...chain, receipt: null }, saved)).toBe(false);
 

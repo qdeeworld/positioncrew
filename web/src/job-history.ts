@@ -1,6 +1,6 @@
 import type { FixtureJobResponse, FreshMarketplaceChain, ServiceId, SessionJob } from "./types.js";
 import { FixtureJobResponseSchema } from "../../src/api/fixture-response-schema.js";
-import { canonicalJson } from "../../src/commerce/fresh-hire-schema.js";
+import { canonicalJson, freshMarketplaceTaskForService } from "../../src/commerce/fresh-hire-schema.js";
 
 export const RECENT_JOB_STORAGE_KEY = "positioncrew.recent-jobs.v1";
 export const RECENT_JOB_CHANGED_EVENT = "positioncrew:recent-job-changed";
@@ -99,6 +99,7 @@ function isFixtureJobResponseForChain(
 
   const benchmarkLock = value.benchmarkLock;
   if (benchmarkLock !== null && (!isRecord(benchmarkLock) ||
+    typeof benchmarkLock.taskId !== "string" ||
     typeof benchmarkLock.fixtureHash !== "string" ||
     typeof benchmarkLock.rubricHash !== "string" ||
     typeof benchmarkLock.protocolHash !== "string")) {
@@ -127,17 +128,17 @@ function isFixtureJobResponseForChain(
     responseJob.providerId !== expectedProviderId ||
     typeof responseJob.evaluatorId !== "string" ||
     !isRecord(responseJob.envelope) ||
-    responseJob.envelope.requestHash !== expectedRequestHash ||
+    typeof responseJob.envelope.requestHash !== "string" ||
     !Array.isArray(responseJob.history) ||
     !responseJob.history.every((entry) => isRecord(entry) &&
       typeof entry.state === "string" &&
       typeof entry.at === "string" &&
       typeof entry.reference === "string") ||
     !isRecord(responseJob.deliverable) ||
-    responseJob.deliverable.requestHash !== expectedRequestHash ||
+    typeof responseJob.deliverable.requestHash !== "string" ||
     responseJob.deliverable.deliverableHash !== expectedDeliverableHash ||
     !isRecord(responseJob.evaluation) ||
-    responseJob.evaluation.requestHash !== expectedRequestHash) {
+    typeof responseJob.evaluation.requestHash !== "string") {
     return false;
   }
 
@@ -154,14 +155,6 @@ function isFixtureJobResponseForChain(
     return false;
   }
 
-  try {
-    if (canonicalJson(request) !== canonicalJson(expectedRequest)) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-
   if (!isRecord(deliverable) ||
     deliverable.service !== reference.service ||
     typeof deliverable.status !== "string" ||
@@ -172,17 +165,55 @@ function isFixtureJobResponseForChain(
     return false;
   }
 
-  return isRecord(evaluation) &&
-    evaluation.requestHash === expectedRequestHash &&
-    typeof evaluation.score === "number" &&
-    Number.isFinite(evaluation.score) &&
-    typeof evaluation.passed === "boolean" &&
-    evaluation.evaluationHash === expectedEvaluationHash &&
-    Array.isArray(evaluation.checks) &&
-    evaluation.checks.every((check) => isRecord(check) &&
+  if (!isRecord(evaluation) ||
+    typeof evaluation.requestHash !== "string" ||
+    typeof evaluation.score !== "number" ||
+    !Number.isFinite(evaluation.score) ||
+    typeof evaluation.passed !== "boolean" ||
+    evaluation.evaluationHash !== expectedEvaluationHash ||
+    !Array.isArray(evaluation.checks) ||
+    !evaluation.checks.every((check) => isRecord(check) &&
       typeof check.id === "string" &&
       typeof check.passed === "boolean" &&
-      typeof check.critical === "boolean");
+      typeof check.critical === "boolean")) {
+    return false;
+  }
+
+  const responseRequestHash = evaluation.requestHash;
+  if (responseJob.envelope.requestHash !== responseRequestHash ||
+    responseJob.deliverable.requestHash !== responseRequestHash ||
+    responseJob.evaluation.requestHash !== responseRequestHash) {
+    return false;
+  }
+
+  if (chainEvidenceMode === "CURRENT_BLOCK_PINNED") {
+    if (responseRequestHash !== expectedRequestHash) {
+      return false;
+    }
+    try {
+      return canonicalJson(request) === canonicalJson(expectedRequest);
+    } catch {
+      return false;
+    }
+  }
+
+  const fixtureBinding = freshMarketplaceTaskForService(reference.service);
+  if (!fixtureBinding || !isRecord(expectedRequest) || !isRecord(benchmarkLock)) {
+    return false;
+  }
+  const [benchmarkSlug, task] = fixtureBinding;
+  return embeddedReceipt.mode === "PUBLIC_REPRODUCIBLE" &&
+    expectedRequest.schemaVersion === "positioncrew.fresh-marketplace-provider-request.v1" &&
+    expectedRequest.benchmarkSlug === benchmarkSlug &&
+    expectedRequest.providerSlug === task.providerSlug &&
+    expectedRequest.providerId === expectedProviderId &&
+    expectedRequest.requestSchema === task.requestSchema &&
+    expectedRequest.evidenceMode === "HISTORICAL_FIXTURE" &&
+    expectedRequest.directCostUsd === "0.00" &&
+    expectedRequest.walletRequired === false &&
+    request.schemaVersion === task.requestSchema &&
+    request.requestId === benchmarkLock.taskId &&
+    responseRequestHash === benchmarkLock.fixtureHash;
 }
 
 export function isRecentJobReference(value: unknown): value is RecentJobReference {
@@ -336,7 +367,15 @@ export function isFreshMarketplaceChainForReference(
     return false;
   }
 
+  const taskBinding = freshMarketplaceTaskForService(reference.service);
+  if (!taskBinding) {
+    return false;
+  }
+  const [benchmarkSlug, task] = taskBinding;
+
   if (hire.hireId !== reference.hireId || hire.service !== reference.service ||
+    hire.benchmarkSlug !== benchmarkSlug ||
+    hire.providerSlug !== task.providerSlug ||
     typeof hire.providerId !== "string" ||
     !isRecord(hire.request) ||
     typeof hire.requestHash !== "string" ||
