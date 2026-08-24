@@ -33,6 +33,8 @@ import { TASKS } from "../task-config";
 import type {
   AgentAdvantagePublicationStatus,
   FounderAgentAdvantagePublicationStatus,
+  FounderAgentAdvantageAtAGlance,
+  FounderAgentAdvantageAtAGlanceLoadState,
   PublicationLoadState,
   BenchmarkRepeatabilityResponse,
   BoundedGridForwardShadowLedger,
@@ -375,6 +377,8 @@ function ResultAdvantageBand({
   marketplaceProvenance,
   advantagePublication,
   founderAdvantagePublication,
+  founderAdvantageAtAGlance,
+  founderAdvantageAtAGlanceLoadState,
   advantagePublicationLoadState,
   founderAdvantagePublicationLoadState,
 }: {
@@ -384,6 +388,8 @@ function ResultAdvantageBand({
   marketplaceProvenance: MarketplaceInvocationEvidence | null;
   advantagePublication: AgentAdvantagePublicationStatus | null;
   founderAdvantagePublication: FounderAgentAdvantagePublicationStatus | null;
+  founderAdvantageAtAGlance: FounderAgentAdvantageAtAGlance | null;
+  founderAdvantageAtAGlanceLoadState: FounderAgentAdvantageAtAGlanceLoadState;
   advantagePublicationLoadState: PublicationLoadState;
   founderAdvantagePublicationLoadState: PublicationLoadState;
 }) {
@@ -395,6 +401,9 @@ function ResultAdvantageBand({
     founderAdvantagePublication,
   )
     ? founderAdvantagePublication
+    : null;
+  const founderTask = founderAdvantageAtAGlanceLoadState === "AVAILABLE"
+    ? founderAdvantageAtAGlance?.tasks.find((task) => task.service === service) ?? null
     : null;
 
   if (!benchmarked) {
@@ -459,13 +468,31 @@ function ResultAdvantageBand({
     );
   }
 
-  if (publishedFounder) {
+  if (publishedFounder && founderTask) {
     return (
-      <section className="result-advantage-band published" aria-label="Founder Agent Advantage comparison status">
+      <section className="result-advantage-band published task-detail" aria-label="Founder Agent Advantage comparison status">
         <div className="result-advantage-copy">
           <span className="result-advantage-state"><BadgeCheck size={13} /> Founder comparison published</span>
-          <strong>{publishedFounder.exactOutputParityCount}/3 frozen tasks record exact canonical output parity.</strong>
-          <small>{publishedFounder.recordedSpeedAdvantageCount}/3 record lower agent time. Quality evidence here is exact canonical output parity, not a numeric rating. No separate numeric quality score was assigned. This founder-operated comparison is non-independent and non-blind and does not establish external demand, payment, live execution, or investment performance.</small>
+          <strong>{founderTask.title}: exact canonical output match.</strong>
+          <div className="result-advantage-metrics" aria-label="Recorded task comparison">
+            <span><small>Agent D1 API</small><b>{founderTask.agentElapsedMilliseconds.toLocaleString("en-US")} ms</b></span>
+            <span><small>Manual wall clock</small><b>{founderTask.manualElapsedMilliseconds.toLocaleString("en-US")} ms</b></span>
+            <span><small>Direct cost</small><b>$0 / $0</b></span>
+          </div>
+          <small>Quality was evaluated by exact canonical output parity; no separate numeric rating exists. Agent API duration and founder wall-clock time are different execution contexts, not a controlled speedup claim. Historical, founder-operated, non-independent, and non-blind; no payment, live execution, or investment performance.</small>
+        </div>
+        <a href={founderTask.receiptUrl} target="_blank" rel="noreferrer">Open task receipt <ArrowRight size={13} /></a>
+      </section>
+    );
+  }
+
+  if (publishedFounder) {
+    return (
+      <section className="result-advantage-band neutral" aria-label="Founder Agent Advantage comparison status">
+        <div className="result-advantage-copy">
+          <span className="result-advantage-state"><AlertTriangle size={13} /> Founder task detail unavailable</span>
+          <strong>The published comparison remains linked, but this task's detail was not projected.</strong>
+          <small>No task timing, cost, quality, or receipt metric is inferred while the report is loading, unavailable, or commitment-mismatched.</small>
         </div>
         <a href={publishedFounder.reportUrl}>Open founder report <ArrowRight size={13} /></a>
       </section>
@@ -490,6 +517,8 @@ function SummaryResult({
   marketplaceProvenance,
   advantagePublication,
   founderAdvantagePublication,
+  founderAdvantageAtAGlance,
+  founderAdvantageAtAGlanceLoadState,
   advantagePublicationLoadState,
   founderAdvantagePublicationLoadState,
 }: {
@@ -498,6 +527,8 @@ function SummaryResult({
   marketplaceProvenance: MarketplaceInvocationEvidence | null;
   advantagePublication: AgentAdvantagePublicationStatus | null;
   founderAdvantagePublication: FounderAgentAdvantagePublicationStatus | null;
+  founderAdvantageAtAGlance: FounderAgentAdvantageAtAGlance | null;
+  founderAdvantageAtAGlanceLoadState: FounderAgentAdvantageAtAGlanceLoadState;
   advantagePublicationLoadState: PublicationLoadState;
   founderAdvantagePublicationLoadState: PublicationLoadState;
 }) {
@@ -580,6 +611,8 @@ function SummaryResult({
         marketplaceProvenance={marketplaceProvenance}
         advantagePublication={advantagePublication}
         founderAdvantagePublication={founderAdvantagePublication}
+        founderAdvantageAtAGlance={founderAdvantageAtAGlance}
+        founderAdvantageAtAGlanceLoadState={founderAdvantageAtAGlanceLoadState}
         advantagePublicationLoadState={advantagePublicationLoadState}
         founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState}
       />
@@ -1049,6 +1082,8 @@ export function JobWorkspace({
   marketplaceProvenance,
   advantagePublication,
   founderAdvantagePublication,
+  founderAdvantageAtAGlance,
+  founderAdvantageAtAGlanceLoadState,
   advantagePublicationLoadState,
   founderAdvantagePublicationLoadState,
   forwardShadowLedger,
@@ -1073,6 +1108,8 @@ export function JobWorkspace({
   marketplaceProvenance: MarketplaceInvocationEvidence | null;
   advantagePublication: AgentAdvantagePublicationStatus | null;
   founderAdvantagePublication: FounderAgentAdvantagePublicationStatus | null;
+  founderAdvantageAtAGlance: FounderAgentAdvantageAtAGlance | null;
+  founderAdvantageAtAGlanceLoadState: FounderAgentAdvantageAtAGlanceLoadState;
   advantagePublicationLoadState: PublicationLoadState;
   founderAdvantagePublicationLoadState: PublicationLoadState;
   forwardShadowLedger: BoundedGridForwardShadowLedger | null;
@@ -1392,7 +1429,9 @@ export function JobWorkspace({
                 benchmarks={benchmarks}
           marketplaceProvenance={marketplaceProvenance}
           advantagePublication={advantagePublication}
-          founderAdvantagePublication={founderAdvantagePublication}
+                founderAdvantagePublication={founderAdvantagePublication}
+                founderAdvantageAtAGlance={founderAdvantageAtAGlance}
+                founderAdvantageAtAGlanceLoadState={founderAdvantageAtAGlanceLoadState}
           advantagePublicationLoadState={advantagePublicationLoadState}
           founderAdvantagePublicationLoadState={founderAdvantagePublicationLoadState}
               />

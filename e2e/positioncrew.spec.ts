@@ -571,7 +571,13 @@ async function installCurrentLendingHireRoutes(
 
 test("a cold buyer can discover, hire, and inspect the lending provider", async ({ page }) => {
   const mockedHire = await installCurrentLendingHireRoutes(page);
+  let founderReportLoads = 0;
+  await page.route("**/evidence/agent-advantage-founder/founder-agent-advantage-report.json", async (route) => {
+    founderReportLoads += 1;
+    await route.continue();
+  });
   await page.goto("/#marketplace");
+  expect(founderReportLoads).toBe(0);
   await expect(page.getByRole("heading", { name: "Hire a capital operator." })).toBeVisible();
   await expect(page.getByText("4/4", { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({ timeout: 20_000 });
@@ -593,16 +599,18 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.getByText("100/100", { exact: true }).first()).toBeVisible();
   const advantageStatus = page.getByRole("region", { name: "Founder Agent Advantage comparison status" });
   await expect(advantageStatus.getByText("Founder comparison published", { exact: true })).toBeVisible();
-  await expect(advantageStatus).toContainText("3/3 frozen tasks record exact canonical output parity");
-  await expect(advantageStatus).toContainText(
-    "Quality evidence here is exact canonical output parity, not a numeric rating. No separate numeric quality score was assigned.",
-  );
+  await expect(advantageStatus).toContainText("Bounded lending-position rescue: exact canonical output match");
+  await expect(advantageStatus).toContainText("Agent D1 API371 ms");
+  await expect(advantageStatus).toContainText("Manual wall clock356,626 ms");
+  await expect(advantageStatus).toContainText("Direct cost$0 / $0");
+  await expect(advantageStatus).toContainText("Quality was evaluated by exact canonical output parity; no separate numeric rating exists.");
   await expect(advantageStatus).not.toContainText("Quality score: not assigned");
   await expect(advantageStatus).not.toContainText("(null)");
-  await expect(advantageStatus.getByRole("link", { name: "Open founder report" })).toHaveAttribute(
+  await expect(advantageStatus.getByRole("link", { name: "Open task receipt" })).toHaveAttribute(
     "href",
-    "/evidence/agent-advantage-founder/",
+    "https://positioncrew.dolepee.com/api/benchmark-receipts/7f0234d4-bc81-43d4-9624-31823b334c33",
   );
+  expect(founderReportLoads).toBe(1);
   await page.getByRole("button", { name: "JSON" }).click();
   await expect(page.getByText("application/json", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Receipt", exact: true }).click();
@@ -984,10 +992,25 @@ test("the evidence page separates conformance from advantage claims", async ({ p
   });
   await page.goto("/#evidence");
   await expect(page.getByRole("heading", { name: "Evidence register" })).toBeVisible();
+  const comparisonSection = page.getByRole("region", { name: "Agent Advantage evidence" });
+  await expect(comparisonSection.getByText("Founder comparison published", { exact: true })).toBeVisible();
+  const taskComparisons = comparisonSection.getByRole("list", { name: "Founder Agent Advantage task comparisons" });
+  await expect(taskComparisons.getByRole("listitem")).toHaveCount(3);
+  await expect(taskComparisons).toContainText("Bounded lending-position rescue");
+  await expect(taskComparisons).toContainText("371 ms");
+  await expect(taskComparisons).toContainText("356,626 ms");
+  await expect(taskComparisons).toContainText("Bounded concentrated-liquidity rebalance");
+  await expect(taskComparisons).toContainText("381 ms");
+  await expect(taskComparisons).toContainText("94,612 ms");
+  await expect(taskComparisons).toContainText("Bounded BNB-USDT grid construction");
+  await expect(taskComparisons).toContainText("359 ms");
+  await expect(taskComparisons).toContainText("28,834 ms");
+  await expect(taskComparisons.getByText("$0 / $0", { exact: true })).toHaveCount(3);
+  await expect(taskComparisons.getByText(/Quality was evaluated by exact canonical output parity/)).toHaveCount(3);
+  await expect(comparisonSection).toContainText("Independent/blind extension: in progress.");
   await expect(page.getByText("4/4", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("3/3", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("6", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("OBSERVED", { exact: true })).toHaveCount(3);
   await expect(page.getByText("source-committed agent runs", { exact: true })).toBeVisible();
   await expect(page.getByText(/source 3b28703/).first()).toBeVisible();
   await expect(page.getByText("No independent/blind result is claimed.", { exact: true })).toBeVisible();
@@ -1046,6 +1069,27 @@ test("the evidence page separates conformance from advantage claims", async ({ p
   expect(captures.benchmarks.flatMap((item: { candidates: unknown[] }) => item.candidates)).toHaveLength(6);
 });
 
+test("commitment-mismatched founder task details fail closed", async ({ page }) => {
+  await page.route("**/evidence/agent-advantage-founder/founder-agent-advantage-report.json", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: "positioncrew.founder-agent-advantage-report.v2",
+        reportHash: `sha256:${"0".repeat(64)}`,
+        evidenceManifestHash: `sha256:${"0".repeat(64)}`,
+        qualityMethod: "CANONICAL_EXACT_OUTPUT_PARITY",
+        qualityScore: null,
+        tasks: [],
+      }),
+    });
+  });
+  await page.goto("/#evidence");
+  await expect(page.getByRole("status", { name: "Founder comparison task details unavailable" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Founder Agent Advantage task comparisons" })).toHaveCount(0);
+  await expect(page.getByText("356,626 ms", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("371 ms", { exact: true })).toHaveCount(0);
+});
+
 test("direct product links resolve to their canonical application views", async ({ page }) => {
   for (const view of ["marketplace", "jobs", "evidence"] as const) {
     await page.goto(`/${view}`);
@@ -1100,7 +1144,7 @@ test("a published Agent Advantage status exposes the committed report without ch
     });
   });
   await page.goto("/#evidence");
-  await expect(page.getByText("Published", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Independent\/blind extension: published\./)).toBeVisible();
   await expect(page.getByText("Independent result published.")).toBeVisible();
   await expect(page.getByText(/2\/3 frozen tasks support the pre-registered advantage rule/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Open independently scored report" })).toHaveAttribute(
