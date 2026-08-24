@@ -1028,10 +1028,44 @@ function positiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-export function projectFounderAgentAdvantageAtAGlance(
+function founderCanonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(founderCanonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${founderCanonicalJson(child)}`)
+      .join(",")}}`;
+  }
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return JSON.stringify(value);
+  }
+  throw new TypeError(`Unsupported canonical value type: ${typeof value}`);
+}
+
+async function founderCanonicalSha256(value: unknown): Promise<string | null> {
+  try {
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(founderCanonicalJson(value)),
+    );
+    const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `sha256:${hex}`;
+  } catch {
+    return null;
+  }
+}
+
+export async function projectFounderAgentAdvantageAtAGlance(
   value: unknown,
   publication: FounderAgentAdvantagePublicationStatus,
-): FounderAgentAdvantageAtAGlance | null {
+): Promise<FounderAgentAdvantageAtAGlance | null> {
   if (!isVerifiedFounderAgentAdvantagePublication(publication)) return null;
   const report = founderObject(value);
   if (!report) return null;
@@ -1042,6 +1076,18 @@ export function projectFounderAgentAdvantageAtAGlance(
     report.comparisonMode !== "FOUNDER_OPERATED_NON_INDEPENDENT_NON_BLIND" ||
     report.qualityMethod !== "CANONICAL_EXACT_OUTPUT_PARITY" ||
     report.qualityScore !== null
+  ) return null;
+
+  const evidenceManifest = founderObject(report.evidenceManifest);
+  if (!evidenceManifest) return null;
+  const { reportHash: _declaredReportHash, ...reportBody } = report;
+  const [computedReportHash, computedEvidenceManifestHash] = await Promise.all([
+    founderCanonicalSha256(reportBody),
+    founderCanonicalSha256(evidenceManifest),
+  ]);
+  if (
+    computedReportHash !== publication.reportHash ||
+    computedEvidenceManifestHash !== publication.evidenceManifestHash
   ) return null;
 
   const summary = founderObject(report.summary);

@@ -222,12 +222,12 @@ export default function App() {
       { cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal },
     )
       .then((response) => jsonResponse<unknown>(response))
-      .then((report) => {
-        if (!active) return;
-        const projection = projectFounderAgentAdvantageAtAGlance(
+      .then(async (report) => {
+        const projection = await projectFounderAgentAdvantageAtAGlance(
           report,
           founderAdvantagePublication,
         );
+        if (!active) return;
         if (!projection) throw new Error("Founder Agent Advantage report failed projection");
         loadedFounderAdvantageReportHash.current = founderAdvantagePublication.reportHash;
         setFounderAdvantageAtAGlance(projection);

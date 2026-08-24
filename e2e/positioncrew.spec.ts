@@ -1069,18 +1069,20 @@ test("the evidence page separates conformance from advantage claims", async ({ p
   expect(captures.benchmarks.flatMap((item: { candidates: unknown[] }) => item.candidates)).toHaveLength(6);
 });
 
-test("commitment-mismatched founder task details fail closed", async ({ page }) => {
+test("body-tampered founder task details fail closed even when declared commitments remain unchanged", async ({ page }) => {
   await page.route("**/evidence/agent-advantage-founder/founder-agent-advantage-report.json", async (route) => {
+    const response = await route.fetch();
+    const report = await response.json() as {
+      tasks: Array<{
+        agent: { officialElapsedMilliseconds: number };
+        marketplace: { apiDurationMilliseconds: number };
+      }>;
+    };
+    report.tasks[0].agent.officialElapsedMilliseconds += 1;
+    report.tasks[0].marketplace.apiDurationMilliseconds += 1;
     await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        schemaVersion: "positioncrew.founder-agent-advantage-report.v2",
-        reportHash: `sha256:${"0".repeat(64)}`,
-        evidenceManifestHash: `sha256:${"0".repeat(64)}`,
-        qualityMethod: "CANONICAL_EXACT_OUTPUT_PARITY",
-        qualityScore: null,
-        tasks: [],
-      }),
+      response,
+      body: JSON.stringify(report),
     });
   });
   await page.goto("/#evidence");
