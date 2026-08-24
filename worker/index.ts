@@ -148,6 +148,7 @@ const API_HEADERS = {
 const CANONICAL_PRODUCT_ORIGIN = "https://positioncrew.dolepee.com";
 const MAX_FRESH_MARKETPLACE_REQUEST_BYTES = 32_768;
 const SHADOW_GRID_WORKFLOW_PATH = ".github/workflows/production-smoke.yml";
+// Temporary rollout allowlist: remove this legacy path/ref after queued pre-cutover runs expire.
 const SHADOW_GRID_LEGACY_WORKFLOW_PATH = ".github/workflows/bounded-grid-shadow-ledger.yml";
 const SHADOW_GRID_EXPECTED_RUN_HEADER = "X-PositionCrew-Shadow-Run-Id";
 const SHADOW_GRID_RUN_ID_PATTERN = /^bg-\d{8}-\d{2}$/;
@@ -320,13 +321,22 @@ function scheduleEvidence(request: Request, now: Date): ShadowGridScheduleEviden
   const runAttempt = request.headers.get("X-GitHub-Run-Attempt");
   const headSha = request.headers.get("X-GitHub-Sha");
   const workflowRef = request.headers.get("X-GitHub-Workflow-Ref");
+  const currentWorkflowRef =
+    `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`;
+  const legacyWorkflowRef =
+    `dolepee/positioncrew/${SHADOW_GRID_LEGACY_WORKFLOW_PATH}@refs/heads/main`;
+  const workflowPath = workflowRef === currentWorkflowRef
+    ? SHADOW_GRID_WORKFLOW_PATH
+    : workflowRef === legacyWorkflowRef
+      ? SHADOW_GRID_LEGACY_WORKFLOW_PATH
+      : null;
   if (
     event !== "schedule" ||
     repository !== "dolepee/positioncrew" ||
     !runId || !/^\d+$/.test(runId) ||
     runAttempt !== "1" ||
     !headSha || !/^[a-f0-9]{40}$/i.test(headSha) ||
-    workflowRef !== `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
+    workflowPath === null
   ) {
     throw new FreshMarketplaceRequestError(
       400,
@@ -337,11 +347,13 @@ function scheduleEvidence(request: Request, now: Date): ShadowGridScheduleEviden
   return {
     event: "schedule",
     repository: "dolepee/positioncrew",
-    workflowPath: SHADOW_GRID_WORKFLOW_PATH,
+    workflowPath,
     runId,
     runAttempt,
     headSha: headSha.toLowerCase(),
-    workflowRef,
+    workflowRef: workflowPath === SHADOW_GRID_WORKFLOW_PATH
+      ? currentWorkflowRef
+      : legacyWorkflowRef,
     recordedAt: now.toISOString(),
   };
 }
@@ -516,13 +528,12 @@ function scheduleFromShadowGridGenesis(
 ): ShadowGridScheduleEvidence {
   const schedule = storedScheduleFromShadowGridGenesis(events);
   if (
-    schedule.workflowPath !== SHADOW_GRID_WORKFLOW_PATH ||
     schedule.workflowRef !==
-      `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
+      `dolepee/positioncrew/${schedule.workflowPath}@refs/heads/main`
   ) {
-    throw new Error("Shadow-grid genesis has no current scheduled-workflow evidence");
+    throw new Error("Shadow-grid genesis has no rollout-allowed scheduled-workflow evidence");
   }
-  return { ...schedule, workflowPath: SHADOW_GRID_WORKFLOW_PATH };
+  return schedule;
 }
 
 function cleanupScheduleFromShadowGridGenesis(
