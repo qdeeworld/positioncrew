@@ -531,12 +531,11 @@ try {
     !/rawTransaction|private[-_ ]?key|password|keystore|mnemonic|seed[-_ ]?phrase|\/Users\/|\/home\/|\/root\//i.test(serializedVenusEvidence),
     "Venus testnet native-supply publication contains private or local material",
   );
+  const expectedVenusNativeSupplyClaim =
+    "Optional sponsor and execution evidence for one disclosed-operator Venus action on BSC Testnet using exactly 0.0001 tBNB; its preflight observed zero native BNB balance and pending nonce on BSC mainnet at one timestamp but did not inventory tokens or NFTs; it proves no external buyer, revenue, autonomous custody, strategy return, repeated track record, marketplace demand, or financial performance.";
   assert(
-    marketplace.claims?.venusTestnetNativeSupply?.includes("no mainnet funds") &&
-      marketplace.claims.venusTestnetNativeSupply.includes("external buyer") &&
-      marketplace.claims.venusTestnetNativeSupply.includes("marketplace demand") &&
-      marketplace.claims.venusTestnetNativeSupply.includes("financial performance"),
-    "Marketplace Venus testnet supply claim boundary is incomplete",
+    marketplace.claims?.venusTestnetNativeSupply === expectedVenusNativeSupplyClaim,
+    "Marketplace Venus testnet supply claim boundary changed or is incomplete",
   );
   report.venusTestnetNativeSupplyEvidence = {
     transactionHash: venusNativeSupplyEvidence.transaction.hash,

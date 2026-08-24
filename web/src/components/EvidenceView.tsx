@@ -228,7 +228,7 @@ export function EvidenceView({
         </div>
         <div className="claim-warning">
           <AlertTriangle size={16} aria-hidden="true" />
-          <span><strong>Claim boundary.</strong> Optional sponsor and execution evidence only. It proves no mainnet funds, external buyer, revenue, autonomous custody, strategy return, repeated track record, marketplace demand, or financial performance.</span>
+          <span><strong>Claim boundary.</strong> Optional sponsor and execution evidence only. The preflight observed zero BSC-mainnet native BNB balance and pending nonce at one timestamp but did not inventory tokens or NFTs. It proves no external buyer, revenue, autonomous custody, strategy return, repeated track record, marketplace demand, or financial performance.</span>
         </div>
       </section>
 
