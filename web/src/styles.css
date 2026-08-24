@@ -835,7 +835,8 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .evidence-table td:first-child strong, .evidence-table td:first-child small { display: block; }
 .evidence-table td:first-child small { margin-top: 4px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
 .evidence-table td:first-child .receipt-table-link { margin-top: 6px; font-size: 10px; }
-.evidence-columns { display: grid; grid-template-columns: 1.18fr 0.82fr; gap: 18px; }
+.evidence-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.evidence-columns .evidence-section + .evidence-section { margin-top: 18px; }
 .benchmark-table > div { display: grid; grid-template-columns: 100px 1fr 1.2fr; align-items: center; gap: 13px; min-height: 64px; padding: 10px 15px; border-bottom: 1px solid #e6ebe7; }
 .benchmark-table > div:last-child { border-bottom: 0; }
 .benchmark-table > div > span:nth-child(2) { display: flex; flex-direction: column; }
@@ -934,8 +935,7 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .market-layout, .job-layout { grid-template-columns: 1fr; }
   .registry-panel, .job-composer { border-right: 0; border-bottom: 1px solid var(--line); }
   .provider-detail { min-height: 0; }
-  .evidence-columns { grid-template-columns: 1fr; gap: 0; }
-  .evidence-columns .evidence-section + .evidence-section { margin-top: 18px; }
+  .advantage-task-list article { grid-template-columns: minmax(190px, 0.8fr) minmax(270px, 1.15fr); }
 }
 
 @media (max-width: 680px) {

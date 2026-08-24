@@ -1305,6 +1305,27 @@ test("the app has no page-level horizontal overflow", async ({ page }) => {
   }
 });
 
+test("Agent Advantage task rows do not clip at laptop width", async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 900 });
+  await page.goto("/#evidence");
+  const firstTask = page
+    .getByRole("list", { name: "Founder Agent Advantage task comparisons" })
+    .getByRole("listitem")
+    .first();
+  await expect(firstTask.getByRole("link", { name: "Open D1 receipt" })).toBeVisible();
+  const clipping = await firstTask.evaluate((task) => {
+    const taskBounds = task.getBoundingClientRect();
+    return {
+      hasHorizontalOverflow: task.scrollWidth > task.clientWidth,
+      childOutsideBounds: [...task.children].some((child) => {
+        const childBounds = child.getBoundingClientRect();
+        return childBounds.left < taskBounds.left - 0.5 || childBounds.right > taskBounds.right + 0.5;
+      }),
+    };
+  });
+  expect(clipping).toEqual({ hasHorizontalOverflow: false, childOutsideBounds: false });
+});
+
 test("providers expose machine-readable manifests and exact schemas", async ({ page, request }) => {
   await page.goto("/");
   const manifestLink = page.getByRole("link", { name: "Inspect provider manifest" });
