@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -632,6 +632,7 @@ describe("fresh marketplace hire contract", () => {
     expect(providerResponse.evidenceMode).toBe("CURRENT_BLOCK_PINNED");
     expect(providerResponse.result.request).toEqual(providerRequest);
     expect(providerResponse.result.evaluation.requestHash).toBe(completed.hire.requestHash);
+    expect(providerResponse.result.deliverable.status).toBe("ACTIONABLE");
 
     const receiptResponse = await positionCrewWorker.fetch(
       new Request(`https://positioncrew.example${completed.receipt?.publicUrl}`),
@@ -640,6 +641,61 @@ describe("fresh marketplace hire contract", () => {
     );
     const reloaded = FreshMarketplaceChainSchema.parse(await receiptResponse.json());
     expect(reloaded).toEqual(completed);
+  });
+
+  it("refuses a current hire that expires before its delayed job claim", async () => {
+    vi.useFakeTimers();
+    try {
+      const createdAt = new Date("2026-08-24T12:00:00.000Z");
+      vi.setSystemTime(createdAt);
+      const database = new FakeD1();
+      const environment = { DB: database, ASSETS: TEST_ASSETS };
+      const { httpRequest, providerRequest } = currentLendingHireRequest();
+      const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
+      const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
+      const committedRequestHash = created.hire.requestHash;
+      const committedEvidenceHash = created.hire.evidenceHash;
+
+      const claimedAt = new Date(createdAt.getTime() + 6 * 60_000);
+      vi.setSystemTime(claimedAt);
+      const context = capturingContext();
+      const runResponse = await positionCrewWorker.fetch(
+        new Request(`https://positioncrew.example/api/benchmark-hires/${created.hire.hireId}/jobs`, {
+          method: "POST",
+          headers: { Origin: "https://positioncrew.example" },
+        }),
+        environment,
+        context,
+      );
+      expect(runResponse.status).toBe(202);
+      const running = FreshMarketplaceChainSchema.parse(await runResponse.json());
+      expect(running.job.state).toBe("RUNNING");
+      expect(running.receipt).toBeNull();
+      await Promise.all(context.tasks);
+
+      const completedResponse = await positionCrewWorker.fetch(
+        new Request(`https://positioncrew.example/api/benchmark-hires/${created.hire.hireId}`),
+        environment,
+        TEST_CONTEXT,
+      );
+      const completed = FreshMarketplaceChainSchema.parse(await completedResponse.json());
+      expect({ state: completed.job.state, error: completed.job.error }).toEqual({
+        state: "COMPLETED",
+        error: null,
+      });
+      expect(completed.job.startedAt).toBe(claimedAt.toISOString());
+      if (!completed.receipt) {
+        throw new Error(`Completed delayed hire did not persist a receipt: ${JSON.stringify(completed.job)}`);
+      }
+      const providerResponse = FixtureJobResponseSchema.parse(completed.receipt.response);
+      expect(providerResponse.result.deliverable.status).toBe("REFUSED_EXPIRED");
+      expect(providerResponse.result.request).toEqual(providerRequest);
+      expect(providerResponse.result.evaluation.requestHash).toBe(committedRequestHash);
+      expect(completed.hire.requestHash).toBe(committedRequestHash);
+      expect(completed.hire.evidenceHash).toBe(committedEvidenceHash);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("persists stale, empty, and inconsistent positions as completed provider refusals", async () => {

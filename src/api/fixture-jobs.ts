@@ -233,7 +233,9 @@ export async function runCurrentBlockPinnedLendingRequest(
   now: Date,
 ): Promise<FixtureJobResponse> {
   const request = LendingRescueRequestSchema.parse(input);
-  const result = await runProviderJob(new MemoryCommerceAdapter(), request, now);
+  const result = await runProviderJob(new MemoryCommerceAdapter(), request, now, {
+    persistExpiredRefusal: true,
+  });
   return {
     schemaVersion: "positioncrew.fixture-job-response.v1",
     evidenceMode: "CURRENT_BLOCK_PINNED",

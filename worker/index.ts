@@ -280,13 +280,14 @@ async function finishFreshMarketplaceJob(
   jobId: string,
   claimToken: string,
   hire: FreshMarketplaceChain["hire"],
+  executionStartedAt: string,
   startedAtPerformance: number,
 ): Promise<void> {
   const store = freshStore(env);
   try {
     const task = FRESH_MARKETPLACE_TASKS[hire.benchmarkSlug];
     const response = hire.evidenceMode === "CURRENT_BLOCK_PINNED"
-      ? await runCurrentBlockPinnedLendingRequest(hire.request, new Date(hire.createdAt))
+      ? await runCurrentBlockPinnedLendingRequest(hire.request, new Date(executionStartedAt))
       : await runFrozenFixture(task.service);
     if (
       response.result.request.service !== task.service ||
@@ -342,12 +343,16 @@ async function runFreshMarketplaceHire(
   if (!claimed.chain) return apiError(404, "HIRE_NOT_FOUND", ["Unknown persisted hire ID."]);
   if (!claimed.claimed) return json(claimed.chain, claimed.chain.job.state === "RUNNING" ? 202 : 200);
   if (!claimed.claimToken) throw new Error("Claimed fresh marketplace job did not return a claim token");
+  if (!claimed.chain.job.startedAt || claimed.chain.job.startedAt !== claimed.claimToken) {
+    throw new Error("Claimed fresh marketplace job did not persist its execution timestamp");
+  }
   context.waitUntil(finishFreshMarketplaceJob(
     env,
     hireId,
     claimed.chain.job.jobId,
     claimed.claimToken,
     claimed.chain.hire,
+    claimed.chain.job.startedAt,
     startedAtPerformance,
   ));
   return json(claimed.chain, 202);
