@@ -256,7 +256,7 @@ export function MarketplaceView({
             <div>
               <span className="page-kicker">Registry evidence, not endorsement</span>
               <h2 id="external-comparison-heading">External comparison candidates</h2>
-              <p>One independently owned ERC-8004 listing per capital category. Compare public evidence here; hiring remains limited to the verified PositionCrew providers above.</p>
+              <p>One externally owned ERC-8004 listing per capital category. Compare public evidence here; hiring remains limited to the verified PositionCrew providers above.</p>
             </div>
             {externalComparisons ? (
               <span className="external-snapshot-pin">BSC #{Number(externalComparisons.chain.blockNumber).toLocaleString("en-US")}</span>
