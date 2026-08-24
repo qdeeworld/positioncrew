@@ -459,7 +459,7 @@ export function EvidenceView({
                           <small>
                             {window.sampledCrossings} sampled crossings · BSC block {window.sourceBlockNumber}
                           </small>
-                          <code>Hire {shortHash(window.sourceHireId, 14)}</code>
+                          <code>Hire {shortHash(window.sourceHireId ?? undefined, 14)}</code>
                         </>
                       ) : (
                         <>
