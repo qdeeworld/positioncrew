@@ -943,13 +943,30 @@ try {
   assert.equal(legacySameOriginFollow.body.headHash, legacyOpen.body.headHash);
   assert.equal(legacySameOriginFollow.body.eventCount, legacyOpen.body.eventCount);
 
+  const legacyDueNow = finiteDate(
+    Math.max(
+      Date.parse(legacyOpen.body.epochStartedAt) + 5 * 60_000,
+      legacyOpeningNow.getTime(),
+    ),
+    "legacy cross-run continuation due time",
+  );
+  assert.equal(
+    shadowGridRunId(legacyDueNow),
+    legacyRunId,
+    "Legacy continuation clock no longer routes to the originating ledger hour",
+  );
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, legacyDueNow);
+
   const rejectedLegacyOriginChange = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
     {
       method: "POST",
       headers: {
-        ...legacyPinnedHeaders,
+        ...legacyOriginHeaders,
         "X-GitHub-Run-Id": "4099",
         "X-GitHub-Sha": "c".repeat(40),
       },
@@ -962,7 +979,8 @@ try {
     {
       method: "POST",
       headers: {
-        ...legacyPinnedHeaders,
+        ...legacyOriginHeaders,
+        "X-GitHub-Run-Id": "4098",
         "X-GitHub-Workflow-Ref":
           "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
       },
@@ -975,7 +993,8 @@ try {
     {
       method: "POST",
       headers: {
-        ...legacyPinnedHeaders,
+        ...legacyOriginHeaders,
+        "X-GitHub-Run-Id": "4097",
         "X-GitHub-Workflow-Ref":
           "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/not-main",
       },
@@ -997,11 +1016,51 @@ try {
     legacySameOriginFollow.body.eventCount,
   );
 
+  const legacyContinuationHeaders = {
+    ...legacyOriginHeaders,
+    "X-GitHub-Run-Id": "4002",
+  };
+  assert.equal(
+    Object.hasOwn(legacyContinuationHeaders, "X-PositionCrew-Shadow-Run-Id"),
+    false,
+    "Legacy cross-run continuation unexpectedly pinned the ledger run",
+  );
+  const legacyCrossRunFollow = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: legacyContinuationHeaders },
+  );
+  assert.equal(legacyCrossRunFollow.response.status, 200);
+  assert.equal(legacyCrossRunFollow.body.runId, legacyRunId);
+  assert.notEqual(legacyCrossRunFollow.body.headHash, legacySameOriginFollow.body.headHash);
+  assert(legacyCrossRunFollow.body.eventCount > legacySameOriginFollow.body.eventCount);
+
+  const legacyWindowAfterContinuation = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(legacyRunId)}`,
+  );
+  assert.equal(legacyWindowAfterContinuation.response.status, 200);
+  assert.equal(legacyWindowAfterContinuation.body.integrity.valid, true);
+  assert.equal(
+    legacyWindowAfterContinuation.body.events.at(-1).eventHash,
+    legacyCrossRunFollow.body.headHash,
+  );
+  assert.equal(
+    legacyWindowAfterContinuation.body.events.length,
+    legacyCrossRunFollow.body.eventCount,
+  );
+  assert.equal(legacyWindowAfterContinuation.body.events[0].payload.schedule.runId, "4001");
+  assert.equal(legacyWindowAfterContinuation.body.events[0].payload.schedule.headSha, "7".repeat(40));
+  assert.equal(
+    legacyWindowAfterContinuation.body.events[0].payload.schedule.workflowRef,
+    "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+  );
+
   await stopWorker(worker);
   worker = undefined;
   executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_no_delete");
   executeD1SetupMutation(
-    `DELETE FROM shadow_grid_events WHERE run_id = ${sqlLiteral(legacyRunId)} AND event_type = 'PRECOMMITTED'`,
+    `DELETE FROM shadow_grid_events WHERE run_id = ${sqlLiteral(legacyRunId)} AND event_type <> 'EPOCH_STARTED'`,
   );
 
   const legacyRecoveryNow = finiteDate(
@@ -1011,7 +1070,7 @@ try {
   const legacyReplacementRunId = shadowGridRunId(legacyRecoveryNow);
   const legacyReplacementHeaders = {
     ...headers,
-    "X-GitHub-Run-Id": "4002",
+    "X-GitHub-Run-Id": "4003",
     "X-GitHub-Sha": "8".repeat(40),
   };
 
@@ -1026,6 +1085,43 @@ try {
   assert.equal(legacyReplacementOpen.response.status, 200);
   assert.equal(legacyReplacementOpen.body.runId, legacyReplacementRunId);
   assert.equal(legacyReplacementOpen.body.state, "PRECOMMITTED");
+
+  const currentPinnedHeaders = {
+    ...legacyReplacementHeaders,
+    "X-PositionCrew-Shadow-Run-Id": legacyReplacementRunId,
+  };
+  const rejectedCurrentRunChange = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    {
+      method: "POST",
+      headers: {
+        ...currentPinnedHeaders,
+        "X-GitHub-Run-Id": "4096",
+      },
+    },
+  );
+  assert.equal(rejectedCurrentRunChange.response.status, 400);
+  const currentWindowAfterRejectedRunChange = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(legacyReplacementRunId)}`,
+  );
+  assert.equal(currentWindowAfterRejectedRunChange.response.status, 200);
+  assert.equal(
+    currentWindowAfterRejectedRunChange.body.events.at(-1).eventHash,
+    legacyReplacementOpen.body.headHash,
+  );
+  assert.equal(
+    currentWindowAfterRejectedRunChange.body.events.length,
+    legacyReplacementOpen.body.eventCount,
+  );
+  const currentSameOriginFollow = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: currentPinnedHeaders },
+  );
+  assert.equal(currentSameOriginFollow.response.status, 200);
+  assert.equal(currentSameOriginFollow.body.runId, legacyReplacementRunId);
 
   const recoveredLegacyWindow = await requestJson(
     baseUrl,

@@ -552,13 +552,21 @@ function cleanupScheduleFromShadowGridGenesis(
 function assertShadowGridScheduleBinding(
   events: readonly ShadowGridEvent[],
   incoming: ShadowGridScheduleEvidence,
+  options: { allowLegacyMultiRunCutover?: boolean } = {},
 ): void {
   const committed = scheduleFromShadowGridGenesis(events);
+  // Temporary cutover exception: the retired workflow scheduled each tick as a distinct run.
+  const legacyMultiRunCutover = options.allowLegacyMultiRunCutover === true &&
+    committed.workflowPath === SHADOW_GRID_LEGACY_WORKFLOW_PATH &&
+    incoming.workflowPath === SHADOW_GRID_LEGACY_WORKFLOW_PATH &&
+    committed.workflowRef ===
+      `dolepee/positioncrew/${SHADOW_GRID_LEGACY_WORKFLOW_PATH}@refs/heads/main` &&
+    incoming.workflowRef === committed.workflowRef;
   if (
     committed.event !== incoming.event ||
     committed.repository !== incoming.repository ||
     committed.workflowPath !== incoming.workflowPath ||
-    committed.runId !== incoming.runId ||
+    (!legacyMultiRunCutover && committed.runId !== incoming.runId) ||
     committed.runAttempt !== incoming.runAttempt ||
     committed.headSha !== incoming.headSha ||
     committed.workflowRef !== incoming.workflowRef
@@ -887,6 +895,11 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   await ensureShadowGridAppendOnlyGuards(env.DB);
   const now = shadowGridCollectorNow(request, env);
   const schedule = scheduleEvidence(request, now);
+  // Remove with the temporary legacy workflow allowlist after queued cutover runs expire.
+  const allowLegacyMultiRunCutover = expectedRunId === null &&
+    schedule.workflowPath === SHADOW_GRID_LEGACY_WORKFLOW_PATH &&
+    schedule.workflowRef ===
+      `dolepee/positioncrew/${SHADOW_GRID_LEGACY_WORKFLOW_PATH}@refs/heads/main`;
   const currentHour = new Date(now);
   currentHour.setUTCMinutes(0, 0, 0);
   const currentRunId = shadowGridRunId(currentHour);
@@ -1064,9 +1077,9 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
       });
     }
     events = started.events;
-    assertShadowGridScheduleBinding(events, schedule);
+    assertShadowGridScheduleBinding(events, schedule, { allowLegacyMultiRunCutover });
   } else {
-    assertShadowGridScheduleBinding(events, schedule);
+    assertShadowGridScheduleBinding(events, schedule, { allowLegacyMultiRunCutover });
     events = await processOpenShadowGridRun(env, events, now, request);
   }
   const latest = events.at(-1);
