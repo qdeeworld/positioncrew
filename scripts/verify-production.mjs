@@ -463,9 +463,10 @@ try {
     externalComparisons.schemaVersion === "positioncrew.external-comparison-snapshot.v1",
     "Unexpected external comparison snapshot schema",
   );
+  const { snapshotHash: _externalComparisonSnapshotHash, ...externalComparisonSnapshotBody } = externalComparisons;
   assert(
-    /^sha256:[a-f0-9]{64}$/.test(externalComparisons.snapshotHash ?? ""),
-    "External comparison snapshot has no commitment",
+    canonicalSha256(externalComparisonSnapshotBody) === externalComparisons.snapshotHash,
+    "External comparison snapshot commitment is invalid",
   );
   assert(externalComparisons.candidates?.length === 4, "External comparison snapshot must contain four candidates");
   assert(
