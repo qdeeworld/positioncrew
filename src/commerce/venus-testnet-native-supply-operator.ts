@@ -499,7 +499,7 @@ function decodeSupplyEvents(receipt: VenusRpcReceipt) {
       } else if (decoded.eventName === "Transfer") {
         const from = getAddress(decoded.args.from);
         const to = getAddress(decoded.args.to);
-        if (from === "0x0000000000000000000000000000000000000000" && to === VENUS_TESTNET_NATIVE_SUPPLY.actor) {
+        if (from === VENUS_TESTNET_NATIVE_SUPPLY.vBnb && to === VENUS_TESTNET_NATIVE_SUPPLY.actor) {
           if (transferEvent) throw new Error("Receipt contains multiple matching vBNB mint transfers");
           transferEvent = { from, to, amount: decoded.args.amount, logIndex: log.logIndex };
         }
@@ -579,7 +579,7 @@ async function validateMinedVenusSupply(
     getAddress(events.mintEvent.minter) !== actor ||
     events.mintEvent.mintAmount !== BigInt(intent.transaction.valueWei) ||
     events.mintEvent.mintTokens <= 0n ||
-    getAddress(events.transferEvent.from) !== "0x0000000000000000000000000000000000000000" ||
+    getAddress(events.transferEvent.from) !== VENUS_TESTNET_NATIVE_SUPPLY.vBnb ||
     getAddress(events.transferEvent.to) !== actor ||
     events.transferEvent.amount !== events.mintEvent.mintTokens
   ) throw new Error("Venus Mint and Transfer evidence does not match the reviewed supply");
@@ -682,7 +682,7 @@ export async function reconcileVenusTestnetNativeSupply(
         logIndex: events.mintEvent.logIndex,
       },
       transferEvent: {
-        from: "0x0000000000000000000000000000000000000000",
+        from: VENUS_TESTNET_NATIVE_SUPPLY.vBnb,
         to: VENUS_TESTNET_NATIVE_SUPPLY.actor,
         amountRaw: events.transferEvent.amount.toString(),
         logIndex: events.transferEvent.logIndex,

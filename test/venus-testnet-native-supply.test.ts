@@ -44,7 +44,7 @@ const UNITROLLER = getAddress(VENUS_TESTNET_NATIVE_SUPPLY.unitroller);
 const NOW = new Date("2026-08-24T12:00:00.000Z");
 const RAW_TRANSACTION = "0x0102" as Hex;
 const TRANSACTION_HASH = keccak256(RAW_TRANSACTION);
-const MINT_TOKENS = 500_000n;
+const MINT_TOKENS = 9_816n;
 const DISPOSABLE_SIGNER = privateKeyToAccount(
   "0x1111111111111111111111111111111111111111111111111111111111111111",
 );
@@ -56,7 +56,7 @@ const EVENT_ABI = parseAbi([
   "event Transfer(address indexed from, address indexed to, uint256 amount)",
 ]);
 
-function supplyLogs(): VenusRpcReceipt["logs"] {
+function supplyLogs(transferFrom: Address = VBNB): VenusRpcReceipt["logs"] {
   return [
     {
       address: VBNB,
@@ -72,7 +72,7 @@ function supplyLogs(): VenusRpcReceipt["logs"] {
       topics: encodeEventTopics({
         abi: EVENT_ABI,
         eventName: "Transfer",
-        args: { from: "0x0000000000000000000000000000000000000000", to: ACTOR },
+        args: { from: transferFrom, to: ACTOR },
       }) as [Hex, ...Hex[]],
       data: encodeAbiParameters(parseAbiParameters("uint256 amount"), [MINT_TOKENS]),
       logIndex: 3,
@@ -478,6 +478,11 @@ describe("bounded Venus BSC Testnet native supply", () => {
       mintAmountWei: "100000000000000",
       mintTokensRaw: MINT_TOKENS.toString(),
     });
+    expect(evidence.proof.transferEvent).toMatchObject({
+      from: VBNB,
+      to: ACTOR,
+      amountRaw: "9816",
+    });
     expect(evidence.proof.vTokenBalanceDeltaRaw).toBe(MINT_TOKENS.toString());
     expect(JSON.stringify(evidence)).not.toContain("rawTransaction");
     expect(VenusTestnetNativeSupplyEvidenceSchema.parse(evidence)).toEqual(evidence);
@@ -501,6 +506,31 @@ describe("bounded Venus BSC Testnet native supply", () => {
     const tampered = structuredClone(evidence);
     (tampered.proof as { vTokenBalanceAfterRaw: string }).vTokenBalanceAfterRaw = "500001";
     expect(() => verifyVenusTestnetNativeSupplyEvidence(tampered)).toThrow();
+  });
+
+  it("accepts the real Venus vBNB self-transfer mint shape and rejects zero or unrelated senders", async () => {
+    const valid = dependencies();
+    const validSubmission = (await signed(valid)).submission;
+    valid.testnet.receipt = { ...valid.testnet.receipt, logs: supplyLogs(VBNB) };
+    await expect(reconcileVenusTestnetNativeSupply(validSubmission, valid.testnet)).resolves.toMatchObject({
+      proof: {
+        mintEvent: { mintAmountWei: "100000000000000", mintTokensRaw: "9816" },
+        transferEvent: { from: VBNB, to: ACTOR, amountRaw: "9816" },
+        vTokenBalanceDeltaRaw: "9816",
+      },
+    });
+
+    for (const invalidFrom of [
+      getAddress("0x0000000000000000000000000000000000000000"),
+      UNITROLLER,
+    ]) {
+      const invalid = dependencies();
+      const invalidSubmission = (await signed(invalid)).submission;
+      invalid.testnet.receipt = { ...invalid.testnet.receipt, logs: supplyLogs(invalidFrom) };
+      await expect(reconcileVenusTestnetNativeSupply(invalidSubmission, invalid.testnet)).rejects.toThrow(
+        "missing the required Venus Mint or vBNB Transfer event",
+      );
+    }
   });
 
   it("fails closed on reverted, immature, missing-event, and balance-mismatch receipts", async () => {

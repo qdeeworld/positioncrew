@@ -197,7 +197,7 @@ const MintEventSchema = z.object({
 }).strict();
 
 const TransferEventSchema = z.object({
-  from: z.literal("0x0000000000000000000000000000000000000000"),
+  from: z.literal(VENUS_TESTNET_NATIVE_SUPPLY.vBnb),
   to: z.literal(VENUS_TESTNET_NATIVE_SUPPLY.actor),
   amountRaw: UintStringSchema.refine((value) => BigInt(value) > 0n, "Transfer amount must be positive"),
   logIndex: z.number().int().nonnegative(),
