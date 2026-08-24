@@ -14,7 +14,23 @@ import {
 } from "lucide-react";
 import { TASKS } from "../task-config";
 import { serviceLabel, shortHash } from "../presentation";
-import type { FixtureJobResponse, ProviderListing, ServiceId, SystemTelemetry } from "../types";
+import type {
+  ExternalComparisonSnapshot,
+  FixtureJobResponse,
+  ProviderListing,
+  ServiceId,
+  SystemTelemetry,
+} from "../types";
+
+function exactUtc(value: string): string {
+  return new Date(value).toISOString().replace("T", " ").replace(/\.000Z$/, " UTC").replace(/Z$/, " UTC");
+}
+
+function externalPrice(mode: ExternalComparisonSnapshot["candidates"][number]["pricing"]["mode"]): string {
+  if (mode === "QUOTE_REQUIRED") return "Quote required";
+  if (mode === "UNVERIFIED_MARKETPLACE_ASSERTION") return "Not verified";
+  return "Not published";
+}
 
 export function MarketplaceView({
   providers,
@@ -23,6 +39,7 @@ export function MarketplaceView({
   onSelect,
   onCreateJob,
   telemetry,
+  externalComparisons,
 }: {
   providers: ProviderListing[];
   matrix: Map<ServiceId, FixtureJobResponse>;
@@ -30,6 +47,7 @@ export function MarketplaceView({
   onSelect: (service: ServiceId) => void;
   onCreateJob: (service: ServiceId) => void;
   telemetry: SystemTelemetry | null;
+  externalComparisons: ExternalComparisonSnapshot | null;
 }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
@@ -232,6 +250,63 @@ export function MarketplaceView({
             )}
           </aside>
         </div>
+
+        <section className="external-comparison" aria-labelledby="external-comparison-heading">
+          <div className="external-comparison-heading">
+            <div>
+              <span className="page-kicker">Registry evidence, not endorsement</span>
+              <h2 id="external-comparison-heading">External comparison candidates</h2>
+              <p>One independently owned ERC-8004 listing per capital category. Compare public evidence here; hiring remains limited to the verified PositionCrew providers above.</p>
+            </div>
+            {externalComparisons ? (
+              <span className="external-snapshot-pin">BSC #{Number(externalComparisons.chain.blockNumber).toLocaleString("en-US")}</span>
+            ) : null}
+          </div>
+          {externalComparisons ? (
+            <div className="external-candidate-grid">
+              {externalComparisons.candidates.map((candidate) => {
+                const selectedCategory = candidate.category.service === selectedService;
+                return (
+                  <article
+                    className={`external-candidate-card ${selectedCategory ? "matched" : ""}`}
+                    key={candidate.agentTokenId}
+                  >
+                    <div className="external-candidate-topline">
+                      <span>{candidate.category.label}</span>
+                      <span>External operator</span>
+                    </div>
+                    <h3>{candidate.name}</h3>
+                    <code>ERC-8004 #{candidate.agentTokenId} · {shortHash(candidate.identity.owner, 12)}</code>
+                    <div className="external-candidate-statuses">
+                      <span>Registry: Listed</span>
+                      <span className={candidate.serviceReachability.status === "REACHABLE" ? "reachable" : "listed"}>
+                        Service: {candidate.serviceReachability.status === "REACHABLE" ? "Endpoint reachable" : "Listed only"}
+                      </span>
+                    </div>
+                    <dl className="external-candidate-facts">
+                      <div><dt>Price</dt><dd>{externalPrice(candidate.pricing.mode)}</dd></div>
+                      <div><dt>Track record</dt><dd>Unverified</dd></div>
+                    </dl>
+                    <p className="external-candidate-reputation">
+                      {candidate.feedback.recordCount} indexed feedback · {candidate.validation.recordCount} indexed validations
+                    </p>
+                    <time dateTime={candidate.serviceReachability.checkedAt}>
+                      Checked {exactUtc(candidate.serviceReachability.checkedAt)}
+                    </time>
+                    <div className="external-candidate-links">
+                      <a href={candidate.identity.sourceUrl} target="_blank" rel="noreferrer">Identity <ExternalLink size={11} aria-hidden="true" /></a>
+                      <a href={candidate.category.sourceUrl} target="_blank" rel="noreferrer">Listing <ExternalLink size={11} aria-hidden="true" /></a>
+                      <a href={candidate.serviceReachability.sourceUrl} target="_blank" rel="noreferrer">Endpoint evidence <ExternalLink size={11} aria-hidden="true" /></a>
+                    </div>
+                    <p className="external-candidate-boundary">Evidence candidate only · hiring unavailable · no PositionCrew endorsement.</p>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="external-candidate-loading" role="status">External comparison evidence is unavailable. First-party hiring remains available.</div>
+          )}
+        </section>
       </div>
     </main>
   );

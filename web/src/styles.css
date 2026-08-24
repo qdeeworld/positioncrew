@@ -476,6 +476,36 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .provider-receipt-preview small { margin-top: 3px; overflow: hidden; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .provider-detail-loading { display: flex; flex-direction: column; gap: 18px; padding-top: 2px; }
 
+.external-comparison { margin-top: 30px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(135deg, #fffdf5 0%, #f7faf7 52%, #edf3ef 100%); box-shadow: 0 14px 34px rgba(25, 33, 29, 0.05); }
+.external-comparison-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; padding: 22px; border-bottom: 1px solid var(--line); }
+.external-comparison-heading h2 { margin: 5px 0 0; font-size: 20px; }
+.external-comparison-heading p { max-width: 720px; margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.external-snapshot-pin { flex: 0 0 auto; padding: 7px 9px; border: 1px solid #d7c478; border-radius: 4px; color: #5b4b12; background: #fff8d8; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; font-weight: 750; }
+.external-candidate-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.external-candidate-card { position: relative; min-width: 0; min-height: 316px; padding: 17px; border-right: 1px solid var(--line); background: rgba(255, 255, 255, 0.72); }
+.external-candidate-card:last-child { border-right: 0; }
+.external-candidate-card.matched::before { position: absolute; top: 0; right: 0; left: 0; height: 3px; background: var(--yellow); content: ""; }
+.external-candidate-topline { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.external-candidate-topline span:last-child { color: #6b5b21; }
+.external-candidate-card h3 { margin: 13px 0 5px; font-size: 15px; }
+.external-candidate-card > code { display: block; overflow: hidden; color: #59635e; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.external-candidate-statuses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 15px; }
+.external-candidate-statuses span { padding: 5px 6px; border: 1px solid #d6ddd9; border-radius: 3px; color: #59635e; background: #f6f8f6; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.external-candidate-statuses .reachable { border-color: #a9d6c5; color: #17644f; background: #edf8f3; }
+.external-candidate-statuses .listed { border-color: #d9c985; color: #6b5b21; background: #fff9df; }
+.external-candidate-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 15px 0 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.external-candidate-facts > div { min-width: 0; padding: 10px 0; }
+.external-candidate-facts > div + div { padding-left: 10px; border-left: 1px solid var(--line); }
+.external-candidate-facts dt { color: var(--muted); font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.external-candidate-facts dd { margin: 4px 0 0; color: var(--ink); font-size: 10px; font-weight: 750; }
+.external-candidate-reputation { margin: 11px 0 0; color: var(--muted); font-size: 9px; }
+.external-candidate-card time { display: block; margin-top: 6px; color: #6b746f; font-family: "SFMono-Regular", Consolas, monospace; font-size: 8px; }
+.external-candidate-links { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 13px; }
+.external-candidate-links a { display: inline-flex; align-items: center; gap: 3px; color: #315d91; font-size: 9px; font-weight: 750; text-decoration: none; }
+.external-candidate-links a:hover { text-decoration: underline; }
+.external-candidate-boundary { margin: 13px 0 0; color: #6b5b21; font-size: 8px; line-height: 1.45; }
+.external-candidate-loading { padding: 28px 22px; color: var(--muted); font-size: 11px; }
+
 /* Jobs */
 .jobs-page .page-title-row, .evidence-page .page-title-row { border-bottom: 1px solid var(--line); padding-bottom: 20px; }
 .provider-select { display: flex; flex-direction: column; gap: 6px; min-width: 230px; }
@@ -841,6 +871,9 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .network-chip { display: none; }
   .market-intro-inner { gap: 42px; }
   .market-layout { grid-template-columns: minmax(580px, 1fr) 340px; }
+  .external-candidate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .external-candidate-card:nth-child(2) { border-right: 0; }
+  .external-candidate-card:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
   .job-layout { grid-template-columns: minmax(370px, 0.9fr) minmax(470px, 1.1fr); }
   .decision-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .decision-metrics > div:nth-child(2) { border-right: 0; }
@@ -932,6 +965,11 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .registry-table th:nth-child(n + 3), .registry-table td:nth-child(n + 3) { display: none; }
   .registry-table td { height: 74px; padding: 10px; }
   .provider-detail { padding: 17px; }
+  .external-comparison-heading { align-items: flex-start; padding: 17px; flex-direction: column; }
+  .external-candidate-grid { grid-template-columns: 1fr; }
+  .external-candidate-card { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .external-candidate-card:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+  .external-candidate-card:last-child { border-bottom: 0; }
   .provider-select { width: 100%; min-width: 0; }
   .form-grid, .fixture-fields { grid-template-columns: 1fr; }
   .fixture-fields > div { border-right: 0; }

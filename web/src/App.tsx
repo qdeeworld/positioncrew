@@ -15,6 +15,7 @@ import type {
   BenchmarkRepeatabilityResponse,
   CurrentLendingObservation,
   Erc8183TestnetLedger,
+  ExternalComparisonSnapshot,
   FixtureJobResponse,
   FreshMarketplaceBenchmarkSlug,
   FreshMarketplaceChain,
@@ -65,6 +66,7 @@ export default function App() {
   const [commerceLedger, setCommerceLedger] = useState<Erc8183TestnetLedger | null>(null);
   const [aacpReadiness, setAacpReadiness] = useState<AacpProductionReadiness | null>(null);
   const [productionTrackRecord, setProductionTrackRecord] = useState<ProductionTrackRecord | null>(null);
+  const [externalComparisons, setExternalComparisons] = useState<ExternalComparisonSnapshot | null>(null);
   const [sessionJobs, setSessionJobs] = useState<SessionJob[]>([]);
   const [activeJob, setActiveJob] = useState<SessionJob | null>(null);
   const [marketplaceTrace, setMarketplaceTrace] = useState<FreshMarketplaceChain | null>(null);
@@ -85,6 +87,9 @@ export default function App() {
     setCatalogOnline(false);
 
     const contextualLoads = [
+      fetch("/api/evidence/external-comparisons/2026-08-24", { headers: { Accept: "application/json" } })
+        .then((response) => jsonResponse<ExternalComparisonSnapshot>(response))
+        .then(setExternalComparisons),
       fetch("/api/matrix", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<MatrixResponse>(response))
         .then((payload) => setMatrix(new Map(payload.results.map((item) => [item.result.request.service, item])))),
@@ -339,9 +344,10 @@ export default function App() {
         onSelect={setSelectedService}
         onCreateJob={createJob}
         telemetry={telemetry}
+        externalComparisons={externalComparisons}
       />
     );
-  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, providers, matrix, selectedService, telemetry, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord]);
+  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, providers, matrix, selectedService, telemetry, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord]);
 
   return (
     <div className="app-shell">
