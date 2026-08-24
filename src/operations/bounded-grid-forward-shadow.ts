@@ -435,6 +435,9 @@ export function summarizeShadowGridRuns(
       return false;
     }
   });
+  const precommittedWindowCount = runs.filter((run) =>
+    run.some((event) => event.eventType === "PRECOMMITTED")
+  ).length;
   const windows = runs.map((run) => publicShadowGridWindow(run, origin));
   const terminal = windows.filter((window) => window.terminalAt !== null);
   const closed = windows.filter((window) => window.state === "CLOSED");
@@ -482,7 +485,7 @@ export function summarizeShadowGridRuns(
       mature,
     },
     summary: {
-      precommittedWindowCount: windows.length,
+      precommittedWindowCount,
       terminalWindowCount: terminal.length,
       closedWindowCount: closed.length,
       refusedWindowCount: refused.length,

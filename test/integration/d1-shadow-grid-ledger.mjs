@@ -744,6 +744,15 @@ try {
     "An expected-run request cleaned an unrelated epoch",
   );
 
+  const summaryBeforeGenesisOnlyRecovery = await requestJson(
+    baseUrl,
+    "/api/evidence/bounded-grid-forward-shadow",
+  );
+  assert.equal(summaryBeforeGenesisOnlyRecovery.response.status, 200);
+  const precommittedCountBeforeGenesisOnlyRecovery =
+    summaryBeforeGenesisOnlyRecovery.body.summary.precommittedWindowCount;
+  assert(Number.isInteger(precommittedCountBeforeGenesisOnlyRecovery));
+
   const genesisOnlyNow = finiteDate(
     expectedOnlyNow.getTime() + 60 * 60_000,
     "genesis-only prior-hour opening",
@@ -840,6 +849,18 @@ try {
     )?.state,
     "VOID_SOURCE_GAP",
     "Genesis-only epoch remained permanently nonterminal",
+  );
+  assert.equal(
+    recoveredGenesisSummary.body.recentWindows.find(
+      (window) => window.windowId === genesisRecoveryRunId,
+    )?.state,
+    "PRECOMMITTED",
+    "Normally precommitted replacement run is absent from the public summary",
+  );
+  assert.equal(
+    recoveredGenesisSummary.body.summary.precommittedWindowCount,
+    precommittedCountBeforeGenesisOnlyRecovery + 1,
+    "Genesis-only void was counted as precommitted or the normal replacement was omitted",
   );
 
   await stopWorker(worker);

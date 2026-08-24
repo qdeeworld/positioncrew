@@ -225,6 +225,45 @@ describe("bounded-grid forward shadow evidence", () => {
     expect(terminalIntegrity).toMatchObject({ valid: true });
     expect(verifyShadowGridRun(voided)).toEqual(terminalIntegrity);
 
+    const projection = summarizeShadowGridRuns(
+      [voided],
+      ORIGIN,
+      new Date(Date.parse(startedAt) + 86_400_000),
+    );
+    expect(projection.status).toBe("COLLECTING");
+    expect(projection.maturity).toMatchObject({
+      terminalWindowCount: 1,
+      nonVoidRatePct: 0,
+      hashChainValid: true,
+      mature: false,
+    });
+    expect(projection.summary).toEqual({
+      precommittedWindowCount: 0,
+      terminalWindowCount: 1,
+      closedWindowCount: 0,
+      refusedWindowCount: 0,
+      voidWindowCount: 1,
+      riskExitWindowCount: 0,
+      positiveWindowCount: 0,
+      negativeWindowCount: 0,
+      simulatedNetOutcomeUsd: null,
+    });
+    expect(projection.recentWindows).toHaveLength(1);
+    expect(projection.recentWindows[0]).toMatchObject({
+      windowId: runBinding.runId,
+      state: "VOID_SOURCE_GAP",
+      sourceHireId: runBinding.hireId,
+      sourceRequestHash: runBinding.requestHash,
+      sourceReceiptUrl: null,
+      sourceBlockNumber: null,
+      startedAt,
+      terminalAt: voided.at(-1)!.recordedAt,
+      sampledCrossings: 0,
+      simulatedNetOutcomeUsd: null,
+      eventHash: voided.at(-1)!.eventHash,
+      previousEventHash: genesis.at(-1)!.eventHash,
+    });
+
     for (const eventType of [
       "PRECOMMITTED",
       "OBSERVED",
