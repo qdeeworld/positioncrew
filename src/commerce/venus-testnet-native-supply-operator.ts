@@ -4,10 +4,13 @@ import {
   getAddress,
   http,
   keccak256,
+  parseTransaction,
   parseAbi,
+  recoverTransactionAddress,
   type Address,
   type Hash,
   type Hex,
+  type TransactionSerialized,
 } from "viem";
 import { bsc, bscTestnet } from "viem/chains";
 import {
@@ -20,6 +23,7 @@ import {
   commitVenusTestnetNativeSupplyIntent,
   commitVenusTestnetNativeSupplySubmission,
   verifyVenusTestnetNativeSupplyEvidence,
+  verifyVenusTestnetNativeSupplySubmission,
   type VenusAccountSnapshotEvidence,
   type VenusTestnetNativeSupplyEvidence,
   type VenusTestnetNativeSupplyIntent,
@@ -308,13 +312,69 @@ export async function broadcastIdenticalVenusSubmission(
   submissionInput: unknown,
   client: VenusNativeSupplyRpc,
 ): Promise<Hash> {
-  const submission = VenusTestnetNativeSupplySubmissionSchema.parse(submissionInput);
+  const submission = verifyVenusTestnetNativeSupplySubmission(submissionInput);
   if (await client.getChainId() !== 97) throw new Error("Raw transaction broadcaster is not on BSC Testnet");
+  await assertSignedLegacyTransactionMatches({
+    rawTransaction: submission.rawTransaction as Hex,
+    transactionHash: submission.transactionHash as Hash,
+    actor: getAddress(submission.intent.actor),
+    chainId: 97,
+    to: getAddress(submission.intent.transaction.to),
+    data: submission.intent.transaction.data as Hex,
+    value: BigInt(submission.intent.transaction.valueWei),
+    nonce: Number(submission.intent.transaction.nonce),
+    gas: BigInt(submission.intent.transaction.gasLimit),
+    gasPrice: BigInt(submission.intent.transaction.gasPriceWei),
+  });
   const returnedHash = await client.sendRawTransaction(submission.rawTransaction as Hex);
   if (returnedHash.toLowerCase() !== submission.transactionHash.toLowerCase()) {
     throw new Error("RPC returned a hash that does not match the frozen raw transaction");
   }
   return returnedHash;
+}
+
+export interface ExpectedSignedLegacyTransaction {
+  rawTransaction: Hex;
+  transactionHash: Hash;
+  actor: Address;
+  chainId: number;
+  to: Address;
+  data: Hex;
+  value: bigint;
+  nonce: number;
+  gas: bigint;
+  gasPrice: bigint;
+}
+
+export async function assertSignedLegacyTransactionMatches(
+  expected: ExpectedSignedLegacyTransaction,
+): Promise<void> {
+  if (keccak256(expected.rawTransaction).toLowerCase() !== expected.transactionHash.toLowerCase()) {
+    throw new Error("Signed raw transaction hash does not match the committed submission hash");
+  }
+  let parsed: ReturnType<typeof parseTransaction>;
+  try {
+    parsed = parseTransaction(expected.rawTransaction as TransactionSerialized);
+  } catch {
+    throw new Error("Signed raw transaction is not a valid serialized EVM transaction");
+  }
+  if (parsed.type !== "legacy") throw new Error("Signed raw transaction is not legacy type");
+  if (parsed.chainId !== expected.chainId) throw new Error("Signed raw transaction chain ID mismatch");
+  if (!parsed.to || getAddress(parsed.to) !== getAddress(expected.to)) throw new Error("Signed raw transaction target mismatch");
+  if ((parsed.data ?? "0x").toLowerCase() !== expected.data.toLowerCase()) throw new Error("Signed raw transaction calldata mismatch");
+  if ((parsed.value ?? 0n) !== expected.value) throw new Error("Signed raw transaction value mismatch");
+  if (parsed.nonce !== expected.nonce) throw new Error("Signed raw transaction nonce mismatch");
+  if (parsed.gas !== expected.gas) throw new Error("Signed raw transaction gas limit mismatch");
+  if (parsed.gasPrice !== expected.gasPrice) throw new Error("Signed raw transaction gas price mismatch");
+  let recovered: Address;
+  try {
+    recovered = getAddress(await recoverTransactionAddress({
+      serializedTransaction: expected.rawTransaction as TransactionSerialized,
+    }));
+  } catch {
+    throw new Error("Signed raw transaction sender could not be recovered");
+  }
+  if (recovered !== getAddress(expected.actor)) throw new Error("Signed raw transaction sender mismatch");
 }
 
 function decodeSupplyEvents(receipt: VenusRpcReceipt) {

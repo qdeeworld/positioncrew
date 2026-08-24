@@ -152,6 +152,12 @@ export function commitVenusTestnetNativeSupplySubmission(
   });
 }
 
+export function verifyVenusTestnetNativeSupplySubmission(
+  input: unknown,
+): VenusTestnetNativeSupplySubmission {
+  return VenusTestnetNativeSupplySubmissionSchema.parse(input);
+}
+
 const NormalizedTransactionSchema = z.object({
   hash: TransactionHashSchema,
   chainId: z.literal(97),

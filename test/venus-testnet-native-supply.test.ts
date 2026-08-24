@@ -13,15 +13,18 @@ import {
   type Hash,
   type Hex,
 } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import {
   VENUS_TESTNET_NATIVE_SUPPLY,
   VenusTestnetNativeSupplyEvidenceSchema,
   VenusTestnetNativeSupplyIntentSchema,
   VenusTestnetNativeSupplySubmissionSchema,
+  commitVenusTestnetNativeSupplySubmission,
   verifyVenusTestnetNativeSupplyEvidence,
 } from "../src/commerce/venus-testnet-native-supply-evidence.js";
 import {
   broadcastIdenticalVenusSubmission,
+  assertSignedLegacyTransactionMatches,
   prepareVenusTestnetNativeSupply,
   reconcileVenusTestnetNativeSupply,
   signVenusTestnetNativeSupply,
@@ -39,6 +42,12 @@ const NOW = new Date("2026-08-24T12:00:00.000Z");
 const RAW_TRANSACTION = "0x0102" as Hex;
 const TRANSACTION_HASH = keccak256(RAW_TRANSACTION);
 const MINT_TOKENS = 500_000n;
+const DISPOSABLE_SIGNER = privateKeyToAccount(
+  "0x1111111111111111111111111111111111111111111111111111111111111111",
+);
+const OTHER_DISPOSABLE_SIGNER = privateKeyToAccount(
+  "0x2222222222222222222222222222222222222222222222222222222222222222",
+);
 const EVENT_ABI = parseAbi([
   "event Mint(address minter, uint256 mintAmount, uint256 mintTokens)",
   "event Transfer(address indexed from, address indexed to, uint256 amount)",
@@ -255,19 +264,81 @@ describe("bounded Venus BSC Testnet native supply", () => {
     }, mainnetChanged, new Date("2026-08-24T12:01:00.000Z"))).rejects.toThrow("mainnet native balance");
   });
 
-  it("only retries the identical frozen raw transaction", async () => {
+  it("parses and recovers the exact signed legacy transaction before authorization", async () => {
+    const expected = {
+      chainId: 97,
+      to: VBNB,
+      data: VENUS_TESTNET_NATIVE_SUPPLY.mintSelector as Hex,
+      value: BigInt(VENUS_TESTNET_NATIVE_SUPPLY.amountWei),
+      nonce: 7,
+      gas: 60_000n,
+      gasPrice: 1_000_000_000n,
+    } as const;
+    const rawTransaction = await DISPOSABLE_SIGNER.signTransaction({
+      ...expected,
+      type: "legacy",
+    });
+    await expect(assertSignedLegacyTransactionMatches({
+      rawTransaction,
+      transactionHash: keccak256(rawTransaction),
+      actor: DISPOSABLE_SIGNER.address,
+      ...expected,
+    })).resolves.toBeUndefined();
+
+    const sameSignerMutations = [
+      { ...expected, to: UNITROLLER },
+      { ...expected, data: "0x" as Hex },
+      { ...expected, value: expected.value + 1n },
+      { ...expected, nonce: expected.nonce + 1 },
+      { ...expected, gas: expected.gas + 1n },
+      { ...expected, gasPrice: expected.gasPrice + 1n },
+      { ...expected, chainId: 56 },
+    ];
+    for (const mutation of sameSignerMutations) {
+      const mutatedRaw = await DISPOSABLE_SIGNER.signTransaction({ ...mutation, type: "legacy" });
+      await expect(assertSignedLegacyTransactionMatches({
+        rawTransaction: mutatedRaw,
+        transactionHash: keccak256(mutatedRaw),
+        actor: DISPOSABLE_SIGNER.address,
+        ...expected,
+      })).rejects.toThrow("mismatch");
+    }
+
+    const wrongSignerRaw = await OTHER_DISPOSABLE_SIGNER.signTransaction({ ...expected, type: "legacy" });
+    await expect(assertSignedLegacyTransactionMatches({
+      rawTransaction: wrongSignerRaw,
+      transactionHash: keccak256(wrongSignerRaw),
+      actor: DISPOSABLE_SIGNER.address,
+      ...expected,
+    })).rejects.toThrow("sender mismatch");
+  });
+
+  it("never sends a reconstructed wrong-signer submission with recomputed commitments", async () => {
     const deps = dependencies();
     const { submission } = await signed(deps);
-    const first = await broadcastIdenticalVenusSubmission(submission, deps.testnet);
-    const second = await broadcastIdenticalVenusSubmission(submission, deps.testnet);
-
-    expect(first).toBe(TRANSACTION_HASH);
-    expect(second).toBe(TRANSACTION_HASH);
-    expect(deps.testnet.sentRaw).toEqual([RAW_TRANSACTION, RAW_TRANSACTION]);
-
-    const mutated = structuredClone(submission);
-    (mutated as { rawTransaction: string }).rawTransaction = "0x0304";
-    expect(() => VenusTestnetNativeSupplySubmissionSchema.parse(mutated)).toThrow();
+    const intent = submission.intent;
+    const wrongSignerRaw = await OTHER_DISPOSABLE_SIGNER.signTransaction({
+      type: "legacy",
+      chainId: 97,
+      to: VBNB,
+      data: VENUS_TESTNET_NATIVE_SUPPLY.mintSelector,
+      value: BigInt(VENUS_TESTNET_NATIVE_SUPPLY.amountWei),
+      nonce: Number(intent.transaction.nonce),
+      gas: BigInt(intent.transaction.gasLimit),
+      gasPrice: BigInt(intent.transaction.gasPriceWei),
+    });
+    const reconstructed = commitVenusTestnetNativeSupplySubmission({
+      schemaVersion: "positioncrew.venus-testnet-native-supply-submission.v1",
+      signedAt: submission.signedAt,
+      intent,
+      rawTransaction: wrongSignerRaw,
+      transactionHash: keccak256(wrongSignerRaw),
+    });
+    expect(VenusTestnetNativeSupplySubmissionSchema.parse(reconstructed)).toEqual(reconstructed);
+    await expect(broadcastIdenticalVenusSubmission(reconstructed, deps.testnet)).rejects.toThrow(
+      "sender mismatch",
+    );
+    expect(deps.testnet.sentRaw).toEqual([]);
   });
 
   it("reconciles Mint, Transfer, confirmations, cost, and pinned balance delta", async () => {
