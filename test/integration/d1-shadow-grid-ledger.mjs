@@ -565,6 +565,160 @@ try {
   );
   assert.equal(skippedWindow.response.status, 404);
 
+  const abandonedPriorNow = finiteDate(
+    cutoffHour.getTime() + 60 * 60_000 + 2 * 60_000,
+    "abandoned prior-hour opening",
+  );
+  const abandonedPriorRunId = shadowGridRunId(abandonedPriorNow);
+  const abandonedPriorHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "2001",
+    "X-GitHub-Sha": "3".repeat(40),
+  };
+
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, abandonedPriorNow);
+  const abandonedPriorOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: abandonedPriorHeaders },
+  );
+  assert.equal(abandonedPriorOpen.response.status, 200);
+  assert.equal(abandonedPriorOpen.body.runId, abandonedPriorRunId);
+  assert.equal(abandonedPriorOpen.body.state, "PRECOMMITTED");
+  assert.match(abandonedPriorOpen.body.headHash, /^sha256:[a-f0-9]{64}$/u);
+
+  const abandonedPriorBefore = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(abandonedPriorRunId)}`,
+  );
+  assert.equal(abandonedPriorBefore.response.status, 200);
+  assert.equal(abandonedPriorBefore.body.events.at(-1).eventType, "PRECOMMITTED");
+
+  const replacementSessionNow = finiteDate(
+    abandonedPriorNow.getTime() + 60 * 60_000,
+    "replacement current-hour opening",
+  );
+  const replacementRunId = shadowGridRunId(replacementSessionNow);
+  const replacementHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "2002",
+    "X-GitHub-Sha": "4".repeat(40),
+  };
+  assert.notEqual(replacementRunId, abandonedPriorRunId);
+
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, replacementSessionNow);
+  const replacementOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: replacementHeaders },
+  );
+  assert.equal(replacementOpen.response.status, 200);
+  assert.equal(replacementOpen.body.runId, replacementRunId);
+  assert.equal(replacementOpen.body.state, "PRECOMMITTED");
+  assert.match(replacementOpen.body.headHash, /^sha256:[a-f0-9]{64}$/u);
+
+  const abandonedPriorAfter = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(abandonedPriorRunId)}`,
+  );
+  assert.equal(abandonedPriorAfter.response.status, 200);
+  assert.equal(abandonedPriorAfter.body.window.state, "VOID_SOURCE_GAP");
+  assert.equal(abandonedPriorAfter.body.integrity.valid, true);
+  assert.equal(
+    abandonedPriorAfter.body.events.filter((event) => event.eventType === "OBSERVED").length,
+    0,
+    "A replacement workflow identity sampled the abandoned prior epoch",
+  );
+  assert.equal(
+    abandonedPriorAfter.body.events.filter((event) =>
+      ["SHADOW_FILL", "CLOSED", "RISK_EXIT"].includes(event.eventType)
+    ).length,
+    0,
+    "A replacement workflow identity completed the abandoned prior epoch",
+  );
+  const abandonedGenesis = abandonedPriorAfter.body.events.find(
+    (event) => event.eventType === "EPOCH_STARTED",
+  );
+  const abandonedPrecommit = abandonedPriorAfter.body.events.find(
+    (event) => event.eventType === "PRECOMMITTED",
+  );
+  const abandonedTerminal = abandonedPriorAfter.body.events.at(-1);
+  assert(abandonedGenesis && abandonedPrecommit);
+  for (const provenanceEvent of [abandonedGenesis, abandonedPrecommit]) {
+    assert.equal(provenanceEvent.payload.schedule.runId, "2001");
+    assert.equal(provenanceEvent.payload.schedule.runAttempt, "1");
+    assert.equal(provenanceEvent.payload.schedule.headSha, "3".repeat(40));
+    assert.equal(
+      provenanceEvent.payload.schedule.workflowRef,
+      "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+    );
+  }
+  assert.equal(abandonedTerminal.eventType, "VOID_SOURCE_GAP");
+  assert.equal(abandonedTerminal.previousEventHash, abandonedPrecommit.eventHash);
+  assert.match(abandonedTerminal.payload.reason, /abandon/iu);
+
+  const replacementWindowBeforeExpectedRequest = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(replacementRunId)}`,
+  );
+  assert.equal(replacementWindowBeforeExpectedRequest.response.status, 200);
+  assert.equal(
+    replacementWindowBeforeExpectedRequest.body.events.at(-1).eventType,
+    "PRECOMMITTED",
+  );
+  const replacementHeadBeforeExpectedRequest =
+    replacementWindowBeforeExpectedRequest.body.events.at(-1).eventHash;
+  const replacementCountBeforeExpectedRequest =
+    replacementWindowBeforeExpectedRequest.body.events.length;
+
+  const expectedOnlyNow = finiteDate(
+    replacementSessionNow.getTime() + 60 * 60_000,
+    "expected-run isolation checkpoint",
+  );
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, expectedOnlyNow);
+  const expectedAbandonedReplay = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    {
+      method: "POST",
+      headers: {
+        ...abandonedPriorHeaders,
+        "X-PositionCrew-Shadow-Run-Id": abandonedPriorRunId,
+      },
+    },
+  );
+  assert.equal(expectedAbandonedReplay.response.status, 200);
+  assert.equal(expectedAbandonedReplay.body.runId, abandonedPriorRunId);
+  assert.equal(expectedAbandonedReplay.body.headHash, abandonedTerminal.eventHash);
+
+  const replacementWindowAfterExpectedRequest = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(replacementRunId)}`,
+  );
+  assert.equal(replacementWindowAfterExpectedRequest.response.status, 200);
+  assert.equal(
+    replacementWindowAfterExpectedRequest.body.events.length,
+    replacementCountBeforeExpectedRequest,
+  );
+  assert.equal(
+    replacementWindowAfterExpectedRequest.body.events.at(-1).eventHash,
+    replacementHeadBeforeExpectedRequest,
+  );
+  assert.equal(
+    replacementWindowAfterExpectedRequest.body.events.at(-1).eventType,
+    "PRECOMMITTED",
+    "An expected-run request cleaned an unrelated epoch",
+  );
+
   await stopWorker(worker);
   worker = undefined;
 

@@ -835,6 +835,38 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
     status: "NOT_REQUIRED",
     error: null,
   };
+  if (expectedRunId === null) {
+    const previousRun = await store.getRun(previousHourCleanup.runId);
+    if (previousRun.length > 0 && !shadowGridRunIsTerminal(previousRun)) {
+      try {
+        verifyShadowGridRun(previousRun);
+        const originatingSchedule = scheduleFromShadowGridGenesis(previousRun);
+        const observedSampleCount = previousRun.filter(
+          (event) => event.eventType === "OBSERVED",
+        ).length;
+        const nextSampleDeadline = Date.parse(previousRun[0]!.epochStartedAt) +
+          (observedSampleCount + 1) * 5 * 60_000 +
+          SHADOW_GRID_SAMPLE_GRACE_MILLISECONDS;
+        const horizonDeadline = Date.parse(previousRun[0]!.horizonEndsAt) +
+          SHADOW_GRID_SAMPLE_GRACE_MILLISECONDS;
+        if (now.getTime() > Math.min(nextSampleDeadline, horizonDeadline)) {
+          await voidShadowGridRun(
+            store,
+            previousRun,
+            now,
+            `Originating GitHub workflow run ${originatingSchedule.runId} ended before its next required forward sample; the abandoned epoch was voided without backfill or source sampling`,
+          );
+          previousHourCleanup = { ...previousHourCleanup, status: "PROCESSED" };
+        }
+      } catch (error) {
+        previousHourCleanup = {
+          ...previousHourCleanup,
+          status: "FAILED",
+          error: error instanceof Error ? error.message.slice(0, 240) : "Unknown cleanup failure",
+        };
+      }
+    }
+  }
   const runId = expectedRunId ?? shadowGridRunId(currentHour);
   let events = await store.getRun(runId);
   if (expectedRunId !== null && events.length === 0) {
