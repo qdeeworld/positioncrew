@@ -1,4 +1,5 @@
 import type { FixtureJobResponse, FreshMarketplaceChain, ServiceId, SessionJob } from "./types.js";
+import { FixtureJobResponseSchema } from "../../src/api/fixture-response-schema.js";
 
 export const RECENT_JOB_STORAGE_KEY = "positioncrew.recent-jobs.v1";
 export const RECENT_JOB_CHANGED_EVENT = "positioncrew:recent-job-changed";
@@ -65,14 +66,26 @@ function isStringArray(value: unknown): value is string[] {
 function isFixtureJobResponseForChain(
   value: unknown,
   reference: RecentJobReference,
-  expectedJobId: string,
   expectedProviderId: string,
   expectedDeliverableHash: string,
   expectedEvaluationHash: string,
+  chainEvidenceMode: "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED",
 ): value is FixtureJobResponse {
+  const canonical = FixtureJobResponseSchema.safeParse(value);
+  if (!canonical.success) {
+    return false;
+  }
+  const expectedResponseMode = chainEvidenceMode === "CURRENT_BLOCK_PINNED"
+    ? "CURRENT_BLOCK_PINNED"
+    : "FROZEN_BSC_TEST_FIXTURE";
+  if (canonical.data.evidenceMode !== expectedResponseMode) {
+    return false;
+  }
+  value = canonical.data;
+
   if (!isRecord(value) ||
     value.schemaVersion !== "positioncrew.fixture-job-response.v1" ||
-    !["FROZEN_BSC_TEST_FIXTURE", "CALLER_SUPPLIED_OBSERVATIONS"].includes(String(value.evidenceMode)) ||
+    !["FROZEN_BSC_TEST_FIXTURE", "CALLER_SUPPLIED_OBSERVATIONS", "CURRENT_BLOCK_PINNED"].includes(String(value.evidenceMode)) ||
     value.commerceMode !== "IN_MEMORY_CONFORMANCE" ||
     value.advantageStatus !== "PENDING_INDEPENDENT_BLIND_EVALUATION" ||
     typeof value.generatedAt !== "string" ||
@@ -104,7 +117,8 @@ function isFixtureJobResponseForChain(
   const deliverable = result.deliverable;
   const evaluation = result.evaluation;
   if (!isRecord(responseJob) ||
-    responseJob.jobId !== expectedJobId ||
+    typeof responseJob.jobId !== "string" ||
+    responseJob.jobId.length < 8 ||
     typeof responseJob.state !== "string" ||
     typeof responseJob.envelopeHash !== "string" ||
     responseJob.providerId !== expectedProviderId ||
@@ -307,6 +321,7 @@ export function isFreshMarketplaceChainForReference(
 
   if (hire.hireId !== reference.hireId || hire.service !== reference.service ||
     typeof hire.providerId !== "string" ||
+    !["HISTORICAL_FIXTURE", "CURRENT_BLOCK_PINNED"].includes(String(hire.evidenceMode)) ||
     typeof job.jobId !== "string" ||
     !["CREATED", "RUNNING", "COMPLETED", "FAILED"].includes(String(job.state))) {
     return false;
@@ -330,10 +345,10 @@ export function isFreshMarketplaceChainForReference(
       !isFixtureJobResponseForChain(
         receipt.response,
         reference,
-        job.jobId,
         hire.providerId,
         receipt.deliverableHash,
         receipt.evaluationHash,
+        hire.evidenceMode as "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED",
       )) {
       return false;
     }

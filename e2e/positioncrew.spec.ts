@@ -1,3 +1,4 @@
+import { runCurrentBlockPinnedProviderRequest } from "../src/api/fixture-jobs.js";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
@@ -459,6 +460,8 @@ async function installCurrentLendingHireRoutes(
   if (options.safeRefusal) {
     rescueRequest.position = { collateral: [], debt: [] };
     rescueRequest.availableAssets = [];
+  } else if (options.refused) {
+    rescueRequest.availableAssets = [];
   }
   const source = (rescueRequest.sources as Array<Record<string, unknown>>)[0];
   const observation = {
@@ -466,12 +469,7 @@ async function installCurrentLendingHireRoutes(
     observedAt: String(source.observedAt),
     explorerUrl: `https://bscscan.com/block/${blockNumber}`,
   };
-  const response = currentLendingResponse(
-    rescueRequest,
-    now,
-    Boolean(options.refused || options.safeRefusal),
-    Boolean(options.safeRefusal),
-  );
+  const response = await runCurrentBlockPinnedProviderRequest(rescueRequest, now);
   const createBodies: Array<Record<string, unknown>> = [];
   let runCount = 0;
   let receiptLoadCount = 0;
@@ -488,7 +486,7 @@ async function installCurrentLendingHireRoutes(
       hireId,
       idempotencyKey: String(createBodies.at(-1)?.idempotencyKey ?? "44444444-4444-4444-8444-444444444444"),
       providerSlug: "lending-rescue",
-      providerId: "positioncrew:lending-rescue:v1",
+      providerId: response.result.job.providerId ?? "positioncrew:provider:lending-rescue:v1",
       benchmarkSlug: "lending-rescue",
       service: "LENDING_RESCUE",
       evidenceMode: "CURRENT_BLOCK_PINNED",
@@ -514,8 +512,8 @@ async function installCurrentLendingHireRoutes(
       receiptId,
       publicUrl: `/api/benchmark-receipts/${receiptId}`,
       responseHash: `sha256:${"9".repeat(64)}`,
-      deliverableHash: `sha256:${"b".repeat(64)}`,
-      evaluationHash: `sha256:${"e".repeat(64)}`,
+      deliverableHash: response.result.job.deliverable?.deliverableHash ?? `sha256:${"b".repeat(64)}`,
+      evaluationHash: response.result.evaluation.evaluationHash,
       createdAt: now.toISOString(),
       response,
     } : null,
@@ -701,8 +699,8 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   await hireButton.click();
 
   const durableResult = page.locator(".job-result");
-  await expect(durableResult.getByRole("heading", { name: "REFUSED CONSTRAINTS", exact: true })).toBeVisible();
-  await expect(durableResult.getByText("No lending position was found at the pinned BSC block, so no rescue action is available.", { exact: true })).toBeVisible();
+  await expect(durableResult.getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
+  await expect(durableResult.getByText("No complete Venus collateral-and-debt position was available for rescue analysis.", { exact: true })).toBeVisible();
   expect(mockedHire.createBodies).toHaveLength(1);
   expect(mockedHire.createBodies[0]).toMatchObject({
     evidenceMode: "CURRENT_BLOCK_PINNED",
@@ -1044,7 +1042,7 @@ test("a current lending refusal persists and remains inspectable", async ({ page
   await page.getByRole("button", { name: "Load position" }).click();
   await page.getByRole("button", { name: "Hire and run current request" }).click();
   const durableResult = page.locator(".job-result");
-  await expect(durableResult.getByRole("heading", { name: "REFUSED CONSTRAINTS", exact: true })).toBeVisible();
+  await expect(durableResult.getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
   await expect(durableResult.getByText("No allowed rescue action fits the wallet inventory and safety limits.", { exact: true })).toBeVisible();
   const durableStatus = page.locator('.request-boundary[role="status"]');
   await expect(durableStatus.getByRole("link", { name: "Public receipt" })).toHaveAttribute(
@@ -1502,7 +1500,7 @@ async function installCurrentCategoryHireRoutes(
   const jobId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-9${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
   const receiptId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-a${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
   const createBodies: Array<Record<string, unknown>> = [];
-  let providerResponse: Record<string, unknown> | null = null;
+  let providerResponse: Awaited<ReturnType<typeof runCurrentBlockPinnedProviderRequest>> | null = null;
   let receiptLoadCount = 0;
 
   const chain = (state: "CREATED" | "RUNNING" | "COMPLETED") => {
@@ -1521,7 +1519,7 @@ async function installCurrentCategoryHireRoutes(
         hireId,
         idempotencyKey: body.idempotencyKey,
         providerSlug: definition.providerSlug,
-        providerId: `positioncrew:${definition.providerSlug}:v1`,
+        providerId: providerResponse?.result.job.providerId ?? `positioncrew:provider:${definition.providerSlug}:v1`,
         benchmarkSlug: definition.benchmarkSlug,
         service: definition.service,
         evidenceMode: "CURRENT_BLOCK_PINNED",
@@ -1555,8 +1553,8 @@ async function installCurrentCategoryHireRoutes(
         receiptId,
         publicUrl: `/api/benchmark-receipts/${receiptId}`,
         responseHash: `sha256:${"9".repeat(64)}`,
-        deliverableHash: `sha256:${"b".repeat(64)}`,
-        evaluationHash: `sha256:${"e".repeat(64)}`,
+        deliverableHash: providerResponse?.result.job.deliverable?.deliverableHash ?? `sha256:${"b".repeat(64)}`,
+        evaluationHash: providerResponse?.result.evaluation.evaluationHash ?? `sha256:${"e".repeat(64)}`,
         createdAt: now.toISOString(),
         response: providerResponse,
       } : null,
@@ -1570,12 +1568,7 @@ async function installCurrentCategoryHireRoutes(
       return;
     }
     createBodies.push(body);
-    const direct = await page.context().request.post(
-      `/api/providers/${definition.providerSlug}/jobs`,
-      { data: { request: body.request } },
-    );
-    expect(direct.status()).toBe(200);
-    providerResponse = await direct.json();
+    providerResponse = await runCurrentBlockPinnedProviderRequest(body.request, now);
     await route.fulfill({
       status: 201,
       contentType: "application/json",

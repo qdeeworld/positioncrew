@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { runCurrentBlockPinnedProviderRequest, runFrozenFixture } from "../src/api/fixture-jobs.js";
 import {
   clearRecentJobReferences,
   isFreshMarketplaceChainForReference,
@@ -94,90 +95,94 @@ describe("recent job device index", () => {
     expect(storage.getItem(RECENT_JOB_STORAGE_KEY)).toBeNull();
   });
 
-  it("accepts only a server chain bound to the saved hire and service", () => {
-    const saved = reference(1);
-    const deliverableHash = `sha256:${"b".repeat(64)}`;
-    const evaluationHash = `sha256:${"e".repeat(64)}`;
-    const response = {
-      schemaVersion: "positioncrew.fixture-job-response.v1",
-      evidenceMode: "CALLER_SUPPLIED_OBSERVATIONS",
-      commerceMode: "IN_MEMORY_CONFORMANCE",
-      advantageStatus: "PENDING_INDEPENDENT_BLIND_EVALUATION",
-      generatedAt: "2026-08-24T12:00:00.000Z",
-      claimBoundary: ["Unsigned output."],
-      benchmarkLock: null,
-      receipt: { mode: "SESSION_EMBEDDED", path: null, evaluationHash },
-      result: {
+  it("accepts only a canonical server response bound to the saved hire and service", async () => {
+    const historicalResponse = await runFrozenFixture("LP_REBALANCE");
+    const hireId = "99999999-9999-4999-8999-999999999999";
+    const referenceFor = (rememberedAt: string): RecentJobReference => ({
+      hireId,
+      service: "LP_REBALANCE",
+      rememberedAt,
+    });
+    const chainFor = (
+      response: Awaited<ReturnType<typeof runFrozenFixture>>,
+      evidenceMode: "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED",
+    ): Record<string, unknown> => {
+      const providerId = response.result.job.providerId;
+      const deliverable = response.result.job.deliverable;
+      if (!providerId || !deliverable) throw new Error("Canonical fixture is missing completed provider evidence");
+      return {
+        schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
+        hire: { hireId, service: "LP_REBALANCE", providerId, evidenceMode },
         job: {
-          jobId: "job-1",
+          jobId: "88888888-8888-4888-8888-888888888888",
           state: "COMPLETED",
-          envelopeHash: `sha256:${"a".repeat(64)}`,
-          providerId: "positioncrew:lending-rescue:v1",
-          evaluatorId: "positioncrew:conformance:v1",
-          history: [{ state: "COMPLETED", at: "2026-08-24T12:00:00.000Z", reference: deliverableHash }],
-          deliverable: { deliverableHash },
+          error: null,
         },
-        request: {
-          service: saved.service,
-          account: "0x0000000000000000000000000000000000000000",
-          chainId: 56,
-          maxActionUsd: "100",
-          maxGasUsd: "1",
-          maxSlippageBps: 30,
-          maxDataAgeSeconds: 120,
+        receipt: {
+          receiptId: "77777777-7777-4777-8777-777777777777",
+          publicUrl: "/api/benchmark-receipts/77777777-7777-4777-8777-777777777777",
+          responseHash: `sha256:${"9".repeat(64)}`,
+          deliverableHash: deliverable.deliverableHash,
+          evaluationHash: response.result.evaluation.evaluationHash,
+          createdAt: response.generatedAt,
+          response,
         },
-        deliverable: {
-          service: saved.service,
-          status: "REFUSED_CONSTRAINTS",
-          decision: "REFUSED_CONSTRAINTS",
-          summary: "No position was found.",
-          expiresAt: "2026-08-24T12:05:00.000Z",
-        },
-        evaluation: { score: 100, passed: true, evaluationHash, checks: [] },
-      },
+      };
     };
-    const chain = {
-      schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
-      hire: { hireId: saved.hireId, service: saved.service, providerId: "positioncrew:lending-rescue:v1" },
-      job: { jobId: "job-1", state: "COMPLETED", error: null },
-      receipt: {
-        receiptId: "receipt-1",
-        publicUrl: "/receipt/1",
-        responseHash: `sha256:${"9".repeat(64)}`,
-        deliverableHash,
-        evaluationHash,
-        createdAt: "2026-08-24T12:00:00.000Z",
-        response,
-      },
-    };
+
+    const saved = referenceFor(historicalResponse.generatedAt);
+    const chain = chainFor(historicalResponse, "HISTORICAL_FIXTURE");
     expect(isFreshMarketplaceChainForReference(chain, saved)).toBe(true);
-    expect(isFreshMarketplaceChainForReference({ ...chain, hire: { ...chain.hire, hireId: reference(2).hireId } }, saved)).toBe(false);
+
+    const currentResponse = await runCurrentBlockPinnedProviderRequest(
+      historicalResponse.result.request,
+      new Date(historicalResponse.generatedAt),
+    );
+    const current = chainFor(currentResponse, "CURRENT_BLOCK_PINNED");
+    expect(isFreshMarketplaceChainForReference(current, saved)).toBe(true);
+
+    const wrongResponseMode = structuredClone(current);
+    const wrongModeReceipt = wrongResponseMode.receipt as Record<string, unknown>;
+    (wrongModeReceipt.response as Record<string, unknown>).evidenceMode = "CALLER_SUPPLIED_OBSERVATIONS";
+    expect(isFreshMarketplaceChainForReference(wrongResponseMode, saved)).toBe(false);
+
+    const mismatchedHire = structuredClone(chain);
+    (mismatchedHire.hire as Record<string, unknown>).hireId = reference(2).hireId;
+    expect(isFreshMarketplaceChainForReference(mismatchedHire, saved)).toBe(false);
+
     expect(isFreshMarketplaceChainForReference({ ...chain, receipt: null }, saved)).toBe(false);
-    expect(isFreshMarketplaceChainForReference({
-      ...chain,
-      receipt: { ...chain.receipt, response: { ...response, result: { ...response.result, request: { ...response.result.request, service: "BOUNDED_GRID" } } } },
-    }, saved)).toBe(false);
-    expect(isFreshMarketplaceChainForReference({
-      ...chain,
-      receipt: { ...chain.receipt, response: { ...response, result: { ...response.result, job: { ...response.result.job, jobId: "other-job" } } } },
-    }, saved)).toBe(false);
-    expect(isFreshMarketplaceChainForReference({
-      ...chain,
-      receipt: {
-        ...chain.receipt,
-        response: {
-          ...response,
-          result: {
-            ...response.result,
-            deliverable: { ...response.result.deliverable, expiresAt: "not-a-date" },
-          },
-        },
-      },
-    }, saved)).toBe(false);
-    expect(isFreshMarketplaceChainForReference({
-      ...chain,
-      job: { ...chain.job, state: "FAILED", error: { code: "PROVIDER_TIMEOUT", message: 42 } },
-      receipt: null,
-    }, saved)).toBe(false);
+
+    const mismatchedService = structuredClone(chain);
+    const mismatchedServiceResponse = ((mismatchedService.receipt as Record<string, unknown>).response as Record<string, unknown>);
+    const mismatchedServiceResult = mismatchedServiceResponse.result as Record<string, unknown>;
+    (mismatchedServiceResult.request as Record<string, unknown>).service = "BOUNDED_GRID";
+    expect(isFreshMarketplaceChainForReference(mismatchedService, saved)).toBe(false);
+
+    const mismatchedProvider = structuredClone(chain);
+    const mismatchedProviderResponse = ((mismatchedProvider.receipt as Record<string, unknown>).response as Record<string, unknown>);
+    const mismatchedProviderResult = mismatchedProviderResponse.result as Record<string, unknown>;
+    (mismatchedProviderResult.job as Record<string, unknown>).providerId = "positioncrew:other-provider:v1";
+    expect(isFreshMarketplaceChainForReference(mismatchedProvider, saved)).toBe(false);
+
+    const invalidExpiry = structuredClone(chain);
+    const invalidExpiryResponse = ((invalidExpiry.receipt as Record<string, unknown>).response as Record<string, unknown>);
+    const invalidExpiryResult = invalidExpiryResponse.result as Record<string, unknown>;
+    (invalidExpiryResult.deliverable as Record<string, unknown>).expiresAt = "not-a-date";
+    expect(isFreshMarketplaceChainForReference(invalidExpiry, saved)).toBe(false);
+
+    const invalidCategoryPayload = structuredClone(chain);
+    const invalidCategoryResponse = ((invalidCategoryPayload.receipt as Record<string, unknown>).response as Record<string, unknown>);
+    const invalidCategoryResult = invalidCategoryResponse.result as Record<string, unknown>;
+    (invalidCategoryResult.deliverable as Record<string, unknown>).actionSteps = [{}];
+    expect(isFreshMarketplaceChainForReference(invalidCategoryPayload, saved)).toBe(false);
+
+    const invalidError = structuredClone(chain);
+    invalidError.job = {
+      ...(invalidError.job as Record<string, unknown>),
+      state: "FAILED",
+      error: { code: "PROVIDER_TIMEOUT", message: 42 },
+    };
+    invalidError.receipt = null;
+    expect(isFreshMarketplaceChainForReference(invalidError, saved)).toBe(false);
   });
 });
