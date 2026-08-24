@@ -125,6 +125,12 @@ describe("bounded-grid scheduled session collector", () => {
       expect(call.init).not.toHaveProperty("body");
       expect(call.init.headers["X-GitHub-Run-Id"]).toBe("123456789");
     }
+    expect(runtime.calls[0]!.init.headers).not.toHaveProperty(
+      "X-PositionCrew-Shadow-Run-Id",
+    );
+    for (const call of runtime.calls.slice(1)) {
+      expect(call.init.headers["X-PositionCrew-Shadow-Run-Id"]).toBe(RUN_ID);
+    }
     expect(result).toMatchObject({ status: "COMPLETED", finalStatus: "CLOSED" });
     expect(result.targets.map((target: { targetAt: string | null }) => target.targetAt)).toEqual([
       EPOCH,
@@ -152,6 +158,11 @@ describe("bounded-grid scheduled session collector", () => {
     expect(runtime.calls).toHaveLength(5);
     expect(runtime.calls[1]!.url).toBe(runtime.calls[2]!.url);
     expect(runtime.calls[1]!.init.headers).toEqual(runtime.calls[2]!.init.headers);
+    expect(runtime.calls[0]!.init.headers).not.toHaveProperty(
+      "X-PositionCrew-Shadow-Run-Id",
+    );
+    expect(runtime.calls[1]!.init.headers["X-PositionCrew-Shadow-Run-Id"]).toBe(RUN_ID);
+    expect(runtime.calls[2]!.init.headers["X-PositionCrew-Shadow-Run-Id"]).toBe(RUN_ID);
     expect(runtime.calls[3]!.requestedAt).toBe("2026-08-24T12:27:00.000Z");
     expect(runtime.calls[4]!.requestedAt).toBe(HORIZON);
     expect(result.attempts.map((attempt: { outcome: string }) => attempt.outcome)).toEqual([

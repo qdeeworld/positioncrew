@@ -305,10 +305,58 @@ try {
     15 * 60_000,
   );
 
+  const pinnedHeaders = {
+    ...headers,
+    "X-PositionCrew-Shadow-Run-Id": first.body.runId,
+  };
+  const rejectedMismatchedOrigin = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    {
+      method: "POST",
+      headers: {
+        ...pinnedHeaders,
+        "X-GitHub-Run-Id": "1002",
+        "X-GitHub-Sha": "2".repeat(40),
+      },
+    },
+  );
+  assert.equal(rejectedMismatchedOrigin.response.status, 400);
+
+  const unknownExpectedRunId = "bg-19990101-00";
+  const rejectedUnknownExpectedRun = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    {
+      method: "POST",
+      headers: {
+        ...headers,
+        "X-PositionCrew-Shadow-Run-Id": unknownExpectedRunId,
+      },
+    },
+  );
+  assert.equal(rejectedUnknownExpectedRun.response.status, 400);
+
+  const unchangedAfterRejectedFollowUps = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(first.body.runId)}`,
+  );
+  assert.equal(unchangedAfterRejectedFollowUps.response.status, 200);
+  assert.equal(unchangedAfterRejectedFollowUps.body.events.length, first.body.eventCount);
+  assert.equal(
+    unchangedAfterRejectedFollowUps.body.events.at(-1).eventHash,
+    first.body.headHash,
+  );
+  const unknownExpectedWindow = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(unknownExpectedRunId)}`,
+  );
+  assert.equal(unknownExpectedWindow.response.status, 404);
+
   const retry = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
-    { method: "POST", headers },
+    { method: "POST", headers: pinnedHeaders },
   );
   assert.equal(retry.response.status, 200);
   assert.equal(retry.body.runId, first.body.runId);
@@ -422,7 +470,7 @@ try {
   const lateSampleTick = await requestJson(
     baseUrl,
     "/api/internal/bounded-grid-forward-shadow/tick",
-    { method: "POST", headers },
+    { method: "POST", headers: pinnedHeaders },
   );
   assert.equal(lateSampleTick.response.status, 200);
   const lateSampleWindow = await requestJson(
@@ -442,6 +490,44 @@ try {
     lateSampleTerminalPayload.reason,
     /(?:after|outside).*(?:grace|deadline)|(?:grace|deadline).*after/iu,
   );
+
+  const nextHourNow = finiteDate(
+    testNow.getTime() + 60 * 60_000,
+    "expected-run next-hour checkpoint",
+  );
+  const nextHourRunId = shadowGridRunId(nextHourNow);
+  assert.notEqual(nextHourRunId, runId);
+  const originalHeadBeforeNextHour = lateSampleWindow.body.events.at(-1).eventHash;
+  const originalEventCountBeforeNextHour = lateSampleWindow.body.events.length;
+
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, nextHourNow);
+  const pinnedNextHourTick = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: pinnedHeaders },
+  );
+  assert.equal(pinnedNextHourTick.response.status, 200);
+  assert.equal(pinnedNextHourTick.body.runId, runId);
+  assert.equal(pinnedNextHourTick.body.headHash, originalHeadBeforeNextHour);
+  assert.equal(pinnedNextHourTick.body.eventCount, originalEventCountBeforeNextHour);
+  assert.equal(pinnedNextHourTick.body.epochStartedAt, first.body.epochStartedAt);
+  assert.equal(pinnedNextHourTick.body.horizonEndsAt, first.body.horizonEndsAt);
+
+  const nextHourWindow = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(nextHourRunId)}`,
+  );
+  assert.equal(nextHourWindow.response.status, 404);
+  const originalAfterNextHour = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(runId)}`,
+  );
+  assert.equal(originalAfterNextHour.response.status, 200);
+  assert.equal(originalAfterNextHour.body.events.length, originalEventCountBeforeNextHour);
+  assert.equal(originalAfterNextHour.body.events.at(-1).eventHash, originalHeadBeforeNextHour);
 
   const cutoffHour = finiteDate(beforeSampleGrace.getTime(), "opening-cutoff hour");
   cutoffHour.setUTCMinutes(0, 0, 0);

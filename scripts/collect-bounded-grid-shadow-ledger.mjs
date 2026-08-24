@@ -205,7 +205,7 @@ export async function runShadowGridScheduledSession(options = {}) {
     artifact.status = "RUNNING";
     await persist();
 
-    const headers = Object.freeze({
+    const baseHeaders = Object.freeze({
       Accept: "application/json",
       Authorization: `Bearer ${required(environment, "SHADOW_GRID_TICK_TOKEN")}`,
       "User-Agent": "PositionCrew-Bounded-Grid-Forward-Shadow/2.0",
@@ -218,6 +218,11 @@ export async function runShadowGridScheduledSession(options = {}) {
     });
 
     const requestTick = async (targetOffsetMinutes, expected) => {
+      const tickHeaders = Object.freeze(
+        expected
+          ? { ...baseHeaders, "X-PositionCrew-Shadow-Run-Id": expected.runId }
+          : { ...baseHeaders },
+      );
       for (let attemptNumber = 1; attemptNumber <= 2; attemptNumber += 1) {
         if (expected && runIdAt(milliseconds(now)) !== expected.runId) {
           throw new Error("Scheduled session crossed its initial UTC-hour run ID");
@@ -228,7 +233,7 @@ export async function runShadowGridScheduledSession(options = {}) {
           response = await fetchImpl(endpoint, {
             method: "POST",
             redirect: "error",
-            headers,
+            headers: tickHeaders,
             signal: AbortSignal.timeout(requestTimeout),
           });
         } catch (error) {

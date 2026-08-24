@@ -148,6 +148,8 @@ const API_HEADERS = {
 const CANONICAL_PRODUCT_ORIGIN = "https://positioncrew.dolepee.com";
 const MAX_FRESH_MARKETPLACE_REQUEST_BYTES = 32_768;
 const SHADOW_GRID_WORKFLOW_PATH = ".github/workflows/production-smoke.yml";
+const SHADOW_GRID_EXPECTED_RUN_HEADER = "X-PositionCrew-Shadow-Run-Id";
+const SHADOW_GRID_RUN_ID_PATTERN = /^bg-\d{8}-\d{2}$/;
 const SHADOW_GRID_SAMPLE_GRACE_MILLISECONDS = 3 * 60_000;
 const SHADOW_GRID_SAMPLE_EARLY_TOLERANCE_MILLISECONDS = 90_000;
 const SHADOW_GRID_OPENING_CUTOFF_MINUTE = 44;
@@ -481,6 +483,28 @@ function scheduleFromShadowGridGenesis(
   return schedule;
 }
 
+function assertShadowGridScheduleBinding(
+  events: readonly ShadowGridEvent[],
+  incoming: ShadowGridScheduleEvidence,
+): void {
+  const committed = scheduleFromShadowGridGenesis(events);
+  if (
+    committed.event !== incoming.event ||
+    committed.repository !== incoming.repository ||
+    committed.workflowPath !== incoming.workflowPath ||
+    committed.runId !== incoming.runId ||
+    committed.runAttempt !== incoming.runAttempt ||
+    committed.headSha !== incoming.headSha ||
+    committed.workflowRef !== incoming.workflowRef
+  ) {
+    throw new FreshMarketplaceRequestError(
+      400,
+      "INVALID_JSON",
+      "Shadow-grid tick identity does not match the originating scheduled workflow",
+    );
+  }
+}
+
 function assertShadowGridHireBinding(
   events: readonly ShadowGridEvent[],
   chain: FreshMarketplaceChain,
@@ -781,10 +805,18 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   if ((request.headers.get("Content-Length") ?? "0") !== "0") {
     return apiError(400, "CALLER_INPUT_PROHIBITED", ["Collector request bodies are prohibited."]);
   }
-  const expected = env.SHADOW_GRID_TICK_TOKEN;
+  const expectedToken = env.SHADOW_GRID_TICK_TOKEN;
   const supplied = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  if (!expected || !supplied || !(await constantTimeTokenMatch(supplied, expected))) {
+  if (!expectedToken || !supplied || !(await constantTimeTokenMatch(supplied, expectedToken))) {
     return apiError(401, "UNAUTHORIZED", ["A valid scheduler credential is required."]);
+  }
+  const expectedRunId = request.headers.get(SHADOW_GRID_EXPECTED_RUN_HEADER);
+  if (expectedRunId !== null && !SHADOW_GRID_RUN_ID_PATTERN.test(expectedRunId)) {
+    throw new FreshMarketplaceRequestError(
+      400,
+      "INVALID_JSON",
+      "Shadow-grid follow-up run ID must match bg-YYYYMMDD-HH",
+    );
   }
   await ensureShadowGridAppendOnlyGuards(env.DB);
   const now = shadowGridCollectorNow(request, env);
@@ -803,23 +835,21 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
     status: "NOT_REQUIRED",
     error: null,
   };
-  const previousRun = await store.getRun(shadowGridRunId(previousHour));
-  if (previousRun.length > 0 && !shadowGridRunIsTerminal(previousRun)) {
-    try {
-      await processOpenShadowGridRun(env, previousRun, now, request);
-      previousHourCleanup = { ...previousHourCleanup, status: "PROCESSED" };
-    } catch (error) {
-      previousHourCleanup = {
-        ...previousHourCleanup,
-        status: "FAILED",
-        error: error instanceof Error ? error.message.slice(0, 240) : "Unknown cleanup failure",
-      };
-    }
-  }
-  const runId = shadowGridRunId(currentHour);
+  const runId = expectedRunId ?? shadowGridRunId(currentHour);
   let events = await store.getRun(runId);
+  if (expectedRunId !== null && events.length === 0) {
+    throw new FreshMarketplaceRequestError(
+      400,
+      "INVALID_JSON",
+      "Shadow-grid follow-up references an unknown originating run",
+    );
+  }
   const openingCheckpoint = shadowGridCollectorNow(request, env);
-  if (events.length === 0 && openingCheckpoint.getTime() >= openingDeadline) {
+  if (
+    expectedRunId === null &&
+    events.length === 0 &&
+    openingCheckpoint.getTime() >= openingDeadline
+  ) {
     return json({
       schemaVersion: "positioncrew.bounded-grid-forward-shadow-tick.v1",
       accepted: true,
@@ -852,7 +882,9 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
       });
     }
     events = started.events;
+    assertShadowGridScheduleBinding(events, schedule);
   } else {
+    assertShadowGridScheduleBinding(events, schedule);
     events = await processOpenShadowGridRun(env, events, now, request);
   }
   const latest = events.at(-1);
