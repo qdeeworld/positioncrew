@@ -55,6 +55,16 @@ describe("lending rescue provider", () => {
     expect(result.status).toBe("NO_ACTION");
     expect(result.recommendation).toBeNull();
   });
+
+  it("returns an explicit refusal for an empty block-pinned position", () => {
+    const request = lendingFixture();
+    request.position = { collateral: [], debt: [] };
+    const result = createLendingRescueDeliverable(request, FIXTURE_NOW);
+
+    expect(result.status).toBe("REFUSED_CONSTRAINTS");
+    expect(result.recommendation).toBeNull();
+    expect(result.refusalReasons[0]).toContain("collateral balance");
+  });
 });
 
 describe("lending rescue evaluator", () => {

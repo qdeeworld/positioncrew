@@ -35,6 +35,7 @@ import type {
   FounderAgentAdvantagePublicationStatus,
   PublicationLoadState,
   BenchmarkRepeatabilityResponse,
+  CurrentLendingObservation,
   FixtureJobResponse,
   FreshMarketplaceChain,
   JobRequestMode,
@@ -628,14 +629,21 @@ function ReceiptView({
       <div className="receipt-actions">
         <span><ShieldCheck size={14} /> {response.receipt.mode.replaceAll("_", " ")}</span>
         <div>
-          {marketplaceTrace?.receipt && <a href={marketplaceTrace.receipt.publicUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Persisted public receipt</a>}
+          {marketplaceTrace?.receipt && <a href={marketplaceTrace.receipt.publicUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Reload durable receipt</a>}
           {response.receipt.path && <a href={response.receipt.path} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Public receipt</a>}
           <button type="button" onClick={downloadReceipt}><Download size={14} /> Download</button>
         </div>
       </div>
       <dl className="receipt-facts">
         {marketplaceTrace && <div><dt>Hire ID</dt><dd>{marketplaceTrace.hire.hireId}</dd></div>}
+        {marketplaceTrace && <div><dt>Evidence mode</dt><dd>{marketplaceTrace.hire.evidenceMode.replaceAll("_", " ")}</dd></div>}
+        {marketplaceTrace && <div><dt>Request hash</dt><dd>{marketplaceTrace.hire.requestHash}</dd></div>}
+        {marketplaceTrace?.hire.providerHash && <div><dt>Provider hash</dt><dd>{marketplaceTrace.hire.providerHash}</dd></div>}
+        {marketplaceTrace?.hire.evidenceHash && <div><dt>Evidence hash</dt><dd>{marketplaceTrace.hire.evidenceHash}</dd></div>}
         {marketplaceTrace?.receipt && <div><dt>Receipt ID</dt><dd>{marketplaceTrace.receipt.receiptId}</dd></div>}
+        {marketplaceTrace?.receipt && <div><dt>Result hash</dt><dd>{marketplaceTrace.receipt.responseHash}</dd></div>}
+        {marketplaceTrace?.job.apiDurationMilliseconds != null && <div><dt>Provider API time</dt><dd>{marketplaceTrace.job.apiDurationMilliseconds} ms</dd></div>}
+        {marketplaceTrace?.job.completedAt && <div><dt>Completed at</dt><dd>{formatTimestamp(marketplaceTrace.job.completedAt)} UTC</dd></div>}
         <div><dt>Job ID</dt><dd>{job.jobId}</dd></div>
         <div><dt>Provider</dt><dd>{job.providerId}</dd></div>
         <div><dt>Conformance scorer</dt><dd>{job.evaluatorId}</dd></div>
@@ -661,7 +669,7 @@ function WalletRiskProbe({
   onUseRequest,
 }: {
   telemetry: SystemTelemetry | null;
-  onUseRequest: (request: JobRequest) => void;
+  onUseRequest: (request: JobRequest, observation: CurrentLendingObservation) => void;
 }) {
   const [account, setAccount] = useState("");
   const [probe, setProbe] = useState<VenusAccountProbe | null>(null);
@@ -680,7 +688,18 @@ function WalletRiskProbe({
         const body = await response.json().catch(() => null) as { details?: unknown } | null;
         throw new Error(Array.isArray(body?.details) ? String(body.details[0]) : `Wallet probe failed (${response.status})`);
       }
-      setProbe(await response.json() as VenusAccountProbe);
+      const next = await response.json() as VenusAccountProbe;
+      setProbe(next);
+      if (next.rescueRequest) {
+        const source = objectValue((next.rescueRequest.sources as unknown[] | undefined)?.[0]);
+        const observedAt = String(source.observedAt ?? "");
+        if (!observedAt) throw new Error("Venus probe returned incomplete block evidence");
+        onUseRequest(next.rescueRequest, {
+          blockNumber: next.source.blockNumber,
+          observedAt,
+          explorerUrl: next.source.explorerUrl,
+        });
+      }
     } catch (probeError) {
       setError(probeError instanceof Error ? probeError.message : "Wallet probe failed");
     } finally {
@@ -713,7 +732,7 @@ function WalletRiskProbe({
         </label>
         <button type="button" onClick={inspect} disabled={loading || account.trim().length !== 42}>
           {loading ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}
-          {loading ? "Reading" : "Inspect"}
+          {loading ? "Loading" : "Load position"}
         </button>
       </div>
       {error && <div className="wallet-probe-error" id="wallet-probe-error" role="alert"><AlertTriangle size={14} /> {error}</div>}
@@ -730,15 +749,9 @@ function WalletRiskProbe({
             <div><dt>Markets</dt><dd>{probe.position.markets.length}</dd></div>
           </dl>
           <p>{probe.boundary}</p>
-          {probe.rescueRequest && (
-            <button
-              className="wallet-probe-use"
-              type="button"
-              onClick={() => onUseRequest(probe.rescueRequest!)}
-            >
-              Use live position <ArrowRight size={14} aria-hidden="true" />
-            </button>
-          )}
+          {probe.rescueRequest
+            ? <span className="wallet-probe-loaded" role="status"><CheckCircle2 size={14} aria-hidden="true" /> Current request loaded</span>
+            : <p role="status">No current rescue request was returned. Reload the account before hiring.</p>}
         </div>
       )}
     </section>
@@ -1012,7 +1025,11 @@ export function JobWorkspace({
   marketplaceTrace: FreshMarketplaceChain | null;
   sessionJobs: SessionJob[];
   loading: boolean;
-  onRun: (request: Record<string, unknown>, mode: JobRequestMode) => Promise<void>;
+  onRun: (
+    request: Record<string, unknown>,
+    mode: JobRequestMode,
+    observation?: CurrentLendingObservation,
+  ) => Promise<void>;
   onSelectJob: (job: SessionJob) => void;
   onSelectService: (service: ServiceId) => void;
   telemetry: SystemTelemetry | null;
@@ -1028,18 +1045,23 @@ export function JobWorkspace({
   const task = TASKS.find((candidate) => candidate.id === service) ?? TASKS[0];
   const [draft, setDraft] = useState<JobDraft>(EMPTY_DRAFT);
   const [resultView, setResultView] = useState<ResultView>("summary");
-  const [inputMode, setInputMode] = useState<WorkspaceInputMode>("locked");
+  const [inputMode, setInputMode] = useState<WorkspaceInputMode>(
+    selectedService === "LENDING_RESCUE" || selectedService === "YIELD_OPTIMIZATION"
+      ? "interactive"
+      : "locked",
+  );
   const [liveRequest, setLiveRequest] = useState<JobRequest | null>(null);
+  const [liveLendingObservation, setLiveLendingObservation] = useState<CurrentLendingObservation | null>(null);
   const liveRequestRef = useRef<JobRequest | null>(null);
   const shownResponse = activeJob?.response ?? null;
   const fixtureRequest = fixture?.result.request;
   const inputRequest = inputMode === "locked"
     ? fixtureRequest
-    : liveRequest ?? fixtureRequest;
+    : liveRequest ?? (service === "LENDING_RESCUE" ? undefined : fixtureRequest);
   const liveSourceId = String(
     objectValue((liveRequest?.sources as unknown[] | undefined)?.[0]).sourceId ?? "",
   );
-  const liveBlockNumber = liveSourceId.match(/-block-(\d+)/)?.[1] ?? "";
+  const liveBlockNumber = liveLendingObservation?.blockNumber ?? liveSourceId.match(/-block-(\d+)/)?.[1] ?? "";
   const liveSourceLabel = liveSourceId.startsWith("pancake-position-mainnet-block-")
     ? "PancakeSwap position"
     : liveSourceId.startsWith("pancake-v3-mainnet-block-")
@@ -1054,9 +1076,10 @@ export function JobWorkspace({
 
   useEffect(() => {
     setResultView("summary");
-    setInputMode(service === "YIELD_OPTIMIZATION" ? "interactive" : "locked");
+    setInputMode(service === "LENDING_RESCUE" || service === "YIELD_OPTIMIZATION" ? "interactive" : "locked");
     liveRequestRef.current = null;
     setLiveRequest(null);
+    setLiveLendingObservation(null);
     setDraft(draftFromRequest(fixtureRequest));
   }, [service]);
 
@@ -1072,9 +1095,15 @@ export function JobWorkspace({
     () => inputMode === "interactive" && Boolean(inputRequest && draftRequest && JSON.stringify(inputRequest) !== JSON.stringify(draftRequest)),
     [inputMode, inputRequest, draftRequest],
   );
-  const liveMarketPending = inputMode === "interactive" && !liveRequest &&
-    (service === "BOUNDED_GRID" || service === "YIELD_OPTIMIZATION");
-  const inputsDisabled = !fixture || loading || inputMode === "locked" || liveMarketPending;
+  const liveMarketPending = inputMode === "interactive" && (
+    (service === "LENDING_RESCUE" && (!liveRequest || !liveLendingObservation)) ||
+    (!liveRequest && (service === "BOUNDED_GRID" || service === "YIELD_OPTIMIZATION"))
+  );
+  const currentLendingHireReady = service === "LENDING_RESCUE" &&
+    inputMode === "interactive" &&
+    Boolean(liveRequest && liveLendingObservation);
+  const inputsDisabled = (!fixture && !currentLendingHireReady) ||
+    loading || inputMode === "locked" || liveMarketPending || service === "LENDING_RESCUE";
 
   function updateDraft<K extends keyof JobDraft>(key: K, value: JobDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -1082,15 +1111,22 @@ export function JobWorkspace({
 
   async function submitJob() {
     if (!inputRequest || !draftRequest) return;
+    if (service === "LENDING_RESCUE" && (!liveRequest || !liveLendingObservation)) return;
     const next = inputMode === "locked"
       ? structuredClone(inputRequest)
+      : service === "LENDING_RESCUE"
+        ? structuredClone(liveRequest!)
       : liveRequest
         ? structuredClone(draftRequest)
         : freshInteractiveRequest(draftRequest);
     const mode: JobRequestMode = inputMode === "locked"
       ? "FROZEN_FIXTURE"
       : "CALLER_SUPPLIED_OBSERVATIONS";
-    await onRun(next as Record<string, unknown>, mode);
+    await onRun(
+      next as Record<string, unknown>,
+      mode,
+      service === "LENDING_RESCUE" ? liveLendingObservation ?? undefined : undefined,
+    );
   }
 
   function selectInputMode(mode: WorkspaceInputMode) {
@@ -1102,10 +1138,11 @@ export function JobWorkspace({
     setResultView("summary");
   }
 
-  function useLiveRequest(request: JobRequest) {
+  function useLiveRequest(request: JobRequest, observation?: CurrentLendingObservation) {
     const next = structuredClone(request);
     liveRequestRef.current = next;
     setLiveRequest(next);
+    setLiveLendingObservation(observation ?? null);
     setInputMode("interactive");
     setDraft(draftFromRequest(request));
     setResultView("summary");
@@ -1132,10 +1169,14 @@ export function JobWorkspace({
           <div className="section-bar">
             <div><span className="section-kicker">Request</span><h2 id="composer-title">{provider?.name ?? task.title}</h2></div>
             <div className="composer-mode-actions">
-              <div className="input-mode-switch" role="group" aria-label="Request evidence mode">
-                <button type="button" aria-pressed={inputMode === "interactive"} onClick={() => selectInputMode("interactive")} disabled={loading}>Interactive</button>
-                <button type="button" aria-pressed={inputMode === "locked"} onClick={() => selectInputMode("locked")} disabled={loading}>Locked receipt</button>
-              </div>
+              {service === "LENDING_RESCUE" ? (
+                <a className="historical-evidence-link" href="#evidence">Historical replay in Evidence <ArrowRight size={12} aria-hidden="true" /></a>
+              ) : (
+                <div className="input-mode-switch" role="group" aria-label="Request evidence mode">
+                  <button type="button" aria-pressed={inputMode === "interactive"} onClick={() => selectInputMode("interactive")} disabled={loading}>Interactive</button>
+                  <button type="button" aria-pressed={inputMode === "locked"} onClick={() => selectInputMode("locked")} disabled={loading}>Evidence replay</button>
+                </div>
+              )}
               {customRequest && (
                 <button type="button" onClick={() => setDraft(draftFromRequest(inputRequest))} disabled={loading} title="Reset interactive bounds">
                   <RefreshCw size={13} aria-hidden="true" /> Reset
@@ -1215,9 +1256,13 @@ export function JobWorkspace({
             <span>{inputMode === "locked"
               ? "Historical August 12 fixture. The public receipt is reproducible, but the instruction is no longer executable."
               : liveRequest
-                ? `Block-pinned ${liveSourceLabel} from BSC block ${liveBlockNumber || "unknown"}. Limits remain editable; observations are not rebased.`
+                ? service === "LENDING_RESCUE"
+                  ? `Block-pinned Venus position from BSC block ${liveBlockNumber || "unknown"}. The exact inspected request is persisted; the result is an unsigned plan or refusal, not a wallet transaction.`
+                  : `Block-pinned ${liveSourceLabel} from BSC block ${liveBlockNumber || "unknown"}. Limits remain editable; observations are not rebased.`
               : liveMarketPending
-                ? service === "YIELD_OPTIMIZATION"
+                ? service === "LENDING_RESCUE"
+                  ? "Enter a Venus account and load its current block-pinned position. Hire remains disabled until the exact request and block evidence are ready."
+                  : service === "YIELD_OPTIMIZATION"
                   ? "Waiting for a block-pinned Venus market read. Interactive allocation stays disabled if rates, cash, oracle, token, or gas evidence is unavailable."
                   : "Waiting for a block-pinned PancakeSwap market read. Interactive grid construction stays disabled if live price, reserve, volatility, or gas evidence is unavailable."
               : customRequest
@@ -1240,20 +1285,24 @@ export function JobWorkspace({
           )}
           <div className="composer-footer">
             <span>
-              <strong>{inputMode === "locked" && service !== "YIELD_OPTIMIZATION"
+              <strong>{service === "LENDING_RESCUE" && inputMode === "interactive"
                 ? "$0.00"
+                : inputMode === "locked" && service !== "YIELD_OPTIMIZATION"
+                  ? "$0.00"
                 : inputMode === "locked"
                   ? "Free historical simulation"
                   : "Free provider trial"}</strong>
-              <small>{inputMode === "locked" && service !== "YIELD_OPTIMIZATION"
-                ? "No wallet · no payment · public locked receipt"
+              <small>{service === "LENDING_RESCUE" && inputMode === "interactive"
+                ? "No wallet · no payment · current request and result persist"
+                : inputMode === "locked" && service !== "YIELD_OPTIMIZATION"
+                  ? "No wallet · no payment · historical evidence replay"
                 : inputMode === "locked"
                   ? "No persisted marketplace hire"
                   : `${provider?.price.amount ?? "5"} ${provider?.price.token ?? "TEST_USDC"} listed price · no wallet required`}</small>
             </span>
-            <button className="primary-action" type="button" onClick={submitJob} aria-describedby="request-boundary" disabled={loading || !fixture || liveMarketPending || (service === "LENDING_RESCUE" && !draft.allowRepay && !draft.allowCollateral)}>
+            <button className="primary-action" type="button" onClick={submitJob} aria-describedby="request-boundary" disabled={loading || (!fixture && !currentLendingHireReady) || liveMarketPending || (service === "LENDING_RESCUE" && !draft.allowRepay && !draft.allowCollateral)}>
               {loading ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
-              {loading ? (marketplaceTrace?.job.status.replaceAll("_", " ") ?? "Recording hire") : inputMode === "locked" && service !== "YIELD_OPTIMIZATION" ? "Hire and run" : `Run ${serviceLabel(service).toLowerCase()} simulation`}
+              {loading ? (marketplaceTrace?.job.status.replaceAll("_", " ") ?? "Recording hire") : service === "LENDING_RESCUE" && inputMode === "interactive" ? "Hire and run current position" : inputMode === "locked" && service !== "YIELD_OPTIMIZATION" ? "Replay historical receipt" : `Run ${serviceLabel(service).toLowerCase()} simulation`}
               {!loading && <ArrowRight size={15} />}
             </button>
           </div>
@@ -1287,7 +1336,7 @@ export function JobWorkspace({
               <span className="empty-result-icon"><ShieldCheck size={28} strokeWidth={1.6} /></span>
               <span className="empty-result-kicker">READY FOR REQUEST</span>
               <h2>Your bounded action will appear here.</h2>
-              <p>One no-wallet trial call produces the decision, guardrails, machine JSON, and receipt.</p>
+              <p>{service === "LENDING_RESCUE" ? "Load a current Venus position, then one no-wallet hire produces a persisted plan or refusal and durable receipt." : "One no-wallet trial call produces the decision, guardrails, machine JSON, and receipt."}</p>
               <div className="empty-result-flow" aria-hidden="true">
                 <span><b>01</b> Request</span><ArrowRight size={14} /><span><b>02</b> Evaluate</span><ArrowRight size={14} /><span><b>03</b> Receipt</span>
               </div>

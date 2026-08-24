@@ -68,6 +68,7 @@ describe("BSC telemetry math", () => {
   });
 
   it("retries provider faults but never retries EVM execution failures", () => {
+    expect(isRetryableRpcFailure({ code: -32_002, message: "the resource eth_call is not available" })).toBe(true);
     expect(isRetryableRpcFailure({ code: -32_005, message: "rate limit exceeded" })).toBe(true);
     expect(isRetryableRpcFailure({ code: -32_603, message: "temporary internal error" })).toBe(true);
     expect(isRetryableRpcFailure({

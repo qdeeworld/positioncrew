@@ -136,6 +136,20 @@ export function createLendingRescueDeliverable(
     });
   }
 
+  if (request.position.collateral.length === 0 || request.position.debt.length === 0) {
+    return LendingRescueDeliverableSchema.parse({
+      ...common,
+      status: "REFUSED_CONSTRAINTS",
+      decision: "NONE",
+      summary: "No complete Venus collateral-and-debt position was available for rescue analysis.",
+      recommendation: null,
+      alternatives: [],
+      refusalReasons: [
+        "A lending rescue requires at least one observed collateral balance and one observed debt balance.",
+      ],
+    });
+  }
+
   if (current.debtValueUsd === 0n || current.healthFactor === null) {
     return LendingRescueDeliverableSchema.parse({
       ...common,

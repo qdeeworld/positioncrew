@@ -283,154 +283,150 @@ function liveLpRequest(now: Date, tokenId: string, blockNumber: string) {
   return request;
 }
 
-test("a cold buyer can discover, hire, and inspect the lending provider", async ({ page }) => {
-  await page.goto("/#marketplace");
-  await expect(page.getByRole("heading", { name: "Hire a capital operator." })).toBeVisible();
-  await expect(page.getByText("4/4", { exact: true }).last()).toBeVisible();
-  await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({ timeout: 20_000 });
-
-  await page.getByRole("button", { name: "Select and continue to Hire and run" }).click();
-  await expect(page.getByRole("heading", { name: "Define the job. Inspect the action." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Locked receipt" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Interactive" }).click();
-  await expect(page.getByText("Free provider trial", { exact: true })).toBeVisible();
-  await expect(page.getByText("5 TEST_USDC listed price · no wallet required", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Interactive" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Run lending rescue simulation" }).click();
-
-  await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
-  await expect(page.getByText(/inputs were not fetched live/)).toBeVisible();
-  await expect(page.getByText("100/100", { exact: true }).first()).toBeVisible();
-  const advantageStatus = page.getByRole("region", { name: "Founder Agent Advantage comparison status" });
-  await expect(advantageStatus.getByText("Founder comparison published", { exact: true })).toBeVisible();
-  await expect(advantageStatus).toContainText("3/3 frozen tasks record exact canonical output parity");
-  await expect(advantageStatus.getByRole("link", { name: "Open founder report" })).toHaveAttribute(
-    "href",
-    "/evidence/agent-advantage-founder/",
-  );
-  await page.getByRole("button", { name: "JSON" }).click();
-  await expect(page.getByText("application/json", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Receipt", exact: true }).click();
-  await expect(page.getByText("Score receipt", { exact: true })).toBeVisible();
-  await expect(page.getByText("SESSION EMBEDDED", { exact: true })).toBeVisible();
-
-  await page.getByRole("button", { name: "Locked receipt" }).click();
-  await expect(page.getByText(/Historical August 12 fixture/)).toBeVisible();
-  await expect(page.locator(".composer-footer").getByText("$0.00", { exact: true })).toBeVisible();
-  await expect(page.getByText("No wallet · no payment · public locked receipt", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Hire and run" })).toBeVisible();
-});
-
-test("a lost hire response reuses the unresolved idempotency key", async ({ page }) => {
-  const idempotencyKeys: string[] = [];
-  await page.route(/\/api\/benchmark-hires$/, async (route) => {
-    const body = route.request().postDataJSON() as { idempotencyKey: string };
-    idempotencyKeys.push(body.idempotencyKey);
-    await route.abort("connectionreset");
-  });
-
-  await page.goto("/#marketplace");
-  await page.getByRole("button", { name: "Select and continue to Hire and run" }).click();
-  const hireButton = page.getByRole("button", { name: "Hire and run" });
-  await hireButton.click();
-  await expect.poll(() => idempotencyKeys.length).toBe(1);
-  await expect(hireButton).toBeEnabled();
-  await hireButton.click();
-  await expect.poll(() => idempotencyKeys.length).toBe(2);
-  expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
-});
-
-test("a lost job response resumes the persisted hire instead of creating another", async ({ page }) => {
-  const hireId = "11111111-1111-4111-8111-111111111111";
-  let createCount = 0;
-  let jobCount = 0;
-  await page.route(/\/api\/benchmark-hires$/, async (route) => {
-    createCount += 1;
-    const request = route.request().postDataJSON() as { idempotencyKey: string };
-    await route.fulfill({
-      status: 201,
-      contentType: "application/json",
-      body: JSON.stringify({
-        schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
-        claimBoundary: ["Frozen fixture.", "$0 and no wallet.", "Server receipt only.", "No external buyer claim."],
-        hire: {
-          hireId,
-          idempotencyKey: request.idempotencyKey,
-          providerSlug: "lending-rescue",
-          providerId: "positioncrew:lending-rescue:v1",
-          benchmarkSlug: "lending-rescue",
-          service: "LENDING_RESCUE",
-          evidenceMode: "HISTORICAL_FIXTURE",
-          commerce: { directCostUsd: "0.00", walletRequired: false, settlement: "NO_PAYMENT" },
-          request: {},
-          requestHash: "sha256:" + "a".repeat(64),
-          createdAt: new Date().toISOString(),
+function currentLendingResponse(
+  request: Record<string, unknown>,
+  now: Date,
+  refused = false,
+) {
+  const expiresAt = new Date(now.getTime() + 5 * 60_000).toISOString();
+  const recommendation = refused ? null : {
+    kind: "REPAY_DEBT",
+    amount: "152",
+    amountBaseUnits: "152000000000000000000",
+    amountUsd: "152",
+    asset: {
+      symbol: "USDT",
+      address: "0x55d398326f99059fF775485246999027B3197955",
+      decimals: 18,
+    },
+    projectedHealthFactor: "1.25",
+    estimatedGasUsd: "0.05",
+    executeBefore: expiresAt,
+    maxSlippageBps: 30,
+    preconditions: ["Revalidate the Venus position before execution."],
+  };
+  return {
+    schemaVersion: "positioncrew.fixture-job-response.v1",
+    evidenceMode: "CALLER_SUPPLIED_OBSERVATIONS",
+    commerceMode: "IN_MEMORY_CONFORMANCE",
+    advantageStatus: "PENDING_INDEPENDENT_BLIND_EVALUATION",
+    generatedAt: now.toISOString(),
+    claimBoundary: ["Unsigned provider output.", "No wallet transaction or payment."],
+    benchmarkLock: null,
+    receipt: {
+      mode: "SESSION_EMBEDDED",
+      path: null,
+      evaluationHash: `sha256:${"e".repeat(64)}`,
+    },
+    result: {
+      job: {
+        jobId: "22222222-2222-4222-8222-222222222222",
+        state: "COMPLETED",
+        envelopeHash: `sha256:${"a".repeat(64)}`,
+        providerId: "positioncrew:lending-rescue:v1",
+        evaluatorId: "positioncrew:conformance:v1",
+        history: [
+          { state: "CREATED", at: now.toISOString(), reference: `sha256:${"a".repeat(64)}` },
+          { state: "COMPLETED", at: now.toISOString(), reference: `sha256:${"b".repeat(64)}` },
+        ],
+        deliverable: { deliverableHash: `sha256:${"b".repeat(64)}` },
+      },
+      request,
+      deliverable: {
+        service: "LENDING_RESCUE",
+        status: refused ? "REFUSED_CONSTRAINTS" : "ACTIONABLE",
+        decision: refused ? "REFUSED_CONSTRAINTS" : "RESCUE",
+        summary: refused
+          ? "No allowed rescue action fits the wallet inventory and safety limits."
+          : "A bounded debt repayment restores the requested health factor.",
+        expiresAt,
+        recommendation,
+        alternatives: [],
+        position: {
+          collateralValueUsd: "1200",
+          debtValueUsd: "920",
+          currentHealthFactor: "1.04347826",
+          stressedHealthFactor: "0.93913043",
+          targetHealthFactor: "1.25",
         },
-        job: {
-          jobId: "22222222-2222-4222-8222-222222222222",
-          state: "CREATED",
-          status: "HIRE_RECORDED",
-          createdAt: new Date().toISOString(),
-          startedAt: null,
-          completedAt: null,
-          apiDurationMilliseconds: null,
-          error: null,
-        },
-        receipt: null,
-      }),
-    });
-  });
-  await page.route(new RegExp("/api/benchmark-hires/" + hireId + "/jobs$"), async (route) => {
-    jobCount += 1;
-    await route.abort("connectionreset");
-  });
+        invalidationConditions: ["Position state changes after the pinned block."],
+      },
+      evaluation: {
+        score: 100,
+        passed: true,
+        evaluationHash: `sha256:${"e".repeat(64)}`,
+        checks: [],
+      },
+    },
+  };
+}
 
-  await page.goto("/#marketplace");
-  await page.getByRole("button", { name: "Select and continue to Hire and run" }).click();
-  const hireButton = page.getByRole("button", { name: "Hire and run" });
-  await hireButton.click();
-  await expect.poll(() => jobCount).toBe(1);
-  await expect(hireButton).toBeEnabled();
-  await hireButton.click();
-  await expect.poll(() => jobCount).toBe(2);
-  expect(createCount).toBe(1);
-});
-
-test("slow remote hydration never blocks provider discovery", async ({ page }) => {
-  await page.route(/\/api\/(providers|commerce\/aacp)(\?.*)?$/, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
-    await route.abort("timedout");
-  });
-
-  await page.goto("/#marketplace");
-  await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({
-    timeout: 3_000,
-  });
-  await expect(page.getByRole("button", { name: "Select and continue to Hire and run" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /LP Range Operator v1/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Yield Allocator v1/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Bounded Grid Builder v1/ })).toBeVisible();
-  await expect(page.getByText("Connecting", { exact: true })).toHaveText("Connecting");
-});
-
-test("BSC telemetry and Venus wallet risk are independently inspectable", async ({ page }) => {
-  await installDeterministicLiveProbeRoutes(page);
-  await page.goto("/#marketplace");
-  await expect(page.getByText("LIVE BSC DATA", { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".market-system-panel").getByText("4/4", { exact: true })).toBeVisible();
-
-  await page.goto("/#jobs");
-  await page.getByPlaceholder("0x account address").fill("0x0000000000000000000000000000000000000001");
-  await page.getByRole("button", { name: "Inspect" }).click();
-  await expect(page.getByText("NO POSITION", { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("link", { name: /Block [0-9,]+/ })).toHaveAttribute("href", /bscscan\.com\/block/);
-});
-
-test("a block-pinned Venus position can become the provider request", async ({ page }) => {
+async function installCurrentLendingHireRoutes(
+  page: Page,
+  options: { abortCreate?: boolean; abortRun?: boolean; refused?: boolean } = {},
+) {
+  const now = new Date();
   const account = "0x1111111111111111111111111111111111111111";
   const blockNumber = "115607036";
-  const now = new Date();
+  const hireId = "11111111-1111-4111-8111-111111111111";
+  const receiptId = "33333333-3333-4333-8333-333333333333";
   const rescueRequest = liveLendingRequest(now, account, blockNumber);
+  const source = (rescueRequest.sources as Array<Record<string, unknown>>)[0];
+  const observation = {
+    blockNumber,
+    observedAt: String(source.observedAt),
+    explorerUrl: `https://bscscan.com/block/${blockNumber}`,
+  };
+  const response = currentLendingResponse(rescueRequest, now, options.refused);
+  const createBodies: Array<Record<string, unknown>> = [];
+  let runCount = 0;
+  let receiptLoadCount = 0;
+
+  const chain = (state: "CREATED" | "RUNNING" | "COMPLETED") => ({
+    schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
+    claimBoundary: [
+      "Current block-pinned input.",
+      "$0 and no wallet.",
+      "Unsigned plan or refusal only.",
+      "No payment or transaction execution.",
+    ],
+    hire: {
+      hireId,
+      idempotencyKey: String(createBodies.at(-1)?.idempotencyKey ?? "44444444-4444-4444-8444-444444444444"),
+      providerSlug: "lending-rescue",
+      providerId: "positioncrew:lending-rescue:v1",
+      benchmarkSlug: "lending-rescue",
+      service: "LENDING_RESCUE",
+      evidenceMode: "CURRENT_BLOCK_PINNED",
+      commerce: { directCostUsd: "0.00", walletRequired: false, settlement: "NO_PAYMENT" },
+      request: rescueRequest,
+      requestHash: `sha256:${"c".repeat(64)}`,
+      evidence: observation,
+      evidenceHash: `sha256:${"d".repeat(64)}`,
+      providerHash: `sha256:${"f".repeat(64)}`,
+      createdAt: now.toISOString(),
+    },
+    job: {
+      jobId: "22222222-2222-4222-8222-222222222222",
+      state,
+      status: state === "CREATED" ? "HIRE_RECORDED" : state,
+      createdAt: now.toISOString(),
+      startedAt: state === "CREATED" ? null : now.toISOString(),
+      completedAt: state === "COMPLETED" ? now.toISOString() : null,
+      apiDurationMilliseconds: state === "COMPLETED" ? 43 : null,
+      error: null,
+    },
+    receipt: state === "COMPLETED" ? {
+      receiptId,
+      publicUrl: `/api/benchmark-receipts/${receiptId}`,
+      responseHash: `sha256:${"9".repeat(64)}`,
+      deliverableHash: `sha256:${"b".repeat(64)}`,
+      evaluationHash: `sha256:${"e".repeat(64)}`,
+      createdAt: now.toISOString(),
+      response,
+    } : null,
+  });
+
   await page.route("**/api/wallets/*/venus", async (route) => {
     await route.fulfill({
       status: 200,
@@ -472,22 +468,196 @@ test("a block-pinned Venus position can become the provider request", async ({ p
         source: {
           comptroller: "0xfD36E2c2a6789Db23113685031d7F16329158384",
           blockNumber,
-          explorerUrl: `https://bscscan.com/block/${blockNumber}`,
+          explorerUrl: observation.explorerUrl,
         },
         boundary: "Block-pinned Venus Classic reconstruction.",
       }),
     });
   });
+  await page.route(/\/api\/benchmark-hires$/, async (route) => {
+    createBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (options.abortCreate) return route.abort("connectionreset");
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(chain("CREATED")) });
+  });
+  await page.route(new RegExp(`/api/benchmark-hires/${hireId}/jobs$`), async (route) => {
+    runCount += 1;
+    if (options.abortRun) return route.abort("connectionreset");
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(chain("RUNNING")) });
+  });
+  await page.route(new RegExp(`/api/benchmark-hires/${hireId}$`), async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(chain("COMPLETED")) });
+  });
+  await page.context().route(`**/api/benchmark-receipts/${receiptId}`, async (route) => {
+    receiptLoadCount += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(chain("COMPLETED")) });
+  });
+
+  return {
+    account,
+    blockNumber,
+    hireId,
+    receiptId,
+    rescueRequest,
+    observation,
+    createBodies,
+    get runCount() { return runCount; },
+    get receiptLoadCount() { return receiptLoadCount; },
+  };
+}
+
+test("a cold buyer can discover, hire, and inspect the lending provider", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page);
+  await page.goto("/#marketplace");
+  await expect(page.getByRole("heading", { name: "Hire a capital operator." })).toBeVisible();
+  await expect(page.getByText("4/4", { exact: true }).last()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole("button", { name: "Load current position and hire" }).click();
+  await expect(page.getByRole("heading", { name: "Define the job. Inspect the action." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Historical replay in Evidence" })).toHaveAttribute("href", "#evidence");
+  await expect(page.getByText(/Hire remains disabled until the exact request and block evidence are ready/)).toBeVisible();
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
+  await expect(page.getByText("Current request loaded", { exact: true })).toBeVisible();
+  await expect(page.getByText(`Block-pinned Venus position from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Hire and run current position" }).click();
+
+  await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
+  await expect(page.locator(".result-boundary")).toContainText(
+    "Block-pinned Venus input. The provider output is unsigned and must be revalidated against current protocol state before execution.",
+  );
+  await expect(page.getByText("100/100", { exact: true }).first()).toBeVisible();
+  const advantageStatus = page.getByRole("region", { name: "Founder Agent Advantage comparison status" });
+  await expect(advantageStatus.getByText("Founder comparison published", { exact: true })).toBeVisible();
+  await expect(advantageStatus).toContainText("3/3 frozen tasks record exact canonical output parity");
+  await expect(advantageStatus.getByRole("link", { name: "Open founder report" })).toHaveAttribute(
+    "href",
+    "/evidence/agent-advantage-founder/",
+  );
+  await page.getByRole("button", { name: "JSON" }).click();
+  await expect(page.getByText("application/json", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Receipt", exact: true }).click();
+  await expect(page.getByText("Score receipt", { exact: true })).toBeVisible();
+  await expect(page.getByText("SESSION EMBEDDED", { exact: true })).toBeVisible();
+  await expect(page.getByText("CURRENT BLOCK PINNED", { exact: true })).toBeVisible();
+  await expect(page.getByText("43 ms", { exact: true })).toBeVisible();
+  expect(mockedHire.createBodies).toHaveLength(1);
+  expect(mockedHire.createBodies[0]).toMatchObject({
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    benchmarkSlug: "lending-rescue",
+    providerSlug: "lending-rescue",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    observation: mockedHire.observation,
+  });
+  expect(mockedHire.createBodies[0].request).toEqual(mockedHire.rescueRequest);
+  const [receiptPage] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.getByRole("link", { name: "Reload durable receipt" }).click(),
+  ]);
+  await expect(receiptPage.locator("body")).toContainText(mockedHire.hireId);
+  await receiptPage.reload();
+  await expect(receiptPage.locator("body")).toContainText(`sha256:${"9".repeat(64)}`);
+  expect(mockedHire.receiptLoadCount).toBe(2);
+});
+
+test("a current lending hire does not depend on the historical fixture matrix", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page);
+  await page.route("**/api/matrix", async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Historical fixture matrix unavailable" }),
+    });
+  });
 
   await page.goto("/#jobs");
-  await page.getByPlaceholder("0x account address").fill(account);
-  await page.getByRole("button", { name: "Inspect" }).click();
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
+  await expect(page.getByText("Current request loaded", { exact: true })).toBeVisible();
+  const hireButton = page.getByRole("button", { name: "Hire and run current position" });
+  await expect(hireButton).toBeEnabled();
+  await hireButton.click();
+
+  await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
+  await expect(page.locator('.request-boundary[role="status"]')).toContainText("COMPLETED");
+  expect(mockedHire.createBodies).toHaveLength(1);
+  expect(mockedHire.createBodies[0]).toMatchObject({
+    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+  });
+});
+
+test("a lost hire response reuses the unresolved idempotency key", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page, { abortCreate: true });
+  await page.goto("/#marketplace");
+  await page.getByRole("button", { name: "Load current position and hire" }).click();
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
+  const hireButton = page.getByRole("button", { name: "Hire and run current position" });
+  await hireButton.click();
+  await expect.poll(() => mockedHire.createBodies.length).toBe(1);
+  await expect(hireButton).toBeEnabled();
+  await hireButton.click();
+  await expect.poll(() => mockedHire.createBodies.length).toBe(2);
+  expect(mockedHire.createBodies[1].idempotencyKey).toBe(mockedHire.createBodies[0].idempotencyKey);
+});
+
+test("a lost job response resumes the persisted hire instead of creating another", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page, { abortRun: true });
+  await page.goto("/#marketplace");
+  await page.getByRole("button", { name: "Load current position and hire" }).click();
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
+  const hireButton = page.getByRole("button", { name: "Hire and run current position" });
+  await hireButton.click();
+  await expect.poll(() => mockedHire.runCount).toBe(1);
+  await expect(hireButton).toBeEnabled();
+  await hireButton.click();
+  await expect.poll(() => mockedHire.runCount).toBe(2);
+  expect(mockedHire.createBodies).toHaveLength(1);
+});
+
+test("slow remote hydration never blocks provider discovery", async ({ page }) => {
+  await page.route(/\/api\/(providers|commerce\/aacp)(\?.*)?$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+    await route.abort("timedout");
+  });
+
+  await page.goto("/#marketplace");
+  await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({
+    timeout: 3_000,
+  });
+  await expect(page.getByRole("button", { name: "Load current position and hire" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /LP Range Operator v1/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Yield Allocator v1/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Bounded Grid Builder v1/ })).toBeVisible();
+  await expect(page.getByText("Connecting", { exact: true })).toHaveText("Connecting");
+});
+
+test("BSC telemetry and Venus wallet risk are independently inspectable", async ({ page }) => {
+  await installDeterministicLiveProbeRoutes(page);
+  await page.goto("/#marketplace");
+  await expect(page.getByText("LIVE BSC DATA", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".market-system-panel").getByText("4/4", { exact: true })).toBeVisible();
+
+  await page.goto("/#jobs");
+  await page.getByPlaceholder("0x account address").fill("0x0000000000000000000000000000000000000001");
+  await page.getByRole("button", { name: "Load position" }).click();
+  await expect(page.getByText("NO POSITION", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("link", { name: /Block [0-9,]+/ })).toHaveAttribute("href", /bscscan\.com\/block/);
+});
+
+test("a block-pinned Venus position can become the provider request", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page);
+  await page.goto("/#jobs");
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
   await expect(page.getByText("1.04347826", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Use live position" }).click();
-  await expect(page.getByText(`Block-pinned Venus position from BSC block ${blockNumber}`, { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Run lending rescue" }).click();
+  await expect(page.getByText(`Block-pinned Venus position from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Hire and run current position" }).click();
   await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
   await expect(page.getByText(/Block-pinned Venus input/)).toBeVisible();
+  expect(mockedHire.createBodies[0].request).toEqual(mockedHire.rescueRequest);
 });
 
 test("a block-pinned Pancake market can become a bounded grid request", async ({ page }) => {
@@ -611,16 +781,20 @@ test("all four mandatory capital jobs return category-specific results", async (
   await expect(page.getByText("3 jobs", { exact: true })).toBeVisible();
 });
 
-test("an undersized action cap fails closed", async ({ page }) => {
+test("a current lending refusal persists and remains inspectable", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page, { refused: true });
   await page.goto("/#jobs");
-  await expect(page.getByRole("combobox", { name: "Provider" })).toBeVisible();
-  await page.getByRole("button", { name: "Interactive" }).click();
-  const actionCap = page.getByLabel("Maximum action (USD)");
-  await expect(actionCap).toBeEnabled();
-  await actionCap.fill("100");
-  await page.getByRole("button", { name: "Run lending rescue simulation" }).click();
-  await expect(page.getByText("REFUSED CONSTRAINTS", { exact: true })).toBeVisible();
-  await expect(page.getByText("No allowed rescue action fits the wallet inventory and safety limits.", { exact: true })).toBeVisible();
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
+  await page.getByRole("button", { name: "Hire and run current position" }).click();
+  const durableResult = page.locator(".job-result");
+  await expect(durableResult.getByRole("heading", { name: "REFUSED CONSTRAINTS", exact: true })).toBeVisible();
+  await expect(durableResult.getByText("No allowed rescue action fits the wallet inventory and safety limits.", { exact: true })).toBeVisible();
+  const durableStatus = page.locator('.request-boundary[role="status"]');
+  await expect(durableStatus.getByRole("link", { name: "Public receipt" })).toHaveAttribute(
+    "href",
+    `/api/benchmark-receipts/${mockedHire.receiptId}`,
+  );
 });
 
 test("every non-lending provider accepts custom bounds and fails closed", async ({ page }) => {
@@ -780,6 +954,7 @@ test("the evidence page exposes the precommitted public marketplace deliveries",
 });
 
 test("a published Agent Advantage status exposes the committed report without changing its scope", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page);
   await page.route("**/api/benchmarks/status", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -809,8 +984,9 @@ test("a published Agent Advantage status exposes the committed report without ch
   await expect(page.getByText(/scope remains limited to the published report/)).toBeVisible();
 
   await page.goto("/#jobs");
-  await page.getByRole("button", { name: "Interactive" }).click();
-  await page.getByRole("button", { name: "Run lending rescue simulation" }).click();
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
+  await page.getByRole("button", { name: "Hire and run current position" }).click();
   const resultStatus = page.getByRole("region", { name: "Agent Advantage status" });
   await expect(resultStatus.getByText("Independent report published", { exact: true })).toBeVisible();
   await expect(resultStatus).toContainText("2/3 frozen tasks support the pre-registered advantage rule");

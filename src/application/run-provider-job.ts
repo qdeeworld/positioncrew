@@ -26,11 +26,17 @@ export async function runProviderJob(
   adapter: CommerceAdapter,
   requestInput: PositionCrewRequest,
   now: Date,
+  options: { persistExpiredRefusal?: boolean } = {},
 ): Promise<ProviderJobResult> {
   const request = PositionCrewRequestSchema.parse(requestInput);
   const requestHash = canonicalHash(request);
   const providerId = PROVIDER_IDS[request.service];
   const evaluatorId = `positioncrew:evaluator:${request.service.toLowerCase()}:v1`;
+  const persistExpiredRefusal =
+    options.persistExpiredRefusal === true && now.getTime() >= Date.parse(request.deadline);
+  const commerceDeadline = persistExpiredRefusal
+    ? new Date(now.getTime() + 1).toISOString()
+    : request.deadline;
   let job = await adapter.createJob({
     schemaVersion: "positioncrew.job-envelope.v1",
     idempotencyKey: `${request.service.toLowerCase()}:${request.requestId}`,
@@ -43,7 +49,7 @@ export async function runProviderJob(
       amount: "5",
     },
     createdAt: now.toISOString(),
-    deadline: request.deadline,
+    deadline: commerceDeadline,
   });
   job = await adapter.fund(job.jobId, {
     tokenAddress: TEST_SETTLEMENT_TOKEN.address,
@@ -55,6 +61,9 @@ export async function runProviderJob(
   job = await adapter.assignEvaluator(job.jobId, evaluatorId);
 
   const deliverable = executeProvider(request, now);
+  if (persistExpiredRefusal && deliverable.status !== "REFUSED_EXPIRED") {
+    throw new Error("An expired request may persist only an explicit expired refusal");
+  }
   const deliverableHash = canonicalHash(deliverable);
   job = await adapter.submitDeliverable(job.jobId, {
     schemaVersion: "positioncrew.deliverable-manifest.v1",

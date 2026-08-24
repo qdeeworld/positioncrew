@@ -160,6 +160,7 @@ export function isRetryableRpcFailure(error: NonNullable<RpcResult["error"]>): b
   );
   if (executionFailure) return false;
   return (
+    error.code === -32_002 ||
     error.code === -32_005 ||
     /busy|gateway|header not found|internal error|limit|rate|temporar|timeout/i.test(error.message)
   );
@@ -380,7 +381,7 @@ export interface VenusAccountProbe {
       collateralEnabled: boolean;
     }>;
   };
-  rescueRequest: LendingRescueRequest | null;
+  rescueRequest: LendingRescueRequest;
   source: {
     comptroller: Address;
     blockNumber: string;
@@ -2197,8 +2198,7 @@ export async function inspectVenusAccount(
       availableAmount: tokenAmount(vaiWalletRaw, 18),
     });
   }
-  const rescueRequest = collateral.length > 0 && debt.length > 0
-    ? LendingRescueRequestSchema.parse({
+  const rescueRequest = LendingRescueRequestSchema.parse({
         schemaVersion: "positioncrew.lending-rescue.request.v1",
         service: "LENDING_RESCUE",
         requestId: `venus-live-${account.toLowerCase().slice(2, 10)}-${Date.now()}`,
@@ -2220,8 +2220,7 @@ export async function inspectVenusAccount(
         stressPriceDropBps: options.stressPriceDropBps ?? 1_000,
         oracleDeviationToleranceBps: 100,
         estimatedGasUsd: formatFixed(estimatedGasUsd, 6),
-      })
-    : null;
+      });
   const state =
     activeMarkets.length === 0 ? "NO_POSITION" : shortfall > 0n ? "SHORTFALL" : "LIQUID";
 
@@ -2263,9 +2262,8 @@ export async function inspectVenusAccount(
       blockNumber: BigInt(block.number).toString(),
       explorerUrl: `https://bscscan.com/block/${BigInt(block.number)}`,
     },
-    boundary:
-      rescueRequest
-        ? "The embedded rescue request was reconstructed from block-pinned Venus Classic balances, collateral factors, liquidation thresholds, oracle prices, and wallet inventory. It remains unsigned and must be revalidated before execution."
-        : "This block-pinned Venus Classic account has no reconstructable collateral-and-debt pair, so no rescue request was produced.",
+    boundary: collateral.length > 0 && debt.length > 0
+      ? "The embedded rescue request was reconstructed from block-pinned Venus Classic balances, collateral factors, liquidation thresholds, oracle prices, and wallet inventory. It remains unsigned and must be revalidated before execution."
+      : "This block-pinned Venus Classic account has no reconstructable collateral-and-debt pair. Its embedded request is preserved so the provider can return an explicit, receipted refusal.",
   };
 }

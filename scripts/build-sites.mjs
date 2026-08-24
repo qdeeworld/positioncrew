@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { build } from "esbuild";
 
@@ -7,27 +7,24 @@ const distRoot = resolve(root, "dist");
 const clientRoot = resolve(distRoot, "client");
 const serverRoot = resolve(distRoot, "server");
 const drizzleRoot = resolve(root, "drizzle");
-const drizzleMetaRoot = resolve(drizzleRoot, "meta");
-const expectedMigration = "0000_fresh_benchmark_hires.sql";
+const migrationsRoot = resolve(root, "migrations");
+const hostingManifestPath = resolve(root, ".openai", "hosting.json");
+const hostingManifest = JSON.parse(await readFile(hostingManifestPath, "utf8"));
 
-const drizzleEntries = await readdir(drizzleRoot, { withFileTypes: true });
-const drizzleInventory = drizzleEntries.map((entry) => entry.name).sort();
-if (
-  JSON.stringify(drizzleInventory) !== JSON.stringify([expectedMigration, "meta"]) ||
-  !drizzleEntries.find((entry) => entry.name === expectedMigration)?.isFile() ||
-  !drizzleEntries.find((entry) => entry.name === "meta")?.isDirectory()
-) {
-  throw new Error("Expected exactly one generated fresh-marketplace migration and its Drizzle metadata");
+if (hostingManifest.d1 !== "DB") {
+  throw new Error("Expected the PositionCrew hosting manifest to expose the DB D1 binding");
 }
-const drizzleMetaEntries = await readdir(drizzleMetaRoot, { withFileTypes: true });
-const drizzleMetaInventory = drizzleMetaEntries.map((entry) => entry.name).sort();
+
+const migrationEntries = await readdir(migrationsRoot, { withFileTypes: true });
+const migrationFiles = migrationEntries
+  .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
+  .map((entry) => entry.name)
+  .sort();
 if (
-  JSON.stringify(drizzleMetaInventory) !==
-    JSON.stringify(["0000_snapshot.json", "_journal.json"]) ||
-  !drizzleMetaEntries.find((entry) => entry.name === "_journal.json")?.isFile() ||
-  !drizzleMetaEntries.find((entry) => entry.name === "0000_snapshot.json")?.isFile()
+  migrationFiles.length === 0 ||
+  migrationFiles.some((name) => !/^\d{4}_[a-z0-9_]+\.sql$/.test(name))
 ) {
-  throw new Error("Expected exactly the generated Drizzle journal and initial snapshot");
+  throw new Error("Expected one or more ordered SQL migrations in migrations/");
 }
 
 await rm(distRoot, { recursive: true, force: true });
@@ -37,12 +34,17 @@ await mkdir(resolve(distRoot, ".openai"), { recursive: true });
 
 await cp(resolve(root, "dist-web"), clientRoot, { recursive: true });
 await cp(
-  resolve(root, ".openai", "hosting.json"),
+  hostingManifestPath,
   resolve(distRoot, ".openai", "hosting.json"),
 );
 await cp(
   drizzleRoot,
   resolve(distRoot, ".openai", "drizzle"),
+  { recursive: true },
+);
+await cp(
+  migrationsRoot,
+  resolve(distRoot, ".openai", "migrations"),
   { recursive: true },
 );
 
@@ -58,24 +60,43 @@ await build({
   logLevel: "info",
 });
 
-await writeFile(
-  resolve(serverRoot, "wrangler.json"),
-  `${JSON.stringify(
+const workerConfig = {
+  name: "positioncrew-marketplace",
+  main: "index.js",
+  compatibility_date: "2026-08-12",
+  compatibility_flags: ["nodejs_compat"],
+  no_bundle: true,
+  assets: {
+    directory: "../client",
+    binding: "ASSETS",
+    run_worker_first: true,
+    not_found_handling: "single-page-application",
+  },
+  observability: { enabled: true },
+};
+
+// Wrangler requires an identifier for local D1 state. This sentinel is not a
+// production resource ID, and the local config is used only with --local.
+const localWorkerConfig = {
+  ...workerConfig,
+  name: "positioncrew-marketplace-local",
+  d1_databases: [
     {
-      name: "positioncrew-marketplace",
-      main: "index.js",
-      compatibility_date: "2026-08-12",
-      compatibility_flags: ["nodejs_compat"],
-      no_bundle: true,
-      assets: {
-        directory: "../client",
-        binding: "ASSETS",
-        run_worker_first: true,
-        not_found_handling: "single-page-application",
-      },
-      observability: { enabled: true },
+      binding: hostingManifest.d1,
+      database_name: "positioncrew-marketplace-local",
+      database_id: "00000000-0000-0000-0000-000000000001",
+      migrations_dir: "../.openai/migrations",
     },
-    null,
-    2,
-  )}\n`,
-);
+  ],
+};
+
+await Promise.all([
+  writeFile(
+    resolve(serverRoot, "wrangler.json"),
+    `${JSON.stringify(workerConfig, null, 2)}\n`,
+  ),
+  writeFile(
+    resolve(serverRoot, "wrangler.local.json"),
+    `${JSON.stringify(localWorkerConfig, null, 2)}\n`,
+  ),
+]);

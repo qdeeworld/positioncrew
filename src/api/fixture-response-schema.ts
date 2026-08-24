@@ -17,7 +17,11 @@ const BenchmarkLockSchema = z
 export const FixtureJobResponseSchema = z
   .object({
     schemaVersion: z.literal("positioncrew.fixture-job-response.v1"),
-    evidenceMode: z.enum(["FROZEN_BSC_TEST_FIXTURE", "CALLER_SUPPLIED_OBSERVATIONS"]),
+    evidenceMode: z.enum([
+      "FROZEN_BSC_TEST_FIXTURE",
+      "CALLER_SUPPLIED_OBSERVATIONS",
+      "CURRENT_BLOCK_PINNED",
+    ]),
     commerceMode: z.literal("IN_MEMORY_CONFORMANCE"),
     advantageStatus: z.literal("PENDING_INDEPENDENT_BLIND_EVALUATION"),
     generatedAt: TimestampSchema,

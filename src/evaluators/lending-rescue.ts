@@ -88,6 +88,9 @@ export function evaluateLendingRescue(
     if (staleEvidence) {
       return "REFUSED_STALE_DATA" as const;
     }
+    if (request.position.collateral.length === 0 || request.position.debt.length === 0) {
+      return "REFUSED_CONSTRAINTS" as const;
+    }
     if (
       current.healthFactor === null ||
       current.healthFactor >= parseFixed(request.targetHealthFactor)

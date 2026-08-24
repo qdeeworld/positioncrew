@@ -13,6 +13,7 @@ import type {
   PublicationLoadState,
   BenchmarkRepeatabilityMatrixResponse,
   BenchmarkRepeatabilityResponse,
+  CurrentLendingObservation,
   Erc8183TestnetLedger,
   FixtureJobResponse,
   FreshMarketplaceBenchmarkSlug,
@@ -73,6 +74,7 @@ export default function App() {
     benchmarkSlug: FreshMarketplaceBenchmarkSlug;
     providerSlug: string;
     idempotencyKey: string;
+    requestKey: string;
     chain?: FreshMarketplaceChain;
   } | null>(null);
   const provider = providers.find((candidate) => candidate.service === selectedService);
@@ -166,22 +168,37 @@ export default function App() {
     navigate("jobs");
   }
 
-  async function runJob(request: Record<string, unknown>, mode: JobRequestMode) {
+  async function runJob(
+    request: Record<string, unknown>,
+    mode: JobRequestMode,
+    observation?: CurrentLendingObservation,
+  ) {
     setLoading(true);
     setError(null);
     const startedAt = performance.now();
     try {
       const benchmarkSlug = FRESH_BENCHMARK_BY_SERVICE[request.service as ServiceId];
       const selectedProvider = providers.find((candidate) => candidate.service === request.service);
-      if (mode === "FROZEN_FIXTURE" && benchmarkSlug && selectedProvider) {
+      const currentPinnedLending = mode === "CALLER_SUPPLIED_OBSERVATIONS" &&
+        request.service === "LENDING_RESCUE";
+      const historicalFixture = mode === "FROZEN_FIXTURE";
+      if ((currentPinnedLending || historicalFixture) && benchmarkSlug && selectedProvider) {
+        if (currentPinnedLending && !observation) {
+          throw new Error("Current lending hire is missing its block-pinned observation");
+        }
+        const requestKey = currentPinnedLending
+          ? JSON.stringify({ request, observation })
+          : `historical-fixture:${benchmarkSlug}`;
         const pendingHire = unresolvedFreshHire.current?.benchmarkSlug === benchmarkSlug &&
-            unresolvedFreshHire.current.providerSlug === selectedProvider.slug
+            unresolvedFreshHire.current.providerSlug === selectedProvider.slug &&
+            unresolvedFreshHire.current.requestKey === requestKey
           ? unresolvedFreshHire.current
           : null;
         const logicalHire = pendingHire ?? {
           benchmarkSlug,
           providerSlug: selectedProvider.slug,
           idempotencyKey: crypto.randomUUID(),
+          requestKey,
         };
         unresolvedFreshHire.current = logicalHire;
         let trace = logicalHire.chain;
@@ -189,12 +206,22 @@ export default function App() {
           const createResponse = await fetch("/api/benchmark-hires", {
             method: "POST",
             headers: { Accept: "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify({
-              schemaVersion: "positioncrew.fresh-marketplace-hire-request.v1",
-              idempotencyKey: logicalHire.idempotencyKey,
-              benchmarkSlug,
-              providerSlug: selectedProvider.slug,
-            }),
+            body: JSON.stringify(currentPinnedLending
+              ? {
+                  schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+                  idempotencyKey: logicalHire.idempotencyKey,
+                  benchmarkSlug,
+                  providerSlug: selectedProvider.slug,
+                  evidenceMode: "CURRENT_BLOCK_PINNED",
+                  request,
+                  observation,
+                }
+              : {
+                  schemaVersion: "positioncrew.fresh-marketplace-hire-request.v1",
+                  idempotencyKey: logicalHire.idempotencyKey,
+                  benchmarkSlug,
+                  providerSlug: selectedProvider.slug,
+                }),
           });
           try {
             trace = await jsonResponse<FreshMarketplaceChain>(createResponse);

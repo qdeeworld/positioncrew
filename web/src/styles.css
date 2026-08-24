@@ -508,6 +508,8 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .input-mode-switch button { min-height: 25px; padding: 0 8px; border: 0; border-radius: 3px; color: var(--muted); background: transparent; font-size: 9px; font-weight: 800; cursor: pointer; }
 .input-mode-switch button[aria-pressed="true"] { color: var(--ink); background: white; box-shadow: 0 1px 3px rgba(25, 33, 29, 0.1); }
 .input-mode-switch button:disabled { cursor: not-allowed; opacity: 0.5; }
+.historical-evidence-link { display: inline-flex; align-items: center; gap: 5px; min-height: 25px; color: #315d91; font-size: 10px; font-weight: 750; text-decoration: none; }
+.historical-evidence-link:hover { text-decoration: underline; }
 .composer-mode-actions > button {
   display: inline-flex;
   align-items: center;
@@ -567,6 +569,7 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   cursor: pointer;
 }
 .wallet-probe-use:hover { background: #1e5748; }
+.wallet-probe-loaded { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; color: #17614e; font-size: 10px; font-weight: 800; }
 .position-bar { padding: 13px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-soft); }
 .position-bar-track { position: relative; display: grid; grid-template-columns: 28% 22% 50%; height: 20px; border: 1px solid #cbd2cd; overflow: visible; }
 .position-bar-track > span { display: block; }

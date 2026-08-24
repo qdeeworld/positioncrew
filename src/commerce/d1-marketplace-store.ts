@@ -1,6 +1,6 @@
 import {
-  FRESH_MARKETPLACE_CLAIM_BOUNDARY,
   FreshMarketplaceChainSchema,
+  freshMarketplaceClaimBoundary,
   type FreshMarketplaceChain,
   type FreshMarketplaceHireRequest,
 } from "./fresh-hire-schema.js";
@@ -25,7 +25,6 @@ export interface D1Database {
 export const FRESH_MARKETPLACE_JOB_LEASE_MILLISECONDS = 5 * 60 * 1_000;
 export const FRESH_MARKETPLACE_CREATE_WINDOW_MILLISECONDS = 60 * 1_000;
 export const FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW = 30;
-export const FRESH_MARKETPLACE_MAX_PERSISTED_HIRES = 10_000;
 
 interface JoinedRow extends Record<string, unknown> {
   hire_id: string;
@@ -39,6 +38,9 @@ interface JoinedRow extends Record<string, unknown> {
   wallet_required: number;
   request_json: string;
   request_hash: string;
+  provider_hash: string | null;
+  evidence_json: string | null;
+  evidence_hash: string | null;
   hire_created_at: string;
   job_id: string;
   job_state: string;
@@ -64,6 +66,12 @@ export interface CreateFreshMarketplaceHire {
   createdAt: string;
   requestJson: string;
   requestHash: string;
+  providerHash: string;
+  evidenceMode: FreshMarketplaceChain["hire"]["evidenceMode"];
+  evidenceJson: string;
+  evidenceHash: string;
+  service: FreshMarketplaceChain["hire"]["service"];
+  rateLimitKey: string;
 }
 
 export interface CompleteFreshMarketplaceJob {
@@ -84,7 +92,7 @@ export class FreshMarketplaceIdempotencyConflict extends Error {
   readonly domain = "positioncrew.fresh-marketplace";
 
   constructor() {
-    super("The idempotency key is already bound to another provider or benchmark");
+    super("The idempotency key is already bound to another immutable hire payload");
     this.name = "FreshMarketplaceIdempotencyConflict";
   }
 }
@@ -94,7 +102,7 @@ export class FreshMarketplaceCapacityExceeded extends Error {
   readonly domain = "positioncrew.fresh-marketplace";
 
   constructor() {
-    super("The public durable-hire creation boundary has been reached");
+    super("The client rolling durable-hire creation limit has been reached");
     this.name = "FreshMarketplaceCapacityExceeded";
   }
 }
@@ -108,7 +116,7 @@ export function isFreshMarketplaceCapacityExceeded(
     candidate.name === "FreshMarketplaceCapacityExceeded" &&
     candidate.code === "HIRE_CAPACITY_EXCEEDED" &&
     candidate.domain === "positioncrew.fresh-marketplace" &&
-    candidate.message === "The public durable-hire creation boundary has been reached"
+    candidate.message === "The client rolling durable-hire creation limit has been reached"
   );
 }
 
@@ -121,7 +129,7 @@ export function isFreshMarketplaceIdempotencyConflict(
     candidate.name === "FreshMarketplaceIdempotencyConflict" &&
     candidate.code === "IDEMPOTENCY_CONFLICT" &&
     candidate.domain === "positioncrew.fresh-marketplace" &&
-    candidate.message === "The idempotency key is already bound to another provider or benchmark"
+    candidate.message === "The idempotency key is already bound to another immutable hire payload"
   );
 }
 
@@ -146,7 +154,7 @@ function rowToChain(row: JoinedRow): FreshMarketplaceChain {
   };
   return FreshMarketplaceChainSchema.parse({
     schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
-    claimBoundary: [...FRESH_MARKETPLACE_CLAIM_BOUNDARY],
+    claimBoundary: [...freshMarketplaceClaimBoundary(row.evidence_mode as FreshMarketplaceChain["hire"]["evidenceMode"])],
     hire: {
       hireId: row.hire_id,
       idempotencyKey: row.idempotency_key,
@@ -162,6 +170,11 @@ function rowToChain(row: JoinedRow): FreshMarketplaceChain {
       },
       request,
       requestHash: row.request_hash,
+      providerHash: row.provider_hash,
+      evidence: row.evidence_json === null
+        ? null
+        : JSON.parse(row.evidence_json) as unknown,
+      evidenceHash: row.evidence_hash,
       createdAt: row.hire_created_at,
     },
     job: {
@@ -183,7 +196,8 @@ function rowToChain(row: JoinedRow): FreshMarketplaceChain {
 const JOINED_SELECT = [
   "SELECT h.hire_id, h.idempotency_key, h.provider_slug, h.provider_id,",
   "h.benchmark_slug, h.service, h.evidence_mode, h.direct_cost_usd, h.wallet_required,",
-  "h.request_json, h.request_hash, h.created_at AS hire_created_at,",
+  "h.request_json, h.request_hash, h.provider_hash, h.evidence_json, h.evidence_hash,",
+  "h.created_at AS hire_created_at,",
   "j.job_id, j.state AS job_state, j.created_at AS job_created_at,",
   "j.started_at AS job_started_at, j.completed_at AS job_completed_at,",
   "j.api_duration_milliseconds, j.error_code, j.error_message,",
@@ -202,43 +216,50 @@ export class FreshMarketplaceStore {
     replayed: boolean;
   }> {
     const existing = await this.getByIdempotencyKey(input.request.idempotencyKey);
-    if (existing) return this.matchReplay(existing, input.request);
+    if (existing) return this.matchReplay(existing, input);
     const createdAtMilliseconds = Date.parse(input.createdAt);
     if (!Number.isFinite(createdAtMilliseconds)) {
       throw new Error("D1 hire creation requires a valid ISO timestamp");
     }
-    const createWindowStartedAt = new Date(
-      createdAtMilliseconds - FRESH_MARKETPLACE_CREATE_WINDOW_MILLISECONDS,
+    const createWindowExpiresAt = new Date(
+      createdAtMilliseconds + FRESH_MARKETPLACE_CREATE_WINDOW_MILLISECONDS,
     ).toISOString();
 
     try {
       const results = await this.db.batch([
+        this.db.prepare(
+          "DELETE FROM fresh_marketplace_rate_limits WHERE window_expires_at <= ?",
+        ).bind(input.createdAt),
+        this.db.prepare([
+          "INSERT INTO fresh_marketplace_rate_limits",
+          "(key_hash, window_started_at, window_expires_at, create_count) VALUES (?, ?, ?, 1)",
+          "ON CONFLICT(key_hash) DO UPDATE SET",
+          "create_count = fresh_marketplace_rate_limits.create_count + 1",
+        ].join(" ")).bind(input.rateLimitKey, input.createdAt, createWindowExpiresAt),
         this.db.prepare([
           "INSERT INTO fresh_marketplace_hires",
           "(hire_id, idempotency_key, provider_slug, provider_id, benchmark_slug, service,",
-          "evidence_mode, direct_cost_usd, wallet_required, request_json, request_hash, created_at)",
-          "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?",
-          "WHERE (SELECT COUNT(*) FROM fresh_marketplace_hires) < ?",
-          "AND (SELECT COUNT(*) FROM fresh_marketplace_hires WHERE created_at >= ?) < ?",
+          "evidence_mode, direct_cost_usd, wallet_required, request_json, request_hash,",
+          "provider_hash, evidence_json, evidence_hash, created_at)",
+          "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?",
+          "WHERE (SELECT create_count FROM fresh_marketplace_rate_limits WHERE key_hash = ?) <= ?",
         ].join(" ")).bind(
           input.hireId,
           input.request.idempotencyKey,
           input.request.providerSlug,
           input.providerId,
           input.request.benchmarkSlug,
-          input.request.benchmarkSlug === "lending-rescue"
-            ? "LENDING_RESCUE"
-            : input.request.benchmarkSlug === "lp-rebalance"
-              ? "LP_REBALANCE"
-              : "BOUNDED_GRID",
-          "HISTORICAL_FIXTURE",
+          input.service,
+          input.evidenceMode,
           "0.00",
           0,
           input.requestJson,
           input.requestHash,
+          input.providerHash,
+          input.evidenceJson,
+          input.evidenceHash,
           input.createdAt,
-          FRESH_MARKETPLACE_MAX_PERSISTED_HIRES,
-          createWindowStartedAt,
+          input.rateLimitKey,
           FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW,
         ),
         this.db.prepare(
@@ -250,11 +271,11 @@ export class FreshMarketplaceStore {
       ]);
       const failed = results.find((result) => !result.success);
       if (failed) throw new Error(failed.error ?? "D1 hire creation failed");
-      if (results[0]?.meta.changes !== 1) throw new FreshMarketplaceCapacityExceeded();
-      if (results[1]?.meta.changes !== 1) throw new Error("D1 job creation did not follow its hire");
+      if (results[2]?.meta.changes !== 1) throw new FreshMarketplaceCapacityExceeded();
+      if (results[3]?.meta.changes !== 1) throw new Error("D1 job creation did not follow its hire");
     } catch (error) {
       const raced = await this.getByIdempotencyKey(input.request.idempotencyKey);
-      if (raced) return this.matchReplay(raced, input.request);
+      if (raced) return this.matchReplay(raced, input);
       throw error;
     }
 
@@ -376,11 +397,13 @@ export class FreshMarketplaceStore {
 
   private matchReplay(
     existing: FreshMarketplaceChain,
-    request: FreshMarketplaceHireRequest,
+    input: CreateFreshMarketplaceHire,
   ): { chain: FreshMarketplaceChain; replayed: true } {
     if (
-      existing.hire.providerSlug !== request.providerSlug ||
-      existing.hire.benchmarkSlug !== request.benchmarkSlug
+      existing.hire.providerSlug !== input.request.providerSlug ||
+      existing.hire.benchmarkSlug !== input.request.benchmarkSlug ||
+      existing.hire.evidenceMode !== input.evidenceMode ||
+      existing.hire.requestHash !== input.requestHash
     ) {
       throw new FreshMarketplaceIdempotencyConflict();
     }

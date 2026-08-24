@@ -74,6 +74,12 @@ export interface JobHistoryEntry {
 
 export type JobRequestMode = "FROZEN_FIXTURE" | "CALLER_SUPPLIED_OBSERVATIONS";
 
+export interface CurrentLendingObservation {
+  blockNumber: string;
+  observedAt: string;
+  explorerUrl: string;
+}
+
 export interface FixtureJobResponse {
   schemaVersion: "positioncrew.fixture-job-response.v1";
   evidenceMode: "FROZEN_BSC_TEST_FIXTURE" | "CALLER_SUPPLIED_OBSERVATIONS";
@@ -439,10 +445,13 @@ export interface FreshMarketplaceChain {
     providerId: string;
     benchmarkSlug: FreshMarketplaceBenchmarkSlug;
     service: "LENDING_RESCUE" | "LP_REBALANCE" | "BOUNDED_GRID";
-    evidenceMode: "HISTORICAL_FIXTURE";
+    evidenceMode: "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED";
     commerce: { directCostUsd: "0.00"; walletRequired: false; settlement: "NO_PAYMENT" };
     request: Record<string, unknown>;
     requestHash: string;
+    evidence?: CurrentLendingObservation;
+    evidenceHash?: string;
+    providerHash?: string;
     createdAt: string;
   };
   job: {
