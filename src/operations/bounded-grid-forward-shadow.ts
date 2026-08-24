@@ -213,7 +213,7 @@ export function verifyShadowGridRun(events: readonly ShadowGridEvent[]): {
     }
     if (previous) {
       const allowed = previous.eventType === "EPOCH_STARTED"
-        ? event.eventType === "PRECOMMITTED"
+        ? ["PRECOMMITTED", "VOID_SOURCE_GAP"].includes(event.eventType)
         : previous.eventType === "PRECOMMITTED"
           ? ["REFUSED", "OBSERVED", "VOID_SOURCE_GAP"].includes(event.eventType)
           : ["OBSERVED", "SHADOW_FILL"].includes(previous.eventType)
@@ -393,8 +393,12 @@ export function shadowGridRunIsTerminal(events: readonly ShadowGridEvent[]): boo
 
 export function publicShadowGridWindow(events: readonly ShadowGridEvent[], origin: string) {
   verifyShadowGridRun(events);
-  const precommit = precommitFromShadowGridRun(events);
+  const hasPrecommit = events.some((event) => event.eventType === "PRECOMMITTED");
+  const precommit = hasPrecommit ? precommitFromShadowGridRun(events) : null;
   const latest = parseShadowGridEvent(events.at(-1)!);
+  if (!precommit && latest.eventType !== "VOID_SOURCE_GAP") {
+    throw new Error("A public shadow-grid window requires a precommitment unless initialization was terminally voided");
+  }
   const terminalPayload = TERMINAL_TYPES.has(events.at(-1)!.eventType)
     ? latest.payload as Record<string, unknown>
     : null;
@@ -402,10 +406,10 @@ export function publicShadowGridWindow(events: readonly ShadowGridEvent[], origi
     windowId: events[0]!.runId,
     state: shadowGridRunState(events),
     pair: "WBNB/USDT" as const,
-    sourceHireId: precommit.sourceHireId,
-    sourceRequestHash: precommit.sourceRequestHash,
-    sourceReceiptUrl: new URL(precommit.sourceReceiptUrl, origin).toString(),
-    sourceBlockNumber: precommit.sourceBlockNumber,
+    sourceHireId: precommit?.sourceHireId ?? events[0]!.hireId,
+    sourceRequestHash: precommit?.sourceRequestHash ?? events[0]!.requestHash,
+    sourceReceiptUrl: precommit ? new URL(precommit.sourceReceiptUrl, origin).toString() : null,
+    sourceBlockNumber: precommit?.sourceBlockNumber ?? null,
     startedAt: events[0]!.epochStartedAt,
     terminalAt: shadowGridRunIsTerminal(events) ? events.at(-1)!.recordedAt : null,
     horizonMinutes: 15 as const,

@@ -186,6 +186,63 @@ describe("bounded-grid forward shadow evidence", () => {
     expect(() => verifyShadowGridRun(unlinked)).toThrow(/sequence|previous hash/u);
   });
 
+  it("accepts a genesis source-gap void once and preserves its terminal head", () => {
+    const runBinding = binding(91);
+    const startedAt = runBinding.epochStartedAt;
+    const genesis = append([], runBinding, "EPOCH_STARTED", startedAt, {
+      schedule: {
+        event: "schedule",
+        repository: "dolepee/positioncrew",
+        workflowPath: ".github/workflows/production-smoke.yml",
+        runId: "10991",
+        runAttempt: "1",
+        headSha: "9".repeat(40),
+        workflowRef:
+          "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+        recordedAt: startedAt,
+      },
+      method: "FORWARD_ONLY_ACTUAL_SAMPLES",
+      sampleCadenceMinutes: 5,
+      horizonMinutes: 15,
+      backfill: "PROHIBITED",
+      capitalMode: "ZERO_FUND_SHADOW",
+    });
+    const voided = append(
+      genesis,
+      runBinding,
+      "VOID_SOURCE_GAP",
+      new Date(Date.parse(startedAt) + 60_000).toISOString(),
+      {
+        reason: "Opening deadline elapsed before immutable precommitment",
+        observedSampleCount: 0,
+        netOutcomeUsd: null,
+        outcome: null,
+        repairedLater: false,
+      },
+    );
+
+    const terminalIntegrity = verifyShadowGridRun(voided);
+    expect(terminalIntegrity).toMatchObject({ valid: true });
+    expect(verifyShadowGridRun(voided)).toEqual(terminalIntegrity);
+
+    for (const eventType of [
+      "PRECOMMITTED",
+      "OBSERVED",
+      "SHADOW_FILL",
+      "CLOSED",
+      "VOID_SOURCE_GAP",
+    ] as const) {
+      const changedAfterTerminal = append(
+        voided,
+        runBinding,
+        eventType,
+        new Date(Date.parse(startedAt) + 120_000).toISOString(),
+        {},
+      );
+      expect(() => verifyShadowGridRun(changedAfterTerminal)).toThrow(/terminal/u);
+    }
+  });
+
   it("uses actual sampled crossings and charges conservative costs", () => {
     const events = precommittedRun();
     const precommit = parseShadowGridEvent(events[1]!);

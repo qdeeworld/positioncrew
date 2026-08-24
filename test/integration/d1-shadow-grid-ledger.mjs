@@ -185,6 +185,31 @@ function expectMutationRejected(sql) {
   assert.match(`${result.stderr}${result.stdout}`, /append|immutable|prohibited|abort/u);
 }
 
+function executeD1SetupMutation(sql) {
+  const result = spawnSync(
+    "npx",
+    [
+      "wrangler",
+      "d1",
+      "execute",
+      "DB",
+      "--local",
+      "--config",
+      config,
+      "--persist-to",
+      persistence,
+      "--command",
+      sql,
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(
+    result.status,
+    0,
+    `D1 genesis-only setup failed: ${result.stderr}${result.stdout}`,
+  );
+}
+
 let worker;
 try {
   execFileSync(
@@ -717,6 +742,104 @@ try {
     replacementWindowAfterExpectedRequest.body.events.at(-1).eventType,
     "PRECOMMITTED",
     "An expected-run request cleaned an unrelated epoch",
+  );
+
+  const genesisOnlyNow = finiteDate(
+    expectedOnlyNow.getTime() + 60 * 60_000,
+    "genesis-only prior-hour opening",
+  );
+  const genesisOnlyRunId = shadowGridRunId(genesisOnlyNow);
+  const genesisOnlyHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "3001",
+    "X-GitHub-Sha": "5".repeat(40),
+  };
+
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, genesisOnlyNow);
+  const genesisOnlyOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: genesisOnlyHeaders },
+  );
+  assert.equal(genesisOnlyOpen.response.status, 200);
+  assert.equal(genesisOnlyOpen.body.runId, genesisOnlyRunId);
+  assert.equal(genesisOnlyOpen.body.state, "PRECOMMITTED");
+  assert.equal(genesisOnlyOpen.body.eventCount, 2);
+
+  await stopWorker(worker);
+  worker = undefined;
+  assert.match(genesisOnlyRunId, /^bg-[0-9]{8}-[0-9]{2}$/u);
+  executeD1SetupMutation("DROP TRIGGER IF EXISTS shadow_grid_events_no_delete");
+  executeD1SetupMutation(
+    `DELETE FROM shadow_grid_events WHERE run_id = '${genesisOnlyRunId}' AND event_type = 'PRECOMMITTED'`,
+  );
+
+  const genesisRecoveryNow = finiteDate(
+    genesisOnlyNow.getTime() + 60 * 60_000,
+    "genesis-only recovery hour",
+  );
+  const genesisRecoveryRunId = shadowGridRunId(genesisRecoveryNow);
+  const genesisRecoveryHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "3002",
+    "X-GitHub-Sha": "6".repeat(40),
+  };
+  assert.notEqual(genesisRecoveryRunId, genesisOnlyRunId);
+
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, genesisRecoveryNow);
+  const genesisRecoveryOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: genesisRecoveryHeaders },
+  );
+  assert.equal(genesisRecoveryOpen.response.status, 200);
+  assert.equal(genesisRecoveryOpen.body.runId, genesisRecoveryRunId);
+  assert.equal(genesisRecoveryOpen.body.state, "PRECOMMITTED");
+
+  const recoveredGenesisOnlyWindow = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(genesisOnlyRunId)}`,
+  );
+  assert.equal(recoveredGenesisOnlyWindow.response.status, 200);
+  assert.equal(recoveredGenesisOnlyWindow.body.window.state, "VOID_SOURCE_GAP");
+  assert.equal(recoveredGenesisOnlyWindow.body.integrity.valid, true);
+  assert.equal(recoveredGenesisOnlyWindow.body.events.length, 2);
+  const recoveredGenesis = recoveredGenesisOnlyWindow.body.events[0];
+  const recoveredGenesisTerminal = recoveredGenesisOnlyWindow.body.events[1];
+  assert.equal(recoveredGenesis.eventType, "EPOCH_STARTED");
+  assert.equal(recoveredGenesis.payload.schedule.runId, "3001");
+  assert.equal(recoveredGenesis.payload.schedule.runAttempt, "1");
+  assert.equal(recoveredGenesis.payload.schedule.headSha, "5".repeat(40));
+  assert.equal(
+    recoveredGenesis.payload.schedule.workflowRef,
+    "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+  );
+  assert.equal(recoveredGenesisTerminal.eventType, "VOID_SOURCE_GAP");
+  assert.equal(recoveredGenesisTerminal.previousEventHash, recoveredGenesis.eventHash);
+  assert.match(recoveredGenesisTerminal.payload.reason, /abandon/iu);
+  assert.equal(
+    recoveredGenesisOnlyWindow.body.events.filter((event) =>
+      ["PRECOMMITTED", "OBSERVED", "SHADOW_FILL", "CLOSED", "RISK_EXIT"].includes(event.eventType)
+    ).length,
+    0,
+    "Genesis-only recovery appended work from the replacement identity",
+  );
+  const recoveredGenesisSummary = await requestJson(
+    baseUrl,
+    "/api/evidence/bounded-grid-forward-shadow",
+  );
+  assert.equal(recoveredGenesisSummary.response.status, 200);
+  assert.equal(
+    recoveredGenesisSummary.body.recentWindows.find(
+      (window) => window.windowId === genesisOnlyRunId,
+    )?.state,
+    "VOID_SOURCE_GAP",
+    "Genesis-only epoch remained permanently nonterminal",
   );
 
   await stopWorker(worker);
