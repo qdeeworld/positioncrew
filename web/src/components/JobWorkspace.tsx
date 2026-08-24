@@ -777,7 +777,7 @@ function WalletRiskProbe({
           Try a safe live refusal
         </button>
       </div>
-      <p className="wallet-probe-help" id="wallet-probe-help">No address ready? Query the zero address at a fresh BSC block. It holds no position or funds and is used only to demonstrate the provider's explicit refusal path.</p>
+      <p className="wallet-probe-help" id="wallet-probe-help">No address ready? Query the zero address at a fresh BSC block. It has no reconstructable Venus lending position and is used only to demonstrate the provider's explicit refusal path.</p>
       {error && <div className="wallet-probe-error" id="wallet-probe-error" role="alert"><AlertTriangle size={14} /> {error}</div>}
       {probe && (
         <div className="wallet-probe-result" aria-live="polite">
@@ -1373,7 +1373,7 @@ export function JobWorkspace({
               ? "Historical August 12 fixture. The public receipt is reproducible, but the instruction is no longer executable."
               : liveRequest
                 ? safeLiveRefusal
-                  ? `Safe live refusal example from BSC block ${liveBlockNumber || "unknown"}. The zero address has no position or funds; the exact current request and observation are persisted so the provider can return a refusal. No rescue or transaction is executed.`
+                  ? `Safe live refusal example from BSC block ${liveBlockNumber || "unknown"}. The zero address has no reconstructable Venus lending position; the exact current request and observation are persisted so the provider can return a refusal. No rescue or transaction is executed.`
                   : `Block-pinned ${liveSourceLabel} from BSC block ${liveBlockNumber || "unknown"}. The exact submitted request and pinned observation are persisted; the result is an unsigned plan or refusal, not a wallet transaction.`
               : liveMarketPending
                 ? service === "LENDING_RESCUE"
@@ -1419,7 +1419,7 @@ export function JobWorkspace({
               <strong>$0.00</strong>
               <small>{inputMode === "interactive"
                 ? safeLiveRefusal
-                  ? "No wallet · no funds · zero-position refusal persists"
+                  ? "No wallet · no value moved · zero-position refusal persists"
                   : "No wallet · no payment · current request and result persist"
                 : "No wallet · no payment · historical evidence replay"}</small>
             </span>
