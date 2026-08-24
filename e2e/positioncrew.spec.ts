@@ -594,6 +594,11 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   const advantageStatus = page.getByRole("region", { name: "Founder Agent Advantage comparison status" });
   await expect(advantageStatus.getByText("Founder comparison published", { exact: true })).toBeVisible();
   await expect(advantageStatus).toContainText("3/3 frozen tasks record exact canonical output parity");
+  await expect(advantageStatus).toContainText(
+    "Quality evidence here is exact canonical output parity, not a numeric rating. No separate numeric quality score was assigned.",
+  );
+  await expect(advantageStatus).not.toContainText("Quality score: not assigned");
+  await expect(advantageStatus).not.toContainText("(null)");
   await expect(advantageStatus.getByRole("link", { name: "Open founder report" })).toHaveAttribute(
     "href",
     "/evidence/agent-advantage-founder/",
@@ -986,6 +991,14 @@ test("the evidence page separates conformance from advantage claims", async ({ p
   await expect(page.getByText("source-committed agent runs", { exact: true })).toBeVisible();
   await expect(page.getByText(/source 3b28703/).first()).toBeVisible();
   await expect(page.getByText("No independent/blind result is claimed.", { exact: true })).toBeVisible();
+  const founderComparison = page.locator(".claim-warning.published").filter({
+    hasText: "Founder-operated comparison published.",
+  });
+  await expect(founderComparison).toContainText(
+    "Quality evidence here is exact canonical output parity, not a numeric rating. No separate numeric quality score was assigned.",
+  );
+  await expect(founderComparison).not.toContainText("Quality score: not assigned");
+  await expect(founderComparison).not.toContainText("(null)");
   await expect(page.getByRole("heading", { name: "Funded provider receipts" })).toBeVisible();
   await expect(page.getByText("0.6 U", { exact: true })).toBeVisible();
   await expect(page.getByText("Verified integration, disclosed operator.", { exact: true })).toBeVisible();
