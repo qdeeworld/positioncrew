@@ -55,6 +55,13 @@ import {
   EXTERNAL_COMPARISON_SNAPSHOT_ROUTE,
 } from "../src/marketplace/external-comparisons.js";
 import {
+  PROVIDER_CONTRACT_PREFLIGHT_BOUNDARY,
+  PROVIDER_CONTRACT_PREFLIGHT_ROUTE,
+  PROVIDER_CONTRACT_PREFLIGHT_VALIDATOR_VERSION,
+  buildProviderContractTemplate,
+  runProviderContractPreflight,
+} from "../src/marketplace/provider-compatibility.js";
+import {
   buildMarketplaceManifest,
   buildOpenApiDocument,
   buildProviderManifest,
@@ -235,6 +242,32 @@ async function boundedJson(request: Request): Promise<unknown> {
       "Fresh marketplace request body must be valid JSON",
     );
   }
+}
+
+async function providerContractPreflight(request: Request): Promise<Response> {
+  if (request.method === "GET") {
+    const matrix = await runFrozenMatrix();
+    const templates = Object.fromEntries(matrix.map((response) => {
+      const service = response.result.request.service;
+      const provider = PROVIDER_CATALOG.find((candidate) => candidate.service === service);
+      if (!provider) throw new Error(`Provider catalog is missing ${service}`);
+      return [service, buildProviderContractTemplate(
+        provider,
+        response.result.request,
+        response.result.deliverable,
+      )];
+    }));
+    return json({
+      schemaVersion: "positioncrew.provider-contract-preflight-templates.v1",
+      validatorVersion: PROVIDER_CONTRACT_PREFLIGHT_VALIDATOR_VERSION,
+      templates,
+      claimBoundary: PROVIDER_CONTRACT_PREFLIGHT_BOUNDARY,
+    }, 200, "public, max-age=0, s-maxage=300");
+  }
+  if (request.method === "POST") {
+    return json(runProviderContractPreflight(await boundedJson(request)));
+  }
+  return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET or POST."]);
 }
 
 function freshStore(env: Env): FreshMarketplaceStore {
@@ -1634,6 +1667,10 @@ async function api(
         200,
         "public, max-age=0, s-maxage=300",
       );
+    }
+
+    if (url.pathname === PROVIDER_CONTRACT_PREFLIGHT_ROUTE) {
+      return providerContractPreflight(request);
     }
 
     if (url.pathname === EXTERNAL_COMPARISON_SNAPSHOT_ROUTE) {

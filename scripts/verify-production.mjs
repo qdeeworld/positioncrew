@@ -1932,6 +1932,16 @@ try {
       "post",
       "runBoundedGridRequest",
     ],
+    [
+      "/api/provider-contract-preflight",
+      "get",
+      "getProviderContractPreflightTemplates",
+    ],
+    [
+      "/api/provider-contract-preflight",
+      "post",
+      "runProviderContractPreflight",
+    ],
     ["/api/wallets/{account}/venus", "get", "inspectVenusAccount"],
     ["/api/positions/pancake/{tokenId}", "get", "inspectPancakePosition"],
     ["/api/markets/venus/stable-yields", "get", "inspectVenusStableYields"],
@@ -2095,6 +2105,74 @@ try {
     /^https:\/\/bscscan\.com\/block\/\d+$/.test(zeroVenus.source?.explorerUrl ?? ""),
     "Venus account probe is not linked to its pinned BSC block",
   );
+
+  const providerContractTemplates = await fetchJson(
+    "provider-contract-preflight-templates",
+    "/api/provider-contract-preflight",
+  );
+  assert(
+    providerContractTemplates.schemaVersion === "positioncrew.provider-contract-preflight-templates.v1",
+    "Unexpected provider contract template schema",
+  );
+  assert(
+    Object.keys(providerContractTemplates.templates ?? {}).length === 4,
+    "Provider contract preflight does not expose four category templates",
+  );
+  const providerContractServices = [
+    "LENDING_RESCUE",
+    "LP_REBALANCE",
+    "YIELD_OPTIMIZATION",
+    "BOUNDED_GRID",
+  ];
+  const providerContractPasses = {};
+  for (const service of providerContractServices) {
+    const packet = providerContractTemplates.templates[service];
+    const pass = await postJson(
+      `provider-contract-preflight-pass-${service.toLowerCase()}`,
+      "/api/provider-contract-preflight",
+      packet,
+    );
+    assert(pass.outcome === "CONTRACT_PASS", `${service} provider packet did not pass`);
+    assert(pass.service === service, `${service} provider packet returned the wrong service`);
+    assert(
+      pass.checks?.filter((check) => check.status === "NOT_PROVEN").length === 11,
+      `${service} provider packet omits explicit NOT_PROVEN boundaries`,
+    );
+    const invalid = structuredClone(packet);
+    invalid.refusalDeliverable.status = "ACTIONABLE";
+    const fail = await postJson(
+      `provider-contract-preflight-fail-${service.toLowerCase()}`,
+      "/api/provider-contract-preflight",
+      invalid,
+    );
+    assert(fail.outcome === "CONTRACT_FAIL", `${service} invalid provider packet did not fail closed`);
+    assert(fail.resultHash !== pass.resultHash, `${service} mutation retained the passing result hash`);
+    providerContractPasses[service] = pass;
+  }
+  const providerContractPacket = providerContractTemplates.templates.LENDING_RESCUE;
+  const providerContractPass = providerContractPasses.LENDING_RESCUE;
+  const providerContractRepeat = await postJson(
+    "provider-contract-preflight-repeat",
+    "/api/provider-contract-preflight",
+    structuredClone(providerContractPacket),
+  );
+  assert(
+    providerContractPass.resultHash === providerContractRepeat.resultHash &&
+      providerContractPass.inputHash === providerContractRepeat.inputHash,
+    "Provider preflight is not deterministic",
+  );
+  report.providerContractPreflight = {
+    outcome: providerContractPass.outcome,
+    service: providerContractPass.service,
+    inputHash: providerContractPass.inputHash,
+    resultHash: providerContractPass.resultHash,
+    notProvenCount: providerContractPass.checks.filter((check) => check.status === "NOT_PROVEN").length,
+    claimBoundary: providerContractPass.claimBoundary,
+    perService: Object.fromEntries(providerContractServices.map((service) => [service, {
+      outcome: providerContractPasses[service].outcome,
+      resultHash: providerContractPasses[service].resultHash,
+    }])),
+  };
 
   const pancakeGrid = await fetchJson(
     "pancake-grid-market",
