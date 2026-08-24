@@ -421,9 +421,10 @@ async function verifyCurrentPersistedHire(definition, probe) {
   assert(created.job?.state === "CREATED", `${definition.service} hire did not start in CREATED`);
   assert(created.receipt === null, `${definition.service} hire created a premature receipt`);
   assert(
-    created.hire?.providerHash === canonicalSha256(envelope.request),
-    `${definition.service} provider request commitment is invalid`,
+    created.hire?.requestHash === canonicalSha256(envelope.request),
+    `${definition.service} request commitment is invalid`,
   );
+  assert(created.hire?.providerHash, `${definition.service} provider binding is uncommitted`);
   assert(created.hire?.evidenceHash, `${definition.service} current evidence is uncommitted`);
   assert(
     created.hire?.evidence?.freshnessAtCreation === "FRESH" &&
@@ -439,7 +440,8 @@ async function verifyCurrentPersistedHire(definition, probe) {
   );
   const completed = await waitForCurrentPersistedHire(definition, created.hire.hireId);
   assert(
-    completed.hire?.providerHash === created.hire.providerHash &&
+    completed.hire?.requestHash === created.hire.requestHash &&
+      completed.hire?.providerHash === created.hire.providerHash &&
       completed.hire?.evidenceHash === created.hire.evidenceHash,
     `${definition.service} hire commitments changed during execution`,
   );
@@ -463,6 +465,12 @@ async function verifyCurrentPersistedHire(definition, probe) {
   assert(publicChain.hire?.hireId === created.hire.hireId, `${definition.service} public receipt changed hire`);
   assert(publicChain.job?.state === "COMPLETED", `${definition.service} public receipt is not complete`);
   assert(
+    publicChain.hire?.requestHash === completed.hire.requestHash &&
+      publicChain.hire?.providerHash === completed.hire.providerHash &&
+      publicChain.hire?.evidenceHash === completed.hire.evidenceHash,
+    `${definition.service} public receipt changed hire commitments`,
+  );
+  assert(
     JSON.stringify(publicChain.receipt) === JSON.stringify(completed.receipt),
     `${definition.service} public receipt changed after reload`,
   );
@@ -478,6 +486,7 @@ async function verifyCurrentPersistedHire(definition, probe) {
     hireId: created.hire.hireId,
     receiptId: completed.receipt.receiptId,
     publicUrl: completed.receipt.publicUrl,
+    requestHash: completed.hire.requestHash,
     providerHash: completed.hire.providerHash,
     evidenceHash: completed.hire.evidenceHash,
     jobState: completed.job.state,
