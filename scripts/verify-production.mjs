@@ -1393,7 +1393,15 @@ try {
     zeroVenus.position?.collateralValueUsd === "0",
     "Zero address Venus collateral is nonzero",
   );
-  assert(zeroVenus.rescueRequest === null, "Zero address produced a rescue request");
+  assert(
+    zeroVenus.rescueRequest?.account === zeroVenus.account && zeroVenus.rescueRequest?.chainId === 56,
+    "Zero-position refusal request is not bound to the probed account and chain",
+  );
+  assert(
+    zeroVenus.rescueRequest?.position?.collateral?.length === 0 &&
+      zeroVenus.rescueRequest?.position?.debt?.length === 0,
+    "Zero-position refusal request unexpectedly contains collateral or debt",
+  );
   assert(
     /^https:\/\/bscscan\.com\/block\/\d+$/.test(zeroVenus.source?.explorerUrl ?? ""),
     "Venus account probe is not linked to its pinned BSC block",
