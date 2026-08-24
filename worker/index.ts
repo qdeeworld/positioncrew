@@ -975,6 +975,7 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   }
   const openingCheckpoint = shadowGridCollectorNow(request, env);
   let openedFresh = false;
+  let lateStartRecordedAt: Date | null = null;
   if (expectedRunId === null && events.length > 0) {
     const collision = shadowGridScheduleCollisionResponse(
       events,
@@ -1006,36 +1007,24 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
       }
     }
     if (started?.state === "LATE_START_SKIPPED") {
-      return json({
-        schemaVersion: "positioncrew.bounded-grid-forward-shadow-tick.v1",
-        accepted: true,
-        recordedAt: started.recordedAt.toISOString(),
-        runId,
-        state: "LATE_START_SKIPPED",
-        headHash: null,
-        eventCount: 0,
-        epochStartedAt: null,
-        horizonEndsAt: null,
-        previousHourCleanup,
-        abandonedRunCleanup,
-        claimBoundary: SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
-      });
+      lateStartRecordedAt = started.recordedAt;
+    } else {
+      if (started?.state === "STARTED") {
+        events = [...started.events];
+        openedFresh = !started.replayed;
+      } else if (events.length === 0) {
+        throw startFailure;
+      }
+      const collision = shadowGridScheduleCollisionResponse(
+        events,
+        schedule,
+        currentRunId,
+        shadowGridCollectorCheckpointNow(request, env),
+        url.origin,
+      );
+      if (collision) return collision;
+      assertShadowGridScheduleBinding(events, schedule);
     }
-    if (started?.state === "STARTED") {
-      events = [...started.events];
-      openedFresh = !started.replayed;
-    } else if (events.length === 0) {
-      throw startFailure;
-    }
-    const collision = shadowGridScheduleCollisionResponse(
-      events,
-      schedule,
-      currentRunId,
-      shadowGridCollectorCheckpointNow(request, env),
-      url.origin,
-    );
-    if (collision) return collision;
-    assertShadowGridScheduleBinding(events, schedule);
   }
   if (expectedRunId === null) {
     try {
@@ -1126,12 +1115,12 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   if (
     expectedRunId === null &&
     events.length === 0 &&
-    openingCheckpoint.getTime() >= openingDeadline
+    (openingCheckpoint.getTime() >= openingDeadline || lateStartRecordedAt !== null)
   ) {
     return json({
       schemaVersion: "positioncrew.bounded-grid-forward-shadow-tick.v1",
       accepted: true,
-      recordedAt: openingCheckpoint.toISOString(),
+      recordedAt: (lateStartRecordedAt ?? openingCheckpoint).toISOString(),
       runId,
       state: "LATE_START_SKIPPED",
       headHash: null,

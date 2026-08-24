@@ -613,7 +613,29 @@ try {
     "post-opening-cutoff checkpoint",
   );
   const cutoffRunId = shadowGridRunId(beforeOpeningCutoff);
+  const cutoffAbandonedNow = finiteDate(
+    cutoffHour.getTime() - 60 * 60_000 + 17 * 60_000,
+    "cutoff cleanup source opening",
+  );
+  const cutoffAbandonedRunId = shadowGridRunId(cutoffAbandonedNow);
+  const cutoffAbandonedHeaders = {
+    ...headers,
+    "X-GitHub-Run-Id": "1999",
+    "X-GitHub-Sha": "2".repeat(40),
+  };
 
+  await stopWorker(worker);
+  port = await availablePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  worker = await startWorker(port, cutoffAbandonedNow);
+  const cutoffAbandonedOpen = await requestJson(
+    baseUrl,
+    "/api/internal/bounded-grid-forward-shadow/tick",
+    { method: "POST", headers: cutoffAbandonedHeaders },
+  );
+  assert.equal(cutoffAbandonedOpen.response.status, 200);
+  assert.equal(cutoffAbandonedOpen.body.runId, cutoffAbandonedRunId);
+  assert.equal(cutoffAbandonedOpen.body.state, "PRECOMMITTED");
   await stopWorker(worker);
   port = await availablePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -630,11 +652,19 @@ try {
   assert.equal(cutoffTick.body.eventCount, 0);
   assert.equal(cutoffTick.body.epochStartedAt, null);
   assert.equal(cutoffTick.body.horizonEndsAt, null);
+  assert.ok(cutoffTick.body.abandonedRunCleanup.voidedCount > 0);
   const skippedWindow = await requestJson(
     baseUrl,
     `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(cutoffRunId)}`,
   );
   assert.equal(skippedWindow.response.status, 404);
+  const cutoffAbandonedWindow = await requestJson(
+    baseUrl,
+    `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(cutoffAbandonedRunId)}`,
+  );
+  assert.equal(cutoffAbandonedWindow.response.status, 200);
+  assert.equal(cutoffAbandonedWindow.body.integrity.valid, true);
+  assert.equal(cutoffAbandonedWindow.body.events.at(-1).eventType, "VOID_SOURCE_GAP");
 
   const abandonedPriorNow = finiteDate(
     cutoffHour.getTime() + 60 * 60_000 + 2 * 60_000,
