@@ -5,7 +5,9 @@ import { pathToFileURL } from "node:url";
 const WORKFLOW_REF =
   "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main";
 const TICK_SCHEMA = "positioncrew.bounded-grid-forward-shadow-tick.v1";
-const SESSION_SCHEMA = "positioncrew.bounded-grid-forward-shadow-scheduled-session.v1";
+const COLLISION_SCHEMA = "positioncrew.bounded-grid-forward-shadow-collision.v1";
+const COLLISION_REASON = "WINDOW_ALREADY_BOUND_TO_ANOTHER_AUTHENTICATED_RUN";
+const SESSION_SCHEMA = "positioncrew.bounded-grid-forward-shadow-scheduled-session.v2";
 const OFFSETS = [0, 5, 10, 15];
 const TERMINAL = new Set([
   "LATE_START_SKIPPED",
@@ -13,6 +15,11 @@ const TERMINAL = new Set([
   "VOID_SOURCE_GAP",
   "RISK_EXIT",
   "CLOSED",
+]);
+const CLAIM_BOUNDARY = Object.freeze([
+  "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
+  "Conservative sampled crossings are simulations, not transactions, executable fills, realised PnL, strategy returns, or audited financial performance.",
+  "The operator-scheduled record proves no external buyer, payment, revenue, demand, or Agent Advantage.",
 ]);
 const HASH = /^sha256:[a-f0-9]{64}$/u;
 
@@ -138,6 +145,70 @@ function validatedTick(body) {
   return body;
 }
 
+function validatedCollision(body, identity, endpoint, requestedAt) {
+  if (typeof body !== "object" || body === null) {
+    throw new Error("Forward-shadow collision returned a non-object response");
+  }
+  const incoming = body.incoming;
+  const originating = body.originating;
+  const existing = body.existing;
+  const boundaryIsValid = Array.isArray(body.claimBoundary) &&
+    sameArray(body.claimBoundary, CLAIM_BOUNDARY);
+  const windowIsValid = typeof body.windowId === "string" &&
+    /^bg-\d{8}-\d{2}$/u.test(body.windowId);
+  if (
+    body.schemaVersion !== COLLISION_SCHEMA ||
+    body.accepted !== false ||
+    body.state !== "COLLISION_SKIPPED" ||
+    body.reason !== COLLISION_REASON ||
+    !windowIsValid ||
+    typeof body.recordedAt !== "string" ||
+    !Number.isFinite(Date.parse(body.recordedAt)) ||
+    runIdAt(Date.parse(body.recordedAt)) !== body.windowId ||
+    runIdAt(Date.parse(requestedAt)) !== body.windowId ||
+    !boundaryIsValid ||
+    typeof incoming !== "object" ||
+    incoming === null ||
+    incoming.event !== identity.eventName ||
+    incoming.repository !== identity.repository ||
+    incoming.workflowPath !== ".github/workflows/production-smoke.yml" ||
+    incoming.runId !== identity.runId ||
+    incoming.runAttempt !== identity.runAttempt ||
+    incoming.headSha !== identity.headSha ||
+    incoming.workflowRef !== identity.workflowRef ||
+    typeof incoming.recordedAt !== "string" ||
+    !Number.isFinite(Date.parse(incoming.recordedAt)) ||
+    runIdAt(Date.parse(incoming.recordedAt)) !== body.windowId ||
+    Date.parse(incoming.recordedAt) > Date.parse(body.recordedAt) ||
+    typeof originating !== "object" ||
+    originating === null ||
+    originating.event !== "schedule" ||
+    originating.repository !== "dolepee/positioncrew" ||
+    originating.workflowPath !== ".github/workflows/production-smoke.yml" ||
+    !/^\d+$/u.test(originating.runId ?? "") ||
+    originating.runId === identity.runId ||
+    originating.runAttempt !== "1" ||
+    !/^[a-f0-9]{40}$/u.test(originating.headSha ?? "") ||
+    originating.workflowRef !== WORKFLOW_REF ||
+    typeof originating.recordedAt !== "string" ||
+    !Number.isFinite(Date.parse(originating.recordedAt)) ||
+    runIdAt(Date.parse(originating.recordedAt)) !== body.windowId ||
+    Date.parse(originating.recordedAt) > Date.parse(body.recordedAt) ||
+    typeof existing !== "object" ||
+    existing === null ||
+    !Number.isInteger(existing.eventCount) ||
+    existing.eventCount < 1 ||
+    !HASH.test(existing.headHash ?? "") ||
+    existing.publicUrl !== new URL(
+      `/api/evidence/bounded-grid-forward-shadow/windows/${encodeURIComponent(body.windowId)}`,
+      endpoint,
+    ).toString()
+  ) {
+    throw new Error("Forward-shadow collision returned an invalid response");
+  }
+  return body;
+}
+
 function sameArray(left, right) {
   return left.length === right.length && left.every((entry, index) => entry === right[index]);
 }
@@ -195,6 +266,7 @@ export async function runShadowGridScheduledSession(options = {}) {
     },
     attempts: [],
     claimBoundary: [],
+    collision: null,
     failure: null,
   };
   const persist = () => persistArtifact(structuredClone(artifact));
@@ -265,6 +337,52 @@ export async function runShadowGridScheduledSession(options = {}) {
           body = await response.json();
         } catch (error) {
           parseError = message(error);
+        }
+        if (response.status === 409) {
+          let collision;
+          try {
+            if (parseError !== null) {
+              throw new Error(`Forward-shadow collision returned invalid JSON: ${parseError}`);
+            }
+            if (targetOffsetMinutes !== 0 || expected !== null) {
+              throw new Error(
+                "Forward-shadow collision is permitted only for an unpinned opening request",
+              );
+            }
+            if (attemptNumber !== 1) {
+              throw new Error(
+                "Forward-shadow collision is permitted only on the first opening attempt",
+              );
+            }
+            collision = validatedCollision(body, identity, endpoint, requestedAt);
+          } catch (error) {
+            artifact.attempts.push({
+              targetOffsetMinutes,
+              attemptNumber,
+              requestedAt,
+              completedAt: iso(milliseconds(now)),
+              outcome: "INVALID_RESPONSE",
+              httpStatus: response.status,
+              response: body,
+              error: message(error),
+            });
+            await persist();
+            throw error;
+          }
+          artifact.claimBoundary = [...collision.claimBoundary];
+          artifact.collision = collision;
+          artifact.attempts.push({
+            targetOffsetMinutes,
+            attemptNumber,
+            requestedAt,
+            completedAt: iso(milliseconds(now)),
+            outcome: "COLLISION_SKIPPED",
+            httpStatus: response.status,
+            response: body,
+            error: null,
+          });
+          await persist();
+          return collision;
         }
         if (!response.ok) {
           artifact.attempts.push({
@@ -354,6 +472,14 @@ export async function runShadowGridScheduledSession(options = {}) {
     };
 
     const opening = await requestTick(0, null);
+    if (opening.state === "COLLISION_SKIPPED") {
+      artifact.runId = opening.windowId;
+      artifact.status = "SKIPPED";
+      artifact.finalStatus = opening.state;
+      artifact.finishedAt = iso(milliseconds(now));
+      await persist();
+      return artifact;
+    }
     artifact.runId = opening.runId;
     if (opening.state === "LATE_START_SKIPPED") {
       artifact.status = "COMPLETED";
@@ -408,8 +534,10 @@ const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).hr
 if (invokedPath === import.meta.url) {
   const artifact = await runShadowGridScheduledSession();
   console.log(
-    artifact.finalStatus === "LATE_START_SKIPPED"
-      ? `Skipped late forward-shadow opening ${artifact.runId}; no retrospective window was created`
+    artifact.finalStatus === "LATE_START_SKIPPED" || artifact.finalStatus === "COLLISION_SKIPPED"
+      ? artifact.finalStatus === "COLLISION_SKIPPED"
+        ? `Skipped collided forward-shadow opening ${artifact.runId}; the existing hourly ledger was not mutated`
+        : `Skipped late forward-shadow opening ${artifact.runId}; no retrospective window was created`
       : `Completed protected forward-shadow session ${artifact.runId}: ${artifact.finalStatus}`,
   );
 }
