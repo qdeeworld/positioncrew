@@ -234,8 +234,6 @@ export class FreshMarketplaceStore {
           "INSERT INTO fresh_marketplace_rate_limits",
           "(key_hash, window_started_at, window_expires_at, create_count) VALUES (?, ?, ?, 1)",
           "ON CONFLICT(key_hash) DO UPDATE SET",
-          "window_started_at = excluded.window_started_at,",
-          "window_expires_at = excluded.window_expires_at,",
           "create_count = fresh_marketplace_rate_limits.create_count + 1",
         ].join(" ")).bind(input.rateLimitKey, input.createdAt, createWindowExpiresAt),
         this.db.prepare([
