@@ -138,6 +138,32 @@ describe("provider contract preflight", () => {
       upperBoundaryLp.request.marketState.currentTick = upperBoundaryLp.actionableDeliverable.proposedRange!.upperTick;
     }
     expect(runProviderContractPreflight(upperBoundaryLp).outcome, "LP upper-exclusive tick").toBe("CONTRACT_FAIL");
+
+    const policyMutations: Record<ServiceId, (packet: ProviderContractPacket) => void> = {
+      LENDING_RESCUE: (packet) => {
+        if (packet.request.service === "LENDING_RESCUE") packet.request.targetHealthFactor = "1.01";
+      },
+      LP_REBALANCE: (packet) => {
+        if (packet.actionableDeliverable.service === "LP_REBALANCE") {
+          packet.actionableDeliverable.expectedNetBenefitUsd = "4.999999999999999999";
+        }
+      },
+      YIELD_OPTIMIZATION: (packet) => {
+        if (packet.actionableDeliverable.service === "YIELD_OPTIMIZATION") {
+          packet.actionableDeliverable.netBenefitUsd = "4.999999999999999999";
+        }
+      },
+      BOUNDED_GRID: (packet) => {
+        if (packet.request.service === "BOUNDED_GRID") {
+          packet.request.marketState.midPrice = packet.request.constraints.lowerPrice;
+        }
+      },
+    };
+    for (const service of Object.keys(packets) as ServiceId[]) {
+      const rejected = structuredClone(packets[service]);
+      policyMutations[service](rejected);
+      expect(runProviderContractPreflight(rejected).outcome, `${service} canonical policy`).toBe("CONTRACT_FAIL");
+    }
   });
 
   it("detects a tampered result hash", async () => {

@@ -230,8 +230,12 @@ describe("public fixture job boundary", () => {
       },
     });
     expect(openApi).toMatchObject({ openapi: "3.1.0", servers: [{ url: origin }] });
-    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(22);
+    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(23);
     expect(openApi.paths).toMatchObject({
+      "/api/provider-contract-preflight": {
+        get: { operationId: "getProviderContractPreflightTemplates" },
+        post: { operationId: "runProviderContractPreflight" },
+      },
       [EXTERNAL_COMPARISON_SNAPSHOT_ROUTE]: {
         get: { operationId: "getExternalComparisonSnapshot" },
       },

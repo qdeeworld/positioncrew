@@ -137,7 +137,7 @@ export function ProviderCompatibilityPanel() {
         <div>
           <span className="page-kicker">Operator onboarding seam</span>
           <h2 id="provider-preflight-heading">Check a provider packet against the contract.</h2>
-          <p>Submit a manifest, representative request, actionable example, and explicit refusal. PositionCrew checks JSON conformance only; it never calls the supplied provider.</p>
+          <p>Submit a manifest, representative request, actionable example, and explicit refusal. PositionCrew checks structure, request binding, buyer limits, and its deterministic reference gate; it never calls the supplied provider.</p>
         </div>
         <button type="button" aria-expanded={open} aria-controls="provider-preflight-body" onClick={toggleOpen}>
           {open ? "Close preflight" : "Check a provider packet"}

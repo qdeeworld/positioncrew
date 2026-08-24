@@ -17,11 +17,15 @@ import {
 } from "../contracts/index.js";
 import { canonicalHash } from "../core/canonical.js";
 import { parseFixed } from "../core/fixed.js";
+import { createBoundedGridDeliverable } from "../providers/bounded-grid.js";
+import { createLendingRescueDeliverable } from "../providers/lending-rescue.js";
+import { createLpRebalanceDeliverable } from "../providers/lp-rebalance.js";
+import { createYieldOptimizationDeliverable } from "../providers/yield-optimization.js";
 import type { ProviderListing } from "./catalog.js";
 
 export const PROVIDER_CONTRACT_PREFLIGHT_ROUTE = "/api/provider-contract-preflight";
 export const PROVIDER_CONTRACT_PREFLIGHT_BOUNDARY =
-  "This checks only whether caller-supplied JSON conforms to one PositionCrew capital-service contract. It does not prove ownership, identity binding, liveness, uptime, latency, real delivery, quality, safety, demand, payment, performance, integration, certification, or hireability.";
+  "This checks only caller-supplied packet structure, request binding, declared buyer limits, and the deterministic PositionCrew reference actionability gate. It does not prove ownership, identity binding, liveness, uptime, latency, real delivery, output accuracy, quality, safety, demand, payment, performance, integration, certification, or hireability.";
 export const PROVIDER_CONTRACT_PREFLIGHT_VALIDATOR_VERSION =
   "positioncrew.provider-contract-preflight.v1";
 
@@ -213,8 +217,8 @@ function actionableSemanticDetails(service: ServiceId, deliverable: PositionCrew
       details.push("LP range changes require a proposedRange.");
     }
   } else if (service === "YIELD_OPTIMIZATION") {
-    if (!(["SUPPLY", "WITHDRAW", "MIGRATE"] as unknown[]).includes(value.decision)) {
-      details.push("Yield actionable decision must be SUPPLY, WITHDRAW, or MIGRATE.");
+    if (!(["SUPPLY", "MIGRATE"] as unknown[]).includes(value.decision)) {
+      details.push("Yield actionable decision must be SUPPLY or MIGRATE.");
     }
     if (value.selectedOpportunityId === null) {
       details.push("Yield actionable example requires a selected opportunity.");
@@ -362,6 +366,32 @@ function actionableRequestBindingDetails(
   return details;
 }
 
+function canonicalReferenceActionabilityDetails(
+  request: PositionCrewRequest,
+  deliverable: PositionCrewDeliverable,
+): string[] {
+  try {
+    const now = new Date(deliverable.generatedAt);
+    const reference = request.service === "LENDING_RESCUE"
+      ? createLendingRescueDeliverable(request, now)
+      : request.service === "LP_REBALANCE"
+        ? createLpRebalanceDeliverable(request, now)
+        : request.service === "YIELD_OPTIMIZATION"
+          ? createYieldOptimizationDeliverable(request, now)
+          : createBoundedGridDeliverable(request, now);
+    const details: string[] = [];
+    if (reference.status !== "ACTIONABLE") {
+      details.push(`PositionCrew reference provider returned ${reference.status}: ${reference.summary}`);
+    }
+    if (Date.parse(deliverable.expiresAt) > Date.parse(reference.expiresAt)) {
+      details.push("Submitted deliverable outlives the reference evidence window.");
+    }
+    return details;
+  } catch (error) {
+    return [`PositionCrew reference provider could not evaluate the request: ${error instanceof Error ? error.message : String(error)}`];
+  }
+}
+
 function actionableLimitDetails(
   service: ServiceId,
   request: PositionCrewRequest,
@@ -382,18 +412,45 @@ function actionableLimitDetails(
       details.push("Recommended slippage exceeds request.maxSlippageBps.");
     }
   } else if (service === "LP_REBALANCE") {
+    const constraints = record(req.constraints);
     if (!decimalAtMost(output.estimatedRebalanceCostUsd, req.maxActionUsd)) {
       details.push("Estimated rebalance cost exceeds request.maxActionUsd.");
     }
+    if (!decimalAtLeast(output.expectedNetBenefitUsd, constraints.minimumNetBenefitUsd)) {
+      details.push("Expected LP net benefit is below the request minimumNetBenefitUsd.");
+    }
+    if (!decimalAtMost(constraints.estimatedGasUsd, req.maxGasUsd)) {
+      details.push("Requested LP gas estimate exceeds request.maxGasUsd.");
+    }
   } else if (service === "YIELD_OPTIMIZATION") {
+    const constraints = record(req.constraints);
     if (!decimalAtMost(output.allocationUsd, req.capitalUsd)) {
       details.push("Yield allocation exceeds request.capitalUsd.");
     }
     if (!decimalAtMost(output.migrationCostUsd, req.maxActionUsd)) {
       details.push("Yield migration cost exceeds request.maxActionUsd.");
     }
+    if (!decimalAtLeast(output.netBenefitUsd, constraints.minimumNetBenefitUsd)) {
+      details.push("Expected yield net benefit is below the request minimumNetBenefitUsd.");
+    }
   } else {
     const constraints = record(req.constraints);
+    const marketState = record(req.marketState);
+    const mid = fixed(marketState.midPrice);
+    const lower = fixed(constraints.lowerPrice);
+    const upper = fixed(constraints.upperPrice);
+    if (mid === null || lower === null || upper === null || mid <= lower || mid >= upper) {
+      details.push("Grid mid price must be strictly inside the requested range.");
+    }
+    if (!decimalAtLeast(marketState.liquidityUsd, constraints.minimumLiquidityUsd)) {
+      details.push("Grid market liquidity is below the request minimumLiquidityUsd.");
+    }
+    if (!Number.isSafeInteger(marketState.realizedVolatilityBps) || Number(marketState.realizedVolatilityBps) > Number(constraints.maximumVolatilityBps)) {
+      details.push("Grid market volatility exceeds the request maximumVolatilityBps.");
+    }
+    if (!decimalAtMost(constraints.capitalUsd, req.maxActionUsd)) {
+      details.push("Grid capital exceeds request.maxActionUsd.");
+    }
     if (!decimalAtMost(output.worstCaseLossUsd, constraints.maximumLossUsd)) {
       details.push("Worst-case loss exceeds the request maximumLossUsd.");
     }
@@ -542,6 +599,13 @@ export function runProviderContractPreflight(input: unknown): ProviderContractPr
       "Actionable example contains a concrete category-specific action.",
       semanticDetails,
     ));
+    const referenceDetails = canonicalReferenceActionabilityDetails(request, actionable);
+    checks.push(contractCheck(
+      "canonical-reference-actionability",
+      referenceDetails.length === 0,
+      "Representative request clears the deterministic PositionCrew reference actionability gate.",
+      referenceDetails,
+    ));
     const limitDetails = actionableLimitDetails(packet.service, request, actionable);
     checks.push(contractCheck(
       "buyer-limits",
@@ -553,6 +617,7 @@ export function runProviderContractPreflight(input: unknown): ProviderContractPr
     checks.push(
       contractCheck("actionable-request-binding", false, "Actionable request binding cannot be evaluated.", ["Fix request and actionable schema failures first."]),
       contractCheck("actionable-semantics", false, "Actionable semantics cannot be evaluated.", ["Fix actionable schema failures first."]),
+      contractCheck("canonical-reference-actionability", false, "Reference actionability cannot be evaluated.", ["Fix request and actionable schema failures first."]),
       contractCheck("buyer-limits", false, "Buyer limits cannot be evaluated.", ["Fix request and actionable schema failures first."]),
     );
   }

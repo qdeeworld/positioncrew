@@ -1932,6 +1932,16 @@ try {
       "post",
       "runBoundedGridRequest",
     ],
+    [
+      "/api/provider-contract-preflight",
+      "get",
+      "getProviderContractPreflightTemplates",
+    ],
+    [
+      "/api/provider-contract-preflight",
+      "post",
+      "runProviderContractPreflight",
+    ],
     ["/api/wallets/{account}/venus", "get", "inspectVenusAccount"],
     ["/api/positions/pancake/{tokenId}", "get", "inspectPancakePosition"],
     ["/api/markets/venus/stable-yields", "get", "inspectVenusStableYields"],
