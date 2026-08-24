@@ -85,7 +85,11 @@ import {
   type ShadowGridRunBinding,
   type ShadowGridScheduleEvidence,
 } from "../src/operations/bounded-grid-forward-shadow.js";
-import { ShadowGridLedgerStore, type ShadowGridEvent } from "../src/operations/shadow-grid-store.js";
+import {
+  ShadowGridLedgerStore,
+  ensureShadowGridAppendOnlyGuards,
+  type ShadowGridEvent,
+} from "../src/operations/shadow-grid-store.js";
 import {
   getSystemTelemetry,
   inspectPancakeGridMarket,
@@ -584,6 +588,7 @@ async function collectShadowGridTick(request: Request, env: Env, url: URL): Prom
   if (!expected || !supplied || !(await constantTimeTokenMatch(supplied, expected))) {
     return apiError(401, "UNAUTHORIZED", ["A valid scheduler credential is required."]);
   }
+  await ensureShadowGridAppendOnlyGuards(env.DB);
   const now = new Date();
   const schedule = scheduleEvidence(request, now);
   const currentHour = new Date(now);
