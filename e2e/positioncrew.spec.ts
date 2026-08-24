@@ -351,6 +351,7 @@ function currentLendingResponse(
   request: Record<string, unknown>,
   now: Date,
   refused = false,
+  noPosition = false,
 ) {
   const expiresAt = new Date(now.getTime() + 5 * 60_000).toISOString();
   const recommendation = refused ? null : {
@@ -401,18 +402,28 @@ function currentLendingResponse(
         status: refused ? "REFUSED_CONSTRAINTS" : "ACTIONABLE",
         decision: refused ? "REFUSED_CONSTRAINTS" : "RESCUE",
         summary: refused
-          ? "No allowed rescue action fits the wallet inventory and safety limits."
+          ? noPosition
+            ? "No lending position was found at the pinned BSC block, so no rescue action is available."
+            : "No allowed rescue action fits the wallet inventory and safety limits."
           : "A bounded debt repayment restores the requested health factor.",
         expiresAt,
         recommendation,
         alternatives: [],
-        position: {
-          collateralValueUsd: "1200",
-          debtValueUsd: "920",
-          currentHealthFactor: "1.04347826",
-          stressedHealthFactor: "0.93913043",
-          targetHealthFactor: "1.25",
-        },
+        position: noPosition
+          ? {
+              collateralValueUsd: "0",
+              debtValueUsd: "0",
+              currentHealthFactor: null,
+              stressedHealthFactor: null,
+              targetHealthFactor: "1.25",
+            }
+          : {
+              collateralValueUsd: "1200",
+              debtValueUsd: "920",
+              currentHealthFactor: "1.04347826",
+              stressedHealthFactor: "0.93913043",
+              targetHealthFactor: "1.25",
+            },
         invalidationConditions: ["Position state changes after the pinned block."],
       },
       evaluation: {
@@ -427,21 +438,32 @@ function currentLendingResponse(
 
 async function installCurrentLendingHireRoutes(
   page: Page,
-  options: { abortCreate?: boolean; abortRun?: boolean; refused?: boolean } = {},
+  options: { abortCreate?: boolean; abortRun?: boolean; refused?: boolean; safeRefusal?: boolean } = {},
 ) {
   const now = new Date();
-  const account = "0x1111111111111111111111111111111111111111";
+  const account = options.safeRefusal
+    ? "0x0000000000000000000000000000000000000000"
+    : "0x1111111111111111111111111111111111111111";
   const blockNumber = "115607036";
   const hireId = "11111111-1111-4111-8111-111111111111";
   const receiptId = "33333333-3333-4333-8333-333333333333";
   const rescueRequest = liveLendingRequest(now, account, blockNumber);
+  if (options.safeRefusal) {
+    rescueRequest.position = { collateral: [], debt: [] };
+    rescueRequest.availableAssets = [];
+  }
   const source = (rescueRequest.sources as Array<Record<string, unknown>>)[0];
   const observation = {
     blockNumber,
     observedAt: String(source.observedAt),
     explorerUrl: `https://bscscan.com/block/${blockNumber}`,
   };
-  const response = currentLendingResponse(rescueRequest, now, options.refused);
+  const response = currentLendingResponse(
+    rescueRequest,
+    now,
+    Boolean(options.refused || options.safeRefusal),
+    Boolean(options.safeRefusal),
+  );
   const createBodies: Array<Record<string, unknown>> = [];
   let runCount = 0;
   let receiptLoadCount = 0;
@@ -500,16 +522,22 @@ async function installCurrentLendingHireRoutes(
         generatedAt: now.toISOString(),
         chainId: 56,
         account,
-        state: "LIQUID",
-        nativeBalanceBnb: "0.25",
-        usdtBalance: "200",
-        liquidityUsd: "40",
+        state: options.safeRefusal ? "NO_POSITION" : "LIQUID",
+        nativeBalanceBnb: options.safeRefusal ? "0" : "0.25",
+        usdtBalance: options.safeRefusal ? "0" : "200",
+        liquidityUsd: options.safeRefusal ? "0" : "40",
         shortfallUsd: "0",
-        enteredMarkets: [
+        enteredMarkets: options.safeRefusal ? [] : [
           "0xA07c5b74C9B40447a954e1466938b865b6BBea36",
           "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
         ],
-        position: {
+        position: options.safeRefusal ? {
+          collateralValueUsd: "0",
+          liquidationWeightedCollateralUsd: "0",
+          debtValueUsd: "0",
+          healthFactor: null,
+          markets: [],
+        } : {
           collateralValueUsd: "1200",
           liquidationWeightedCollateralUsd: "960",
           debtValueUsd: "920",
@@ -534,7 +562,9 @@ async function installCurrentLendingHireRoutes(
           blockNumber,
           explorerUrl: observation.explorerUrl,
         },
-        boundary: "Block-pinned Venus Classic reconstruction.",
+        boundary: options.safeRefusal
+          ? "This block-pinned Venus Classic account has no reconstructable collateral-and-debt pair. Its embedded request is preserved so the provider can return an explicit, receipted refusal."
+          : "Block-pinned Venus Classic reconstruction.",
       }),
     });
   });
@@ -634,6 +664,44 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(receiptPage.locator("body")).toContainText(mockedHire.hireId);
   await receiptPage.reload();
   await expect(receiptPage.locator("body")).toContainText(`sha256:${"9".repeat(64)}`);
+  expect(mockedHire.receiptLoadCount).toBe(2);
+});
+
+test("a cold buyer can cause and reload a safe live lending refusal", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page, { safeRefusal: true });
+  await page.goto("/#marketplace");
+
+  await page.getByRole("button", { name: "Open live Lending Rescue" }).click();
+  await page.getByRole("button", { name: "Try a safe live refusal" }).click();
+
+  await expect(page.getByPlaceholder("0x account address")).toHaveValue(mockedHire.account);
+  await expect(page.getByText("NO POSITION", { exact: true })).toBeVisible();
+  await expect(page.getByText("Safe live refusal example", { exact: true })).toBeVisible();
+  await expect(page.getByText(`Safe live refusal example from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
+  const hireButton = page.getByRole("button", { name: "Hire and persist safe refusal" });
+  await expect(hireButton).toBeEnabled();
+  await hireButton.click();
+
+  const durableResult = page.locator(".job-result");
+  await expect(durableResult.getByRole("heading", { name: "REFUSED CONSTRAINTS", exact: true })).toBeVisible();
+  await expect(durableResult.getByText("No lending position was found at the pinned BSC block, so no rescue action is available.", { exact: true })).toBeVisible();
+  expect(mockedHire.createBodies).toHaveLength(1);
+  expect(mockedHire.createBodies[0]).toMatchObject({
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    observation: mockedHire.observation,
+    request: {
+      account: mockedHire.account,
+      position: { collateral: [], debt: [] },
+      availableAssets: [],
+    },
+  });
+
+  const receiptLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" });
+  await expect(receiptLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
+  const [receiptPage] = await Promise.all([page.waitForEvent("popup"), receiptLink.click()]);
+  await expect(receiptPage.locator("body")).toContainText(mockedHire.account);
+  await receiptPage.reload();
+  await expect(receiptPage.locator("body")).toContainText(mockedHire.hireId);
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
