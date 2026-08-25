@@ -630,7 +630,7 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole("button", { name: "Load current position and hire" }).click();
-  await expect(page.getByRole("heading", { name: "Get a bounded answer from live BSC data." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Get a bounded answer with evidence you can inspect." })).toBeVisible();
   await expect(page.getByRole("link", { name: "Historical replay in Evidence" })).toHaveAttribute("href", "#evidence");
   await expect(page.getByText(/Hire remains disabled until the exact request and block evidence are ready/)).toBeVisible();
   await expect(page.getByLabel("Lending position health")).toHaveCount(0);

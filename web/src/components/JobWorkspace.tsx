@@ -1264,8 +1264,8 @@ export function JobWorkspace({
       <div className="page-title-row compact">
         <div>
           <span className="page-kicker">Current capital check</span>
-          <h1>Get a bounded answer from live BSC data.</h1>
-          <p>Choose a specialist, load current evidence, and receive either a clear action or a provable refusal with a durable receipt.</p>
+          <h1>Get a bounded answer with evidence you can inspect.</h1>
+          <p>Choose a specialist, load current evidence or a clearly labelled replay, and receive either a clear action or a provable refusal with a durable receipt.</p>
         </div>
         <label className="provider-select">
           <span>Provider</span>
