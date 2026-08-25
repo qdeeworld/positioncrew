@@ -775,10 +775,10 @@ function WalletRiskProbe({
           disabled={loading}
         >
           <ShieldCheck size={15} aria-hidden="true" />
-          Try a safe live refusal
+          See how safe refusal works
         </button>
       </div>
-      <p className="wallet-probe-help" id="wallet-probe-help">No address ready? Query the zero address at a fresh BSC block. It has no reconstructable Venus lending position and is used only to demonstrate the provider's explicit refusal path.</p>
+      <p className="wallet-probe-help" id="wallet-probe-help">No address ready? Use a fresh zero-address read to see how PositionCrew safely refuses when no lending position exists.</p>
       {error && <div className="wallet-probe-error" id="wallet-probe-error" role="alert"><AlertTriangle size={14} /> {error}</div>}
       {probe && (
         <div className="wallet-probe-result" aria-live="polite">
@@ -1263,9 +1263,9 @@ export function JobWorkspace({
     <main className="page-shell jobs-page">
       <div className="page-title-row compact">
         <div>
-          <span className="page-kicker">No-wallet provider trial</span>
-          <h1>Define the job. Inspect the action.</h1>
-          <p>The provider returns a machine-readable decision, execution guards, and a reproducible receipt.</p>
+          <span className="page-kicker">Current capital check</span>
+          <h1>Get a bounded answer from live BSC data.</h1>
+          <p>Choose a specialist, load current evidence, and receive either a clear action or a provable refusal with a durable receipt.</p>
         </div>
         <label className="provider-select">
           <span>Provider</span>
@@ -1301,18 +1301,22 @@ export function JobWorkspace({
           {service === "LENDING_RESCUE" ? (
             <>
               <WalletRiskProbe telemetry={telemetry} onUseRequest={useLiveRequest} onClearRequest={clearLiveRequest} />
-              <LendingPositionBar request={draftRequest} />
-              <div className="form-grid">
-                <NumberField label="Target health factor" value={draft.targetHealth} onChange={(value) => updateDraft("targetHealth", value)} disabled={inputsDisabled} min="1.01" max="3" step="0.01" />
-                <NumberField label="Maximum action (USD)" value={draft.maxAction} onChange={(value) => updateDraft("maxAction", value)} disabled={inputsDisabled} min="1" max="10000" step="1" />
-                <NumberField label="Stress price drop (bps)" value={draft.stressDrop} onChange={(value) => updateDraft("stressDrop", value)} disabled={inputsDisabled} min="0" max="5000" step="100" />
-                <NumberField label="Maximum slippage (bps)" value={draft.maxSlippage} onChange={(value) => updateDraft("maxSlippage", value)} disabled={inputsDisabled} min="0" max="2000" step="1" />
-              </div>
-              <fieldset className="action-options">
-                <legend>Allowed actions</legend>
-                <label><input disabled={inputsDisabled} type="checkbox" checked={draft.allowRepay} onChange={(event) => updateDraft("allowRepay", event.target.checked)} /> Repay debt</label>
-                <label><input disabled={inputsDisabled} type="checkbox" checked={draft.allowCollateral} onChange={(event) => updateDraft("allowCollateral", event.target.checked)} /> Add collateral</label>
-              </fieldset>
+              {liveRequest && !safeLiveRefusal && (
+                <>
+                  <LendingPositionBar request={draftRequest} />
+                  <div className="form-grid">
+                    <NumberField label="Target health factor" value={draft.targetHealth} onChange={(value) => updateDraft("targetHealth", value)} disabled={inputsDisabled} min="1.01" max="3" step="0.01" />
+                    <NumberField label="Maximum action (USD)" value={draft.maxAction} onChange={(value) => updateDraft("maxAction", value)} disabled={inputsDisabled} min="1" max="10000" step="1" />
+                    <NumberField label="Stress price drop (bps)" value={draft.stressDrop} onChange={(value) => updateDraft("stressDrop", value)} disabled={inputsDisabled} min="0" max="5000" step="100" />
+                    <NumberField label="Maximum slippage (bps)" value={draft.maxSlippage} onChange={(value) => updateDraft("maxSlippage", value)} disabled={inputsDisabled} min="0" max="2000" step="1" />
+                  </div>
+                  <fieldset className="action-options">
+                    <legend>Allowed actions</legend>
+                    <label><input disabled={inputsDisabled} type="checkbox" checked={draft.allowRepay} onChange={(event) => updateDraft("allowRepay", event.target.checked)} /> Repay debt</label>
+                    <label><input disabled={inputsDisabled} type="checkbox" checked={draft.allowCollateral} onChange={(event) => updateDraft("allowCollateral", event.target.checked)} /> Add collateral</label>
+                  </fieldset>
+                </>
+              )}
             </>
           ) : service === "LP_REBALANCE" ? (
             <>

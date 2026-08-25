@@ -630,12 +630,16 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole("button", { name: "Load current position and hire" }).click();
-  await expect(page.getByRole("heading", { name: "Define the job. Inspect the action." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Get a bounded answer from live BSC data." })).toBeVisible();
   await expect(page.getByRole("link", { name: "Historical replay in Evidence" })).toHaveAttribute("href", "#evidence");
   await expect(page.getByText(/Hire remains disabled until the exact request and block evidence are ready/)).toBeVisible();
+  await expect(page.getByLabel("Lending position health")).toHaveCount(0);
+  await expect(page.getByLabel("Target health factor")).toHaveCount(0);
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
   await expect(page.getByText("Current request loaded", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Lending position health")).toBeVisible();
+  await expect(page.getByLabel("Target health factor")).toBeVisible();
   await expect(page.getByText(`Block-pinned Venus position from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Hire and run current request" }).click();
 
@@ -691,11 +695,13 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   await page.goto("/#marketplace");
 
   await page.getByRole("button", { name: "Open live Lending Rescue" }).click();
-  await page.getByRole("button", { name: "Try a safe live refusal" }).click();
+  await page.getByRole("button", { name: "See how safe refusal works" }).click();
 
   await expect(page.getByPlaceholder("0x account address")).toHaveValue(mockedHire.account);
   await expect(page.getByText("NO POSITION", { exact: true })).toBeVisible();
   await expect(page.getByText("Safe live refusal example", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Lending position health")).toHaveCount(0);
+  await expect(page.getByLabel("Target health factor")).toHaveCount(0);
   await expect(page.getByText(`Safe live refusal example from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
   const hireButton = page.getByRole("button", { name: "Hire and persist safe refusal" });
   await expect(hireButton).toBeEnabled();
