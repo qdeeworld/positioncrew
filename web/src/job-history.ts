@@ -1,6 +1,10 @@
 import type { FixtureJobResponse, FreshMarketplaceChain, ServiceId, SessionJob } from "./types.js";
 import { FixtureJobResponseSchema } from "../../src/api/fixture-response-schema.js";
-import { canonicalJson, freshMarketplaceTaskForService } from "../../src/commerce/fresh-hire-schema.js";
+import {
+  canonicalJson,
+  freshMarketplaceTaskForService,
+  sha256Commitment,
+} from "../../src/commerce/fresh-hire-schema.js";
 
 export const RECENT_JOB_STORAGE_KEY = "positioncrew.recent-jobs.v1";
 export const RECENT_JOB_CHANGED_EVENT = "positioncrew:recent-job-changed";
@@ -353,10 +357,10 @@ export function isRecentJobChangeDetail(value: unknown): value is RecentJobChang
     typeof value.storageAvailable === "boolean";
 }
 
-export function isFreshMarketplaceChainForReference(
+export async function isFreshMarketplaceChainForReference(
   value: unknown,
   reference: RecentJobReference,
-): value is FreshMarketplaceChain {
+): Promise<boolean> {
   if (!isRecord(value) || value.schemaVersion !== "positioncrew.fresh-marketplace-chain.v1") {
     return false;
   }
@@ -372,6 +376,12 @@ export function isFreshMarketplaceChainForReference(
     return false;
   }
   const [benchmarkSlug, task] = taskBinding;
+  const expectedStatus = {
+    CREATED: "HIRE_RECORDED",
+    RUNNING: "RUNNING",
+    COMPLETED: "COMPLETED",
+    FAILED: "FAILED",
+  }[String(job.state)];
 
   if (hire.hireId !== reference.hireId || hire.service !== reference.service ||
     hire.benchmarkSlug !== benchmarkSlug ||
@@ -381,7 +391,7 @@ export function isFreshMarketplaceChainForReference(
     typeof hire.requestHash !== "string" ||
     !["HISTORICAL_FIXTURE", "CURRENT_BLOCK_PINNED"].includes(String(hire.evidenceMode)) ||
     typeof job.jobId !== "string" ||
-    !["CREATED", "RUNNING", "COMPLETED", "FAILED"].includes(String(job.state))) {
+    !expectedStatus || job.status !== expectedStatus) {
     return false;
   }
 
@@ -410,6 +420,13 @@ export function isFreshMarketplaceChainForReference(
         receipt.evaluationHash,
         hire.evidenceMode as "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED",
       )) {
+      return false;
+    }
+    try {
+      if (await sha256Commitment(receipt.response) !== receipt.responseHash) {
+        return false;
+      }
+    } catch {
       return false;
     }
   }

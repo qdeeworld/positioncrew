@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runCurrentBlockPinnedProviderRequest, runFrozenFixture } from "../src/api/fixture-jobs.js";
+import { sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
 import {
   clearRecentJobReferences,
   isFreshMarketplaceChainForReference,
@@ -103,10 +104,10 @@ describe("recent job device index", () => {
       service: "LP_REBALANCE",
       rememberedAt,
     });
-    const chainFor = (
+    const chainFor = async (
       response: Awaited<ReturnType<typeof runFrozenFixture>>,
       evidenceMode: "HISTORICAL_FIXTURE" | "CURRENT_BLOCK_PINNED",
-    ): Record<string, unknown> => {
+    ): Promise<Record<string, unknown>> => {
       const providerId = response.result.job.providerId;
       const deliverable = response.result.job.deliverable;
       if (!providerId || !deliverable) throw new Error("Canonical fixture is missing completed provider evidence");
@@ -140,12 +141,13 @@ describe("recent job device index", () => {
         job: {
           jobId: "88888888-8888-4888-8888-888888888888",
           state: "COMPLETED",
+          status: "COMPLETED",
           error: null,
         },
         receipt: {
           receiptId: "77777777-7777-4777-8777-777777777777",
           publicUrl: "/api/benchmark-receipts/77777777-7777-4777-8777-777777777777",
-          responseHash: `sha256:${"9".repeat(64)}`,
+          responseHash: await sha256Commitment(response),
           deliverableHash: deliverable.deliverableHash,
           evaluationHash: response.result.evaluation.evaluationHash,
           createdAt: response.generatedAt,
@@ -155,8 +157,8 @@ describe("recent job device index", () => {
     };
 
     const saved = referenceFor(historicalResponse.generatedAt);
-    const chain = chainFor(historicalResponse, "HISTORICAL_FIXTURE");
-    expect(isFreshMarketplaceChainForReference(chain, saved)).toBe(true);
+    const chain = await chainFor(historicalResponse, "HISTORICAL_FIXTURE");
+    expect(await isFreshMarketplaceChainForReference(chain, saved)).toBe(true);
     expect((chain.hire as Record<string, unknown>).requestHash)
       .not.toBe(historicalResponse.result.evaluation.requestHash);
 
@@ -164,21 +166,21 @@ describe("recent job device index", () => {
       historicalResponse.result.request,
       new Date(historicalResponse.generatedAt),
     );
-    const current = chainFor(currentResponse, "CURRENT_BLOCK_PINNED");
-    expect(isFreshMarketplaceChainForReference(current, saved)).toBe(true);
+    const current = await chainFor(currentResponse, "CURRENT_BLOCK_PINNED");
+    expect(await isFreshMarketplaceChainForReference(current, saved)).toBe(true);
 
     const wrongResponseMode = structuredClone(current);
     const wrongModeReceipt = wrongResponseMode.receipt as Record<string, unknown>;
     (wrongModeReceipt.response as Record<string, unknown>).evidenceMode = "CALLER_SUPPLIED_OBSERVATIONS";
-    expect(isFreshMarketplaceChainForReference(wrongResponseMode, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(wrongResponseMode, saved)).toBe(false);
 
     const mismatchedHire = structuredClone(chain);
     (mismatchedHire.hire as Record<string, unknown>).hireId = reference(2).hireId;
-    expect(isFreshMarketplaceChainForReference(mismatchedHire, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(mismatchedHire, saved)).toBe(false);
 
     const copiedResponse = structuredClone(current);
     (copiedResponse.hire as Record<string, unknown>).requestHash = `sha256:${"a".repeat(64)}`;
-    expect(isFreshMarketplaceChainForReference(copiedResponse, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(copiedResponse, saved)).toBe(false);
 
     const requestHashLocations = [
       ["job", "envelope"],
@@ -195,55 +197,70 @@ describe("recent job device index", () => {
         target = target[key] as Record<string, unknown>;
       }
       target.requestHash = `sha256:${"b".repeat(64)}`;
-      expect(isFreshMarketplaceChainForReference(alteredHash, saved)).toBe(false);
+      expect(await isFreshMarketplaceChainForReference(alteredHash, saved)).toBe(false);
     }
 
     const alteredRequestBody = structuredClone(current);
     const alteredBodyResponse = (alteredRequestBody.receipt as Record<string, unknown>).response as Record<string, unknown>;
     const alteredBodyResult = alteredBodyResponse.result as Record<string, unknown>;
     (alteredBodyResult.request as Record<string, unknown>).account = "0x2222222222222222222222222222222222222222";
-    expect(isFreshMarketplaceChainForReference(alteredRequestBody, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(alteredRequestBody, saved)).toBe(false);
 
     const alteredFixtureLock = structuredClone(chain);
     const alteredFixtureResponse = (alteredFixtureLock.receipt as Record<string, unknown>).response as Record<string, unknown>;
     (alteredFixtureResponse.benchmarkLock as Record<string, unknown>).fixtureHash = `sha256:${"2".repeat(64)}`;
-    expect(isFreshMarketplaceChainForReference(alteredFixtureLock, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(alteredFixtureLock, saved)).toBe(false);
 
     const alteredFixtureTask = structuredClone(chain);
     const alteredTaskResponse = (alteredFixtureTask.receipt as Record<string, unknown>).response as Record<string, unknown>;
     (alteredTaskResponse.benchmarkLock as Record<string, unknown>).taskId = "different-task";
-    expect(isFreshMarketplaceChainForReference(alteredFixtureTask, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(alteredFixtureTask, saved)).toBe(false);
 
     const alteredHistoricalMetadata = structuredClone(chain);
     const alteredMetadataHire = alteredHistoricalMetadata.hire as Record<string, unknown>;
     (alteredMetadataHire.request as Record<string, unknown>).requestSchema = "positioncrew.bounded-grid.request.v1";
-    expect(isFreshMarketplaceChainForReference(alteredHistoricalMetadata, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(alteredHistoricalMetadata, saved)).toBe(false);
 
-    expect(isFreshMarketplaceChainForReference({ ...chain, receipt: null }, saved)).toBe(false);
+    const alteredResponse = structuredClone(chain);
+    const alteredReceipt = alteredResponse.receipt as Record<string, unknown>;
+    const alteredPayload = alteredReceipt.response as Record<string, unknown>;
+    const alteredResult = alteredPayload.result as Record<string, unknown>;
+    (alteredResult.deliverable as Record<string, unknown>).summary = "A schema-valid plan that was not committed by the receipt.";
+    expect(await isFreshMarketplaceChainForReference(alteredResponse, saved)).toBe(false);
+
+    const missingStatus = structuredClone(chain);
+    delete (missingStatus.job as Record<string, unknown>).status;
+    expect(await isFreshMarketplaceChainForReference(missingStatus, saved)).toBe(false);
+
+    const mismatchedStatus = structuredClone(chain);
+    (mismatchedStatus.job as Record<string, unknown>).status = "RUNNING";
+    expect(await isFreshMarketplaceChainForReference(mismatchedStatus, saved)).toBe(false);
+
+    expect(await isFreshMarketplaceChainForReference({ ...chain, receipt: null }, saved)).toBe(false);
 
     const mismatchedService = structuredClone(chain);
     const mismatchedServiceResponse = ((mismatchedService.receipt as Record<string, unknown>).response as Record<string, unknown>);
     const mismatchedServiceResult = mismatchedServiceResponse.result as Record<string, unknown>;
     (mismatchedServiceResult.request as Record<string, unknown>).service = "BOUNDED_GRID";
-    expect(isFreshMarketplaceChainForReference(mismatchedService, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(mismatchedService, saved)).toBe(false);
 
     const mismatchedProvider = structuredClone(chain);
     const mismatchedProviderResponse = ((mismatchedProvider.receipt as Record<string, unknown>).response as Record<string, unknown>);
     const mismatchedProviderResult = mismatchedProviderResponse.result as Record<string, unknown>;
     (mismatchedProviderResult.job as Record<string, unknown>).providerId = "positioncrew:other-provider:v1";
-    expect(isFreshMarketplaceChainForReference(mismatchedProvider, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(mismatchedProvider, saved)).toBe(false);
 
     const invalidExpiry = structuredClone(chain);
     const invalidExpiryResponse = ((invalidExpiry.receipt as Record<string, unknown>).response as Record<string, unknown>);
     const invalidExpiryResult = invalidExpiryResponse.result as Record<string, unknown>;
     (invalidExpiryResult.deliverable as Record<string, unknown>).expiresAt = "not-a-date";
-    expect(isFreshMarketplaceChainForReference(invalidExpiry, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(invalidExpiry, saved)).toBe(false);
 
     const invalidCategoryPayload = structuredClone(chain);
     const invalidCategoryResponse = ((invalidCategoryPayload.receipt as Record<string, unknown>).response as Record<string, unknown>);
     const invalidCategoryResult = invalidCategoryResponse.result as Record<string, unknown>;
     (invalidCategoryResult.deliverable as Record<string, unknown>).actionSteps = [{}];
-    expect(isFreshMarketplaceChainForReference(invalidCategoryPayload, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(invalidCategoryPayload, saved)).toBe(false);
 
     const invalidError = structuredClone(chain);
     invalidError.job = {
@@ -252,6 +269,6 @@ describe("recent job device index", () => {
       error: { code: "PROVIDER_TIMEOUT", message: 42 },
     };
     invalidError.receipt = null;
-    expect(isFreshMarketplaceChainForReference(invalidError, saved)).toBe(false);
+    expect(await isFreshMarketplaceChainForReference(invalidError, saved)).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { runCurrentBlockPinnedProviderRequest } from "../src/api/fixture-jobs.js";
+import { sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
@@ -470,6 +471,7 @@ async function installCurrentLendingHireRoutes(
     explorerUrl: `https://bscscan.com/block/${blockNumber}`,
   };
   const response = await runCurrentBlockPinnedProviderRequest(rescueRequest, now);
+  const responseHash = await sha256Commitment(response);
   const createBodies: Array<Record<string, unknown>> = [];
   let runCount = 0;
   let receiptLoadCount = 0;
@@ -511,7 +513,7 @@ async function installCurrentLendingHireRoutes(
     receipt: state === "COMPLETED" ? {
       receiptId,
       publicUrl: `/api/benchmark-receipts/${receiptId}`,
-      responseHash: `sha256:${"9".repeat(64)}`,
+      responseHash,
       deliverableHash: response.result.job.deliverable?.deliverableHash ?? `sha256:${"b".repeat(64)}`,
       evaluationHash: response.result.evaluation.evaluationHash,
       createdAt: now.toISOString(),
@@ -605,6 +607,7 @@ async function installCurrentLendingHireRoutes(
     blockNumber,
     hireId,
     receiptId,
+    responseHash,
     rescueRequest,
     observation,
     createBodies,
@@ -679,7 +682,7 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   ]);
   await expect(receiptPage.locator("body")).toContainText(mockedHire.hireId);
   await receiptPage.reload();
-  await expect(receiptPage.locator("body")).toContainText(`sha256:${"9".repeat(64)}`);
+  await expect(receiptPage.locator("body")).toContainText(mockedHire.responseHash);
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
@@ -1501,6 +1504,7 @@ async function installCurrentCategoryHireRoutes(
   const receiptId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-a${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
   const createBodies: Array<Record<string, unknown>> = [];
   let providerResponse: Awaited<ReturnType<typeof runCurrentBlockPinnedProviderRequest>> | null = null;
+  let providerResponseHash: string | null = null;
   let receiptLoadCount = 0;
 
   const chain = (state: "CREATED" | "RUNNING" | "COMPLETED") => {
@@ -1552,7 +1556,7 @@ async function installCurrentCategoryHireRoutes(
       receipt: state === "COMPLETED" ? {
         receiptId,
         publicUrl: `/api/benchmark-receipts/${receiptId}`,
-        responseHash: `sha256:${"9".repeat(64)}`,
+        responseHash: providerResponseHash ?? `sha256:${"9".repeat(64)}`,
         deliverableHash: providerResponse?.result.job.deliverable?.deliverableHash ?? `sha256:${"b".repeat(64)}`,
         evaluationHash: providerResponse?.result.evaluation.evaluationHash ?? `sha256:${"e".repeat(64)}`,
         createdAt: now.toISOString(),
@@ -1569,6 +1573,7 @@ async function installCurrentCategoryHireRoutes(
     }
     createBodies.push(body);
     providerResponse = await runCurrentBlockPinnedProviderRequest(body.request, now);
+    providerResponseHash = await sha256Commitment(providerResponse);
     await route.fulfill({
       status: 201,
       contentType: "application/json",
