@@ -57,10 +57,10 @@ async function retrieveChain(reference: RecentJobReference): Promise<FreshMarket
   }
 
   const payload: unknown = await response.json();
-  if (!isFreshMarketplaceChainForReference(payload, reference)) {
+  if (!(await isFreshMarketplaceChainForReference(payload, reference))) {
     throw new Error("Server receipt did not match this device reference");
   }
-  return payload;
+  return payload as FreshMarketplaceChain;
 }
 
 function stateCopy(item: RecentJobItem): { label: string; detail: string } {
@@ -227,11 +227,12 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
         throw new Error(`Run request returned ${response.status}`);
       }
       const payload: unknown = await response.json();
-      if (!isFreshMarketplaceChainForReference(payload, item.reference)) {
+      if (!(await isFreshMarketplaceChainForReference(payload, item.reference))) {
         throw new Error("Run response did not match this device reference");
       }
-      updateItem(item.reference, { phase: "READY", chain: payload, busy: true, error: null });
-      const settled = await followJob(item.reference, payload, true);
+      const chain = payload as FreshMarketplaceChain;
+      updateItem(item.reference, { phase: "READY", chain, busy: true, error: null });
+      const settled = await followJob(item.reference, chain, true);
       updateItem(item.reference, { phase: "READY", chain: settled, busy: false, error: null });
     } catch (error) {
       updateItem(item.reference, { phase: "UNAVAILABLE", chain: null, busy: false, error: safeError(error) });
