@@ -1,3 +1,4 @@
+import { RecentJobsPanel } from "./RecentJobsPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -1094,7 +1095,6 @@ export function JobWorkspace({
   fixture,
   activeJob,
   marketplaceTrace,
-  sessionJobs,
   loading,
   onRun,
   onSelectJob,
@@ -1109,14 +1109,12 @@ export function JobWorkspace({
   advantagePublicationLoadState,
   founderAdvantagePublicationLoadState,
   forwardShadowLedger,
-  onClearJobs,
 }: {
   provider: ProviderListing | undefined;
   selectedService: ServiceId;
   fixture: FixtureJobResponse | undefined;
   activeJob: SessionJob | null;
   marketplaceTrace: FreshMarketplaceChain | null;
-  sessionJobs: SessionJob[];
   loading: boolean;
   onRun: (
     request: Record<string, unknown>,
@@ -1135,7 +1133,6 @@ export function JobWorkspace({
   advantagePublicationLoadState: PublicationLoadState;
   founderAdvantagePublicationLoadState: PublicationLoadState;
   forwardShadowLedger: BoundedGridForwardShadowLedger | null;
-  onClearJobs: () => void;
 }) {
   const service = selectedService;
   const task = TASKS.find((candidate) => candidate.id === service) ?? TASKS[0];
@@ -1481,31 +1478,7 @@ export function JobWorkspace({
           )}
         </section>
       </div>
-
-      <section className="session-jobs" aria-labelledby="session-jobs-title">
-        <div className="section-bar">
-          <div><span className="section-kicker">Server receipt view</span><h2 id="session-jobs-title">Recent job activity</h2></div>
-          <div className="history-actions"><span>{sessionJobs.length} jobs</span>{sessionJobs.length > 0 && <button type="button" onClick={onClearJobs} title="Clear this browser view only"><Trash2 size={14} /> Clear view</button>}</div>
-        </div>
-        <div className="history-table-wrap">
-          <table className="history-table">
-            <thead><tr><th>Time</th><th>Service</th><th>Decision</th><th>State</th><th>Score</th><th>Job ID</th></tr></thead>
-            <tbody>
-              {sessionJobs.map((job) => (
-                <tr key={`${job.response.result.job.jobId}-${job.ranAt}`}>
-                  <td>{new Date(job.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</td>
-                  <td><button type="button" onClick={() => onSelectJob(job)}>{serviceLabel(job.response.result.request.service)}</button></td>
-                  <td>{resultHeadline(job.response.result.deliverable)}</td>
-                  <td><span className={`state-label ${statusTone(job.response.result.job.state)}`}>{job.response.result.job.state}</span></td>
-                  <td>{job.response.result.evaluation.score}/100</td>
-                  <td><code>{shortHash(job.response.result.job.jobId, 14)}</code></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {sessionJobs.length === 0 && <div className="empty-table">No jobs have run in this browser session.</div>}
-        </div>
-      </section>
+      <RecentJobsPanel onOpenJob={onSelectJob} />
     </main>
   );
 }

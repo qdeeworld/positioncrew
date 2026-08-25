@@ -84,7 +84,7 @@ export type CurrentLendingObservation = CurrentMarketplaceObservation;
 
 export interface FixtureJobResponse {
   schemaVersion: "positioncrew.fixture-job-response.v1";
-  evidenceMode: "FROZEN_BSC_TEST_FIXTURE" | "CALLER_SUPPLIED_OBSERVATIONS";
+  evidenceMode: "FROZEN_BSC_TEST_FIXTURE" | "CALLER_SUPPLIED_OBSERVATIONS" | "CURRENT_BLOCK_PINNED";
   commerceMode: "IN_MEMORY_CONFORMANCE";
   advantageStatus: "PENDING_INDEPENDENT_BLIND_EVALUATION";
   generatedAt: string;

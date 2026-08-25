@@ -1,3 +1,4 @@
+import { runCurrentBlockPinnedProviderRequest } from "../src/api/fixture-jobs.js";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
@@ -438,7 +439,15 @@ function currentLendingResponse(
 
 async function installCurrentLendingHireRoutes(
   page: Page,
-  options: { abortCreate?: boolean; abortRun?: boolean; refused?: boolean; safeRefusal?: boolean } = {},
+  options: {
+    abortCreate?: boolean;
+    abortRun?: boolean;
+    refused?: boolean;
+    safeRefusal?: boolean;
+    staleRunning?: boolean;
+    getDelayMs?: number;
+    failedMessage?: string;
+  } = {},
 ) {
   const now = new Date();
   const account = options.safeRefusal
@@ -451,6 +460,8 @@ async function installCurrentLendingHireRoutes(
   if (options.safeRefusal) {
     rescueRequest.position = { collateral: [], debt: [] };
     rescueRequest.availableAssets = [];
+  } else if (options.refused) {
+    rescueRequest.availableAssets = [];
   }
   const source = (rescueRequest.sources as Array<Record<string, unknown>>)[0];
   const observation = {
@@ -458,17 +469,12 @@ async function installCurrentLendingHireRoutes(
     observedAt: String(source.observedAt),
     explorerUrl: `https://bscscan.com/block/${blockNumber}`,
   };
-  const response = currentLendingResponse(
-    rescueRequest,
-    now,
-    Boolean(options.refused || options.safeRefusal),
-    Boolean(options.safeRefusal),
-  );
+  const response = await runCurrentBlockPinnedProviderRequest(rescueRequest, now);
   const createBodies: Array<Record<string, unknown>> = [];
   let runCount = 0;
   let receiptLoadCount = 0;
 
-  const chain = (state: "CREATED" | "RUNNING" | "COMPLETED") => ({
+  const chain = (state: "CREATED" | "RUNNING" | "COMPLETED" | "FAILED") => ({
     schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
     claimBoundary: [
       "Current block-pinned input.",
@@ -480,13 +486,13 @@ async function installCurrentLendingHireRoutes(
       hireId,
       idempotencyKey: String(createBodies.at(-1)?.idempotencyKey ?? "44444444-4444-4444-8444-444444444444"),
       providerSlug: "lending-rescue",
-      providerId: "positioncrew:lending-rescue:v1",
+      providerId: response.result.job.providerId ?? "positioncrew:provider:lending-rescue:v1",
       benchmarkSlug: "lending-rescue",
       service: "LENDING_RESCUE",
       evidenceMode: "CURRENT_BLOCK_PINNED",
       commerce: { directCostUsd: "0.00", walletRequired: false, settlement: "NO_PAYMENT" },
       request: rescueRequest,
-      requestHash: `sha256:${"c".repeat(64)}`,
+      requestHash: response.result.evaluation.requestHash,
       evidence: observation,
       evidenceHash: `sha256:${"d".repeat(64)}`,
       providerHash: `sha256:${"f".repeat(64)}`,
@@ -500,14 +506,14 @@ async function installCurrentLendingHireRoutes(
       startedAt: state === "CREATED" ? null : now.toISOString(),
       completedAt: state === "COMPLETED" ? now.toISOString() : null,
       apiDurationMilliseconds: state === "COMPLETED" ? 43 : null,
-      error: null,
+      error: state === "FAILED" ? { code: "PROVIDER_TIMEOUT", message: options.failedMessage ?? "Provider run failed." } : null,
     },
     receipt: state === "COMPLETED" ? {
       receiptId,
       publicUrl: `/api/benchmark-receipts/${receiptId}`,
       responseHash: `sha256:${"9".repeat(64)}`,
-      deliverableHash: `sha256:${"b".repeat(64)}`,
-      evaluationHash: `sha256:${"e".repeat(64)}`,
+      deliverableHash: response.result.job.deliverable?.deliverableHash ?? `sha256:${"b".repeat(64)}`,
+      evaluationHash: response.result.evaluation.evaluationHash,
       createdAt: now.toISOString(),
       response,
     } : null,
@@ -579,7 +585,15 @@ async function installCurrentLendingHireRoutes(
     await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(chain("RUNNING")) });
   });
   await page.route(new RegExp(`/api/benchmark-hires/${hireId}$`), async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(chain("COMPLETED")) });
+    if (options.getDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, options.getDelayMs));
+    }
+    const state = options.failedMessage
+      ? "FAILED"
+      : options.staleRunning && runCount === 0
+        ? "RUNNING"
+        : "COMPLETED";
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(chain(state)) });
   });
   await page.context().route(`**/api/benchmark-receipts/${receiptId}`, async (route) => {
     receiptLoadCount += 1;
@@ -626,7 +640,9 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.locator(".result-boundary")).toContainText(
     "Block-pinned Venus input. The provider output is unsigned and must be revalidated against current protocol state before execution.",
   );
-  await expect(page.getByText("100/100", { exact: true }).first()).toBeVisible();
+  const recentJobs = page.getByTestId("recent-jobs-device");
+  await expect(recentJobs.getByText("1 saved job", { exact: true })).toBeVisible();
+  await expect(recentJobs.getByText("Completed", { exact: true })).toBeVisible();
   const advantageStatus = page.getByRole("region", { name: "Founder Agent Advantage comparison status" });
   await expect(advantageStatus.getByText("Founder comparison published", { exact: true })).toBeVisible();
   await expect(advantageStatus).toContainText("Bounded lending-position rescue: exact canonical output match");
@@ -683,8 +699,8 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   await hireButton.click();
 
   const durableResult = page.locator(".job-result");
-  await expect(durableResult.getByRole("heading", { name: "REFUSED CONSTRAINTS", exact: true })).toBeVisible();
-  await expect(durableResult.getByText("No lending position was found at the pinned BSC block, so no rescue action is available.", { exact: true })).toBeVisible();
+  await expect(durableResult.getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
+  await expect(durableResult.getByText("No complete Venus collateral-and-debt position was available for rescue analysis.", { exact: true })).toBeVisible();
   expect(mockedHire.createBodies).toHaveLength(1);
   expect(mockedHire.createBodies[0]).toMatchObject({
     evidenceMode: "CURRENT_BLOCK_PINNED",
@@ -1015,7 +1031,7 @@ test("all three non-lending current hires return category-specific durable resul
     await expect(page.getByRole("heading", { name: candidate.output })).toBeVisible();
     await expect(page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" })).toBeVisible();
   }
-  await expect(page.getByText("3 jobs", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("recent-jobs-device").getByText("3 saved jobs", { exact: true })).toBeVisible();
   expect(hires.every((hire) => hire.createBodies.length === 1)).toBe(true);
 });
 
@@ -1026,7 +1042,7 @@ test("a current lending refusal persists and remains inspectable", async ({ page
   await page.getByRole("button", { name: "Load position" }).click();
   await page.getByRole("button", { name: "Hire and run current request" }).click();
   const durableResult = page.locator(".job-result");
-  await expect(durableResult.getByRole("heading", { name: "REFUSED CONSTRAINTS", exact: true })).toBeVisible();
+  await expect(durableResult.getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
   await expect(durableResult.getByText("No allowed rescue action fits the wallet inventory and safety limits.", { exact: true })).toBeVisible();
   const durableStatus = page.locator('.request-boundary[role="status"]');
   await expect(durableStatus.getByRole("link", { name: "Public receipt" })).toHaveAttribute(
@@ -1484,7 +1500,7 @@ async function installCurrentCategoryHireRoutes(
   const jobId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-9${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
   const receiptId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-a${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
   const createBodies: Array<Record<string, unknown>> = [];
-  let providerResponse: Record<string, unknown> | null = null;
+  let providerResponse: Awaited<ReturnType<typeof runCurrentBlockPinnedProviderRequest>> | null = null;
   let receiptLoadCount = 0;
 
   const chain = (state: "CREATED" | "RUNNING" | "COMPLETED") => {
@@ -1503,13 +1519,13 @@ async function installCurrentCategoryHireRoutes(
         hireId,
         idempotencyKey: body.idempotencyKey,
         providerSlug: definition.providerSlug,
-        providerId: `positioncrew:${definition.providerSlug}:v1`,
+        providerId: providerResponse?.result.job.providerId ?? `positioncrew:provider:${definition.providerSlug}:v1`,
         benchmarkSlug: definition.benchmarkSlug,
         service: definition.service,
         evidenceMode: "CURRENT_BLOCK_PINNED",
         commerce: { directCostUsd: "0.00", walletRequired: false, settlement: "NO_PAYMENT" },
         request,
-        requestHash: `sha256:${"c".repeat(64)}`,
+        requestHash: providerResponse?.result.evaluation.requestHash ?? `sha256:${"c".repeat(64)}`,
         evidence: {
           schemaVersion: "positioncrew.current-block-pinned-evidence.v1",
           evidenceClass: "CURRENT_BLOCK_PINNED",
@@ -1537,8 +1553,8 @@ async function installCurrentCategoryHireRoutes(
         receiptId,
         publicUrl: `/api/benchmark-receipts/${receiptId}`,
         responseHash: `sha256:${"9".repeat(64)}`,
-        deliverableHash: `sha256:${"b".repeat(64)}`,
-        evaluationHash: `sha256:${"e".repeat(64)}`,
+        deliverableHash: providerResponse?.result.job.deliverable?.deliverableHash ?? `sha256:${"b".repeat(64)}`,
+        evaluationHash: providerResponse?.result.evaluation.evaluationHash ?? `sha256:${"e".repeat(64)}`,
         createdAt: now.toISOString(),
         response: providerResponse,
       } : null,
@@ -1552,12 +1568,7 @@ async function installCurrentCategoryHireRoutes(
       return;
     }
     createBodies.push(body);
-    const direct = await page.context().request.post(
-      `/api/providers/${definition.providerSlug}/jobs`,
-      { data: { request: body.request } },
-    );
-    expect(direct.status()).toBe(200);
-    providerResponse = await direct.json();
+    providerResponse = await runCurrentBlockPinnedProviderRequest(body.request, now);
     await route.fulfill({
       status: 201,
       contentType: "application/json",
@@ -1594,3 +1605,97 @@ async function installCurrentCategoryHireRoutes(
     get receiptLoadCount() { return receiptLoadCount; },
   };
 }
+
+test("restores a server-backed recent job on the same device without caching its financial payload", async ({ page }) => {
+  const routes = await installCurrentLendingHireRoutes(page, { safeRefusal: true });
+  await page.addInitScript(({ hireId }) => {
+    window.localStorage.setItem("positioncrew.recent-jobs.v1", JSON.stringify({
+      schemaVersion: "positioncrew.recent-jobs.v1",
+      entries: [{
+        hireId,
+        service: "LENDING_RESCUE",
+        rememberedAt: "2026-08-24T12:00:00.000Z",
+      }],
+    }));
+  }, { hireId: routes.hireId });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#jobs");
+
+  const panel = page.getByTestId("recent-jobs-device");
+  await expect(panel.getByRole("heading", { name: "Recent jobs on this device" })).toBeVisible();
+  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(panel.getByText("This browser stores job references only.", { exact: false })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Open result" })).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Open receipt" })).toBeVisible();
+
+  const serialized = await page.evaluate(() => window.localStorage.getItem("positioncrew.recent-jobs.v1") ?? "");
+  expect(serialized).not.toMatch(/request|response|account|collateral|wallet/i);
+  expect(serialized).toContain(routes.hireId);
+
+  await page.reload();
+  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "Open result" }).click();
+  await expect(page).toHaveURL(/#jobs/);
+
+  await panel.getByRole("button", { name: "Clear device list" }).click();
+  await expect(panel.getByText("No saved jobs on this device.", { exact: false })).toBeVisible();
+  expect(await page.evaluate(() => window.localStorage.getItem("positioncrew.recent-jobs.v1"))).toBeNull();
+});
+
+test("reclaims a stale running job through the existing hire instead of creating a replacement", async ({ page }) => {
+  const routes = await installCurrentLendingHireRoutes(page, { safeRefusal: true, staleRunning: true });
+  await page.addInitScript(({ hireId }) => {
+    window.localStorage.setItem("positioncrew.recent-jobs.v1", JSON.stringify({
+      schemaVersion: "positioncrew.recent-jobs.v1",
+      entries: [{ hireId, service: "LENDING_RESCUE", rememberedAt: "2026-08-24T12:00:00.000Z" }],
+    }));
+  }, { hireId: routes.hireId });
+
+  await page.goto("/#jobs");
+  const panel = page.getByTestId("recent-jobs-device");
+  await expect(panel.getByText("Running", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "Recover run" }).click();
+  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  expect(routes.runCount).toBe(1);
+});
+
+test("does not reinsert a device reference cleared while server hydration is in flight", async ({ page }) => {
+  const routes = await installCurrentLendingHireRoutes(page, { safeRefusal: true, getDelayMs: 300 });
+  await page.addInitScript(({ hireId }) => {
+    window.localStorage.setItem("positioncrew.recent-jobs.v1", JSON.stringify({
+      schemaVersion: "positioncrew.recent-jobs.v1",
+      entries: [{ hireId, service: "LENDING_RESCUE", rememberedAt: "2026-08-24T12:00:00.000Z" }],
+    }));
+  }, { hireId: routes.hireId });
+
+  await page.goto("/#jobs");
+  const panel = page.getByTestId("recent-jobs-device");
+  await expect(panel.getByText("Checking", { exact: true })).toBeVisible();
+  await page.evaluate((key) => {
+    window.localStorage.removeItem(key);
+    window.dispatchEvent(new StorageEvent("storage", { key, newValue: null }));
+  }, "positioncrew.recent-jobs.v1");
+  await expect(panel.getByText("No saved jobs on this device.", { exact: false })).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(panel.getByText("Lending Rescue", { exact: true })).toHaveCount(0);
+});
+
+test("shows the server diagnostic for a restored failed job", async ({ page }) => {
+  const routes = await installCurrentLendingHireRoutes(page, {
+    safeRefusal: true,
+    failedMessage: "The provider timed out before returning a result.",
+  });
+  await page.addInitScript(({ hireId }) => {
+    window.localStorage.setItem("positioncrew.recent-jobs.v1", JSON.stringify({
+      schemaVersion: "positioncrew.recent-jobs.v1",
+      entries: [{ hireId, service: "LENDING_RESCUE", rememberedAt: "2026-08-24T12:00:00.000Z" }],
+    }));
+  }, { hireId: routes.hireId });
+
+  await page.goto("/#jobs");
+  const panel = page.getByTestId("recent-jobs-device");
+  await expect(panel.getByText("Failed", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Run failed: The provider timed out before returning a result.", { exact: true })).toBeVisible();
+  await expect(panel).not.toContainText("[object Object]");
+});

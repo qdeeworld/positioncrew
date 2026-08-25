@@ -1340,3 +1340,211 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
     grid-template-columns: minmax(0, 1fr) auto;
   }
 }
+
+.recent-device-jobs {
+  margin-top: 26px;
+  border: 1px solid rgba(42, 54, 49, 0.16);
+  border-radius: 18px;
+  background: rgba(250, 248, 241, 0.92);
+  box-shadow: 0 18px 44px rgba(28, 37, 33, 0.08);
+  overflow: hidden;
+}
+
+.recent-device-jobs-bar {
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.recent-device-boundary {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.recent-device-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.device-clear-button,
+.recent-job-actions button,
+.recent-job-actions a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(42, 54, 49, 0.18);
+  border-radius: 10px;
+  background: #fffdf7;
+  color: var(--ink);
+  padding: 9px 12px;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.device-clear-button:hover,
+.recent-job-actions button:hover,
+.recent-job-actions a:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.recent-job-actions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.recent-device-alert {
+  margin: 0 22px 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(180, 108, 32, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 239, 208, 0.68);
+  color: #75440f;
+  line-height: 1.45;
+}
+
+.recent-device-table-wrap {
+  border-top: 1px solid rgba(42, 54, 49, 0.11);
+}
+
+.recent-device-table {
+  min-width: 920px;
+}
+
+.recent-device-table td {
+  vertical-align: top;
+}
+
+.recent-device-table td small {
+  display: block;
+  max-width: 320px;
+  margin-top: 5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.recent-job-state {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(81, 96, 89, 0.1);
+  color: #46534e;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.recent-job-state-completed {
+  background: rgba(36, 128, 87, 0.12);
+  color: #176843;
+}
+
+.recent-job-state-failed,
+.recent-job-state-unavailable {
+  background: rgba(177, 66, 44, 0.11);
+  color: #963b29;
+}
+
+.recent-job-state-running,
+.recent-job-state-checking {
+  background: rgba(18, 105, 126, 0.12);
+  color: #12697e;
+}
+
+.recent-job-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recent-job-actions .recent-job-remove {
+  color: #8d3b2b;
+}
+
+.recent-device-clear-note {
+  margin: 0;
+  padding: 12px 22px 16px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .recent-device-jobs-bar,
+  .recent-device-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .device-clear-button {
+    width: 100%;
+  }
+
+  .recent-device-table {
+    min-width: 0;
+  }
+
+  .recent-device-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .recent-device-table,
+  .recent-device-table tbody,
+  .recent-device-table tr,
+  .recent-device-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .recent-device-table tr {
+    padding: 16px;
+    border-bottom: 1px solid rgba(42, 54, 49, 0.12);
+  }
+
+  .recent-device-table td {
+    display: grid;
+    grid-template-columns: minmax(96px, 0.36fr) 1fr;
+    height: auto;
+    gap: 12px;
+    padding: 7px 0;
+    border: 0;
+  }
+
+  .recent-device-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .recent-job-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recent-job-actions button,
+  .recent-job-actions a {
+    width: 100%;
+  }
+}
