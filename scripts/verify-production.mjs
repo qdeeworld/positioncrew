@@ -114,6 +114,19 @@ function canonicalSha256(value) {
   return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
 }
 
+function freshHireCanonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(freshHireCanonicalJson).join(",")}]`;
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, child]) => `${JSON.stringify(key)}:${freshHireCanonicalJson(child)}`)
+    .join(",")}}`;
+}
+
+function freshHireCanonicalSha256(value) {
+  return `sha256:${createHash("sha256").update(freshHireCanonicalJson(value)).digest("hex")}`;
+}
+
 function sleep(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
@@ -869,14 +882,14 @@ async function verifyCurrentPersistedHire(definition, probe) {
   assert(created.job?.state === "CREATED", `${definition.service} hire did not start in CREATED`);
   assert(created.receipt === null, `${definition.service} hire created a premature receipt`);
   assert(
-    created.hire?.requestHash === canonicalSha256(envelope.request),
+    created.hire?.requestHash === freshHireCanonicalSha256(envelope.request),
     `${definition.service} request commitment is invalid`,
   );
   assert(created.hire?.providerHash, `${definition.service} provider binding is uncommitted`);
   assert(created.hire?.evidenceHash, `${definition.service} current evidence is uncommitted`);
   assert(
     created.hire?.evidence?.freshnessAtCreation === "FRESH" &&
-      created.hire.evidenceHash === canonicalSha256(created.hire.evidence),
+      created.hire.evidenceHash === freshHireCanonicalSha256(created.hire.evidence),
     `${definition.service} current evidence commitment is stale or invalid`,
   );
 
@@ -898,7 +911,7 @@ async function verifyCurrentPersistedHire(definition, probe) {
     `${definition.service} receipt contains the wrong provider request`,
   );
   assert(
-    canonicalSha256(completed.receipt?.response?.result?.request) === created.hire.requestHash,
+    freshHireCanonicalSha256(completed.receipt?.response?.result?.request) === created.hire.requestHash,
     `${definition.service} receipt request commitment differs from the live probe request`,
   );
   assert(
