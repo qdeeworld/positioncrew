@@ -77,6 +77,16 @@ class FakeD1 implements D1Database {
     private readonly denyCreates = false,
   ) {}
 
+  async downgradeStoredLendingEvidenceToLegacy(): Promise<void> {
+    if (!this.hire || typeof this.hire.evidence_json !== "string") {
+      throw new Error("No stored hire evidence is available");
+    }
+    const evidence = JSON.parse(this.hire.evidence_json) as Record<string, unknown>;
+    delete evidence.providerAudition;
+    this.hire.evidence_json = canonicalJson(evidence);
+    this.hire.evidence_hash = await sha256Commitment(evidence);
+  }
+
   markRunning(startedAt: string): void {
     if (!this.job) throw new Error("Create the fake job before marking it RUNNING");
     this.job.job_state = "RUNNING";
@@ -577,6 +587,47 @@ describe("fresh marketplace hire contract", () => {
       schemaVersion: "positioncrew.api-error.v1",
       error: "REQUEST_FAILED",
     });
+  });
+
+  it("replays a pre-audition current Lending hire without weakening immutable bindings", async () => {
+    const database = new FakeD1();
+    const environment = { DB: database, ASSETS: TEST_ASSETS };
+    const { httpRequest } = currentLendingHireRequest();
+    const retryBody = await httpRequest.clone().text();
+    const retryHeaders = new Headers(httpRequest.headers);
+
+    const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
+    expect(createdResponse.status).toBe(201);
+    const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
+    const createdEvidence = created.hire.evidence;
+    expect(createdEvidence?.evidenceClass).toBe("CURRENT_BLOCK_PINNED");
+    if (!createdEvidence || createdEvidence.evidenceClass !== "CURRENT_BLOCK_PINNED") {
+      throw new Error("Expected current block-pinned evidence");
+    }
+    expect(createdEvidence.providerAudition).toBeDefined();
+
+    await database.downgradeStoredLendingEvidenceToLegacy();
+    const replayResponse = await positionCrewWorker.fetch(
+      new Request("https://positioncrew.example/api/benchmark-hires", {
+        method: "POST",
+        headers: retryHeaders,
+        body: retryBody,
+      }),
+      environment,
+      TEST_CONTEXT,
+    );
+
+    expect(replayResponse.status).toBe(200);
+    const replayed = FreshMarketplaceChainSchema.parse(await replayResponse.json());
+    expect(replayed.hire.hireId).toBe(created.hire.hireId);
+    expect(replayed.hire.requestHash).toBe(created.hire.requestHash);
+    expect(replayed.hire.providerHash).toBe(created.hire.providerHash);
+    const replayedEvidence = replayed.hire.evidence;
+    expect(replayedEvidence?.evidenceClass).toBe("CURRENT_BLOCK_PINNED");
+    if (!replayedEvidence || replayedEvidence.evidenceClass !== "CURRENT_BLOCK_PINNED") {
+      throw new Error("Expected replayed current block-pinned evidence");
+    }
+    expect(replayedEvidence.providerAudition).toBeUndefined();
   });
 
   it("classifies malformed and oversized hire bodies as client errors", async () => {

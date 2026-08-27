@@ -162,17 +162,25 @@ function lendingProviderAuditionReplayPayload(audition: LendingProviderAudition)
   };
 }
 
-function currentEvidenceReplayPayload(evidence: CurrentBlockPinnedEvidence): unknown {
-  return {
+function currentEvidenceReplayPayload(
+  evidence: CurrentBlockPinnedEvidence,
+  includeProviderAudition = true,
+): unknown {
+  const payload = {
     schemaVersion: evidence.schemaVersion,
     evidenceClass: evidence.evidenceClass,
     chainId: evidence.chainId,
     source: evidence.source,
     maxDataAgeSeconds: evidence.maxDataAgeSeconds,
-    providerAudition: evidence.providerAudition
-      ? lendingProviderAuditionReplayPayload(evidence.providerAudition)
-      : null,
   };
+  return includeProviderAudition
+    ? {
+        ...payload,
+        providerAudition: evidence.providerAudition
+          ? lendingProviderAuditionReplayPayload(evidence.providerAudition)
+          : null,
+      }
+    : payload;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -538,15 +546,23 @@ export class FreshMarketplaceStore {
       const proposedEvidence = CurrentBlockPinnedEvidenceSchema.parse(
         JSON.parse(input.evidenceJson) as unknown,
       );
+      const legacyLendingReplay = input.service === "LENDING_RESCUE" &&
+        !existing.hire.evidence.providerAudition &&
+        Boolean(proposedEvidence.providerAudition);
       if (
-        canonicalJson(currentEvidenceReplayPayload(existing.hire.evidence)) !==
-          canonicalJson(currentEvidenceReplayPayload(proposedEvidence))
+        canonicalJson(currentEvidenceReplayPayload(
+          existing.hire.evidence,
+          !legacyLendingReplay,
+        )) !== canonicalJson(currentEvidenceReplayPayload(
+          proposedEvidence,
+          !legacyLendingReplay,
+        ))
       ) {
         throw new FreshMarketplaceIdempotencyConflict();
       }
       if (
         input.service === "LENDING_RESCUE" &&
-        (!existing.hire.evidence.providerAudition || !proposedEvidence.providerAudition)
+        !proposedEvidence.providerAudition
       ) {
         throw new FreshMarketplaceIdempotencyConflict();
       }
