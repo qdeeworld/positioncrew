@@ -22,6 +22,7 @@ const SERVICE_NAMES: Record<ServiceId, string> = {
 };
 const POLL_DELAY_MS = 500;
 const POLL_LIMIT = 60;
+const RECOVERY_REQUEST_TIMEOUT_MS = 10_000;
 
 type LoadPhase = "LOADING" | "READY" | "UNAVAILABLE";
 
@@ -49,9 +50,20 @@ function formatTime(value: string): string {
 }
 
 async function retrieveChain(reference: RecentJobReference): Promise<FreshMarketplaceChain> {
-  const response = await fetch(`/api/benchmark-hires/${encodeURIComponent(reference.hireId)}`, {
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), RECOVERY_REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`/api/benchmark-hires/${encodeURIComponent(reference.hireId)}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (requestError) {
+    if (controller.signal.aborted) throw new Error("Server status request timed out");
+    throw requestError;
+  } finally {
+    window.clearTimeout(timeout);
+  }
   if (!response.ok) {
     throw new Error(`Server returned ${response.status}`);
   }
@@ -218,11 +230,19 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
   const resume = async (item: RecentJobItem) => {
     updateItem(item.reference, { busy: true, error: null });
     try {
-      const response = await fetch(`/api/benchmark-hires/${encodeURIComponent(item.reference.hireId)}/jobs`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      });
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), RECOVERY_REQUEST_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch(`/api/benchmark-hires/${encodeURIComponent(item.reference.hireId)}/jobs`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeout);
+      }
       if (!response.ok) {
         throw new Error(`Run request returned ${response.status}`);
       }
@@ -325,7 +345,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
                   <td data-label="Saved">{formatTime(chain?.hire.createdAt ?? item.reference.rememberedAt)}</td>
                   <td data-label="Service"><strong>{SERVICE_NAMES[item.reference.service]}</strong></td>
                   <td data-label="Status">
-                    <span className={`recent-job-state recent-job-state-${copy.label.toLowerCase()}`}>{copy.label}</span>
+                    <span className={`recent-job-state recent-job-state-${copy.label.toLowerCase()}`} role="status" aria-live="polite">{copy.label}</span>
                   </td>
                   <td data-label="What happens next">
                     <span>{copy.detail}</span>

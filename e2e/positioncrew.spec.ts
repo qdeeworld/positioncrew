@@ -576,7 +576,7 @@ async function installCurrentLendingHireRoutes(
       }),
     });
   });
-  await page.route(/\/api\/benchmark-hires$/, async (route) => {
+  await page.route(/\/api\/(?:benchmark-hires|provider-auditions\/lending\/hires)$/, async (route) => {
     createBodies.push(route.request().postDataJSON() as Record<string, unknown>);
     if (options.abortCreate) return route.abort("connectionreset");
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(chain("CREATED")) });
@@ -629,7 +629,7 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.getByText("4/4", { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({ timeout: 20_000 });
 
-  await page.getByRole("button", { name: "Load current position and hire" }).click();
+  await page.getByRole("button", { name: "Open live Lending Rescue" }).click();
   await expect(page.getByRole("heading", { name: "Get a bounded answer with evidence you can inspect." })).toBeVisible();
   await expect(page.getByRole("link", { name: "Historical replay in Evidence" })).toHaveAttribute("href", "#evidence");
   await expect(page.getByText(/Hire remains disabled until the exact request and block evidence are ready/)).toBeVisible();
@@ -641,7 +641,7 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.getByLabel("Lending position health")).toBeVisible();
   await expect(page.getByLabel("Target health factor")).toBeVisible();
   await expect(page.getByText(`Block-pinned Venus position from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Hire and run current request" }).click();
+  await page.getByRole("button", { name: "Check eligibility and hire" }).click();
 
   await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
   await expect(page.locator(".result-boundary")).toContainText(
@@ -664,21 +664,19 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
     "https://positioncrew.dolepee.com/api/benchmark-receipts/7f0234d4-bc81-43d4-9624-31823b334c33",
   );
   expect(founderReportLoads).toBe(1);
-  await page.getByRole("button", { name: "JSON" }).click();
+  await page.getByRole("tab", { name: "JSON" }).click();
   await expect(page.getByText("application/json", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Receipt", exact: true }).click();
+  await page.getByRole("tab", { name: "Receipt", exact: true }).click();
   await expect(page.getByText("Score receipt", { exact: true })).toBeVisible();
   await expect(page.getByText("SESSION EMBEDDED", { exact: true })).toBeVisible();
   await expect(page.getByText("CURRENT BLOCK PINNED", { exact: true })).toBeVisible();
   await expect(page.getByText("43 ms", { exact: true })).toBeVisible();
   expect(mockedHire.createBodies).toHaveLength(1);
   expect(mockedHire.createBodies[0]).toMatchObject({
-    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
-    benchmarkSlug: "lending-rescue",
-    providerSlug: "lending-rescue",
-    evidenceMode: "CURRENT_BLOCK_PINNED",
+    schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
     observation: mockedHire.observation,
   });
+  expect(mockedHire.createBodies[0]).not.toHaveProperty("providerSlug");
   expect(mockedHire.createBodies[0].request).toEqual(mockedHire.rescueRequest);
   const [receiptPage] = await Promise.all([
     page.waitForEvent("popup"),
@@ -703,7 +701,7 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   await expect(page.getByLabel("Lending position health")).toHaveCount(0);
   await expect(page.getByLabel("Target health factor")).toHaveCount(0);
   await expect(page.getByText(`Safe live refusal example from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
-  const hireButton = page.getByRole("button", { name: "Hire and persist safe refusal" });
+  const hireButton = page.getByRole("button", { name: "Check eligibility and persist refusal" });
   await expect(hireButton).toBeEnabled();
   await hireButton.click();
 
@@ -712,7 +710,7 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   await expect(durableResult.getByText("No complete Venus collateral-and-debt position was available for rescue analysis.", { exact: true })).toBeVisible();
   expect(mockedHire.createBodies).toHaveLength(1);
   expect(mockedHire.createBodies[0]).toMatchObject({
-    evidenceMode: "CURRENT_BLOCK_PINNED",
+    schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
     observation: mockedHire.observation,
     request: {
       account: mockedHire.account,
@@ -766,7 +764,7 @@ test("an operator can preflight a provider packet without external activation", 
   await region.getByRole("button", { name: "Run contract check" }).click();
   await expect(region.getByText("Packet conformance failed", { exact: true })).toBeVisible();
   await expect(region).toContainText("Refusal example must use an explicit REFUSED_* status.");
-  await expect(page.getByRole("button", { name: "Load current position and hire" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open live Lending Rescue" })).toBeVisible();
 });
 
 test("serves and renders four evidence-only external comparison candidates", async ({ page, request }) => {
@@ -817,7 +815,7 @@ test("a current lending hire does not depend on historical fixtures or external 
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
   await expect(page.getByText("Current request loaded", { exact: true })).toBeVisible();
-  const hireButton = page.getByRole("button", { name: "Hire and run current request" });
+  const hireButton = page.getByRole("button", { name: "Check eligibility and hire" });
   await expect(hireButton).toBeEnabled();
   await hireButton.click();
 
@@ -825,18 +823,17 @@ test("a current lending hire does not depend on historical fixtures or external 
   await expect(page.locator('.request-boundary[role="status"]')).toContainText("COMPLETED");
   expect(mockedHire.createBodies).toHaveLength(1);
   expect(mockedHire.createBodies[0]).toMatchObject({
-    schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
-    evidenceMode: "CURRENT_BLOCK_PINNED",
+    schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
   });
 });
 
 test("a lost hire response reuses the unresolved idempotency key", async ({ page }) => {
   const mockedHire = await installCurrentLendingHireRoutes(page, { abortCreate: true });
   await page.goto("/#marketplace");
-  await page.getByRole("button", { name: "Load current position and hire" }).click();
+  await page.getByRole("button", { name: "Open live Lending Rescue" }).click();
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
-  const hireButton = page.getByRole("button", { name: "Hire and run current request" });
+  const hireButton = page.getByRole("button", { name: "Check eligibility and hire" });
   await hireButton.click();
   await expect.poll(() => mockedHire.createBodies.length).toBe(1);
   await expect(hireButton).toBeEnabled();
@@ -848,10 +845,10 @@ test("a lost hire response reuses the unresolved idempotency key", async ({ page
 test("a lost job response resumes the persisted hire instead of creating another", async ({ page }) => {
   const mockedHire = await installCurrentLendingHireRoutes(page, { abortRun: true });
   await page.goto("/#marketplace");
-  await page.getByRole("button", { name: "Load current position and hire" }).click();
+  await page.getByRole("button", { name: "Open live Lending Rescue" }).click();
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
-  const hireButton = page.getByRole("button", { name: "Hire and run current request" });
+  const hireButton = page.getByRole("button", { name: "Check eligibility and hire" });
   await hireButton.click();
   await expect.poll(() => mockedHire.runCount).toBe(1);
   await expect(hireButton).toBeEnabled();
@@ -870,7 +867,7 @@ test("slow remote hydration never blocks provider discovery", async ({ page }) =
   await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({
     timeout: 3_000,
   });
-  await expect(page.getByRole("button", { name: "Load current position and hire" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open live Lending Rescue" })).toBeVisible();
   await expect(page.getByRole("button", { name: /LP Range Operator v1/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Yield Allocator v1/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Bounded Grid Builder v1/ })).toBeVisible();
@@ -897,7 +894,7 @@ test("a block-pinned Venus position can become the provider request", async ({ p
   await page.getByRole("button", { name: "Load position" }).click();
   await expect(page.getByText("1.04347826", { exact: true })).toBeVisible();
   await expect(page.getByText(`Block-pinned Venus position from BSC block ${mockedHire.blockNumber}`, { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Hire and run current request" }).click();
+  await page.getByRole("button", { name: "Check eligibility and hire" }).click();
   await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
   await expect(page.getByText(/Block-pinned Venus input/)).toBeVisible();
   expect(mockedHire.createBodies[0].request).toEqual(mockedHire.rescueRequest);
@@ -912,7 +909,7 @@ test("a block-pinned Pancake market can become a bounded grid request", async ({
     idDigit: "6",
   });
   await page.goto("/#jobs");
-  await page.getByRole("combobox", { name: "Provider" }).selectOption("BOUNDED_GRID");
+  await page.getByRole("combobox", { name: "Job" }).selectOption("BOUNDED_GRID");
   await expect(page.getByText("READY", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("PancakeSwap market probe", { exact: true })).toBeVisible();
   await expect(page.getByText(/Block-pinned PancakeSwap market from BSC block/)).toBeVisible();
@@ -949,7 +946,7 @@ test("a block-pinned Pancake position can become an LP rebalance request", async
     idDigit: "7",
   });
   await page.goto("/#jobs");
-  await page.getByRole("combobox", { name: "Provider" }).selectOption("LP_REBALANCE");
+  await page.getByRole("combobox", { name: "Job" }).selectOption("LP_REBALANCE");
   await expect(page.getByRole("heading", { name: "PancakeSwap LP position" })).toBeVisible();
   await expect(page.getByLabel("PancakeSwap position NFT ID")).toHaveValue(live.lpTokenId);
   await page.getByRole("button", { name: "Inspect" }).click();
@@ -987,7 +984,7 @@ test("block-pinned Venus stablecoin rates can become a yield request", async ({ 
     idDigit: "8",
   });
   await page.goto("/#jobs");
-  await page.getByRole("combobox", { name: "Provider" }).selectOption("YIELD_OPTIMIZATION");
+  await page.getByRole("combobox", { name: "Job" }).selectOption("YIELD_OPTIMIZATION");
   await expect(page.getByText("READY", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Venus stablecoin probe", { exact: true })).toBeVisible();
   await expect(page.getByText(/Block-pinned Venus yield market from BSC block/)).toBeVisible();
@@ -1020,7 +1017,7 @@ test("all three non-lending current hires return category-specific durable resul
     await installCurrentCategoryHireRoutes(page, { service: "BOUNDED_GRID", benchmarkSlug: "bounded-grid", providerSlug: "bounded-grid", idDigit: "6" }),
   ];
   await page.goto("/#jobs");
-  const provider = page.getByRole("combobox", { name: "Provider" });
+  const provider = page.getByRole("combobox", { name: "Job" });
   await expect(provider).toBeVisible();
   const cases = [
     { value: "LP_REBALANCE", output: "SHIFT range to 0...240" },
@@ -1049,7 +1046,7 @@ test("a current lending refusal persists and remains inspectable", async ({ page
   await page.goto("/#jobs");
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
-  await page.getByRole("button", { name: "Hire and run current request" }).click();
+  await page.getByRole("button", { name: "Check eligibility and hire" }).click();
   const durableResult = page.locator(".job-result");
   await expect(durableResult.getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
   await expect(durableResult.getByText("No allowed rescue action fits the wallet inventory and safety limits.", { exact: true })).toBeVisible();
@@ -1066,7 +1063,7 @@ test("every non-lending provider accepts custom bounds and fails closed", async 
   await installCurrentCategoryHireRoutes(page, { service: "YIELD_OPTIMIZATION", benchmarkSlug: "yield-optimization", providerSlug: "yield-optimization", idDigit: "8" });
   await installCurrentCategoryHireRoutes(page, { service: "BOUNDED_GRID", benchmarkSlug: "bounded-grid", providerSlug: "bounded-grid", idDigit: "6" });
   await page.goto("/#jobs");
-  const provider = page.getByRole("combobox", { name: "Provider" });
+  const provider = page.getByRole("combobox", { name: "Job" });
   const cases = [
     {
       service: "LP_REBALANCE",
@@ -1329,7 +1326,7 @@ test("a published Agent Advantage status exposes the committed report without ch
   await page.goto("/#jobs");
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
-  await page.getByRole("button", { name: "Hire and run current request" }).click();
+  await page.getByRole("button", { name: "Check eligibility and hire" }).click();
   const resultStatus = page.getByRole("region", { name: "Agent Advantage status" });
   await expect(resultStatus.getByText("Independent report published", { exact: true })).toBeVisible();
   await expect(resultStatus).toContainText("2/3 frozen tasks support the pre-registered advantage rule");

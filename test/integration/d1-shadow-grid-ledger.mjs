@@ -185,9 +185,8 @@ async function requestJson(baseUrl, path, init) {
 
 function expectMutationRejected(sql) {
   const result = spawnSync(
-    "npx",
+    wrangler,
     [
-      "wrangler",
       "d1",
       "execute",
       "DB",
@@ -207,9 +206,8 @@ function expectMutationRejected(sql) {
 
 function executeD1SetupMutation(sql) {
   const result = spawnSync(
-    "npx",
+    wrangler,
     [
-      "wrangler",
       "d1",
       "execute",
       "DB",
@@ -232,9 +230,8 @@ function executeD1SetupMutation(sql) {
 
 function queryD1SetupRows(sql) {
   const result = spawnSync(
-    "npx",
+    wrangler,
     [
-      "wrangler",
       "d1",
       "execute",
       "DB",
@@ -259,9 +256,8 @@ function queryD1SetupRows(sql) {
 let worker;
 try {
   execFileSync(
-    "npx",
+    wrangler,
     [
-      "wrangler",
       "d1",
       "migrations",
       "apply",

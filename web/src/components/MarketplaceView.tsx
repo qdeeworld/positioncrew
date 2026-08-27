@@ -41,6 +41,10 @@ export function MarketplaceView({
   onCreateJob,
   telemetry,
   externalComparisons,
+  telemetryLoadState,
+  matrixLoadState,
+  catalogLoadState,
+  onRetryStatus,
 }: {
   providers: ProviderListing[];
   matrix: Map<ServiceId, FixtureJobResponse>;
@@ -49,6 +53,10 @@ export function MarketplaceView({
   onCreateJob: (service: ServiceId) => void;
   telemetry: SystemTelemetry | null;
   externalComparisons: ExternalComparisonSnapshot | null;
+  telemetryLoadState: "LOADING" | "AVAILABLE" | "UNAVAILABLE";
+  matrixLoadState: "LOADING" | "AVAILABLE" | "UNAVAILABLE";
+  catalogLoadState: "LOADING" | "AVAILABLE" | "UNAVAILABLE";
+  onRetryStatus: () => void;
 }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
@@ -65,7 +73,14 @@ export function MarketplaceView({
   const selectedResult = matrix.get(selectedService);
   const selectedTask = TASKS.find((task) => task.id === selectedService);
   const SelectedIcon = selectedTask?.icon;
-  const catalogLoading = providers.length === 0;
+  const catalogLoading = catalogLoadState === "LOADING" && providers.length === 0;
+  const liveTelemetry = telemetryLoadState === "AVAILABLE" ? telemetry : null;
+  const liveDataUnavailable = telemetryLoadState === "UNAVAILABLE" || matrixLoadState === "UNAVAILABLE";
+  const matrixStatus = (result: FixtureJobResponse | undefined) => result
+    ? { label: "Reachable", className: "ready" }
+    : matrixLoadState === "UNAVAILABLE"
+      ? { label: "Unavailable", className: "unavailable" }
+      : { label: "Checking", className: "pending" };
 
   return (
     <main className="marketplace-page">
@@ -80,14 +95,17 @@ export function MarketplaceView({
             </button>
           </div>
           <div className="market-system-panel" aria-label="Marketplace system status">
-            <span className={`system-live ${telemetry ? "online" : "loading"}`} role="status"><Radio size={14} aria-hidden="true" /> {telemetry ? "LIVE BSC DATA" : "SYNCING BSC"}</span>
+            <div className="market-system-status-row">
+              <span className={`system-live ${liveTelemetry ? "online" : telemetryLoadState === "UNAVAILABLE" ? "unavailable" : "loading"}`} role="status"><Radio size={14} aria-hidden="true" /> {liveTelemetry ? "LIVE BSC DATA" : telemetryLoadState === "UNAVAILABLE" ? "BSC DATA UNAVAILABLE" : "SYNCING BSC"}</span>
+              {liveDataUnavailable && <button className="status-retry" type="button" onClick={onRetryStatus}>Retry live data</button>}
+            </div>
             <div className="market-system-grid">
-              <div><strong>{telemetry ? Number(telemetry.mainnet.blockNumber).toLocaleString("en-US") : "-"}</strong><span>BSC block</span></div>
-              <div><strong>{telemetry ? `$${telemetry.market.spotPriceUsd}` : "-"}</strong><span>WBNB / USDT</span></div>
-              <div><strong>{telemetry ? `${telemetry.venus.supplyAprPct}%` : "-"}</strong><span>Venus vUSDT APR</span></div>
+              <div><strong>{liveTelemetry ? Number(liveTelemetry.mainnet.blockNumber).toLocaleString("en-US") : "-"}</strong><span>BSC block</span></div>
+              <div><strong>{liveTelemetry ? `$${liveTelemetry.market.spotPriceUsd}` : "-"}</strong><span>WBNB / USDT</span></div>
+              <div><strong>{liveTelemetry ? `${liveTelemetry.venus.supplyAprPct}%` : "-"}</strong><span>Venus vUSDT APR</span></div>
               <div><strong>{providers.length ? `${providers.length}/4` : "-"}</strong><span>verified agents</span></div>
             </div>
-            <p>{telemetry ? `Block-pinned RPC reads · ${telemetry.mainnet.rpcLatencyMs} ms · ${new Date(telemetry.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Provider decisions remain available while live chain telemetry synchronises."}</p>
+            <p>{liveTelemetry ? `Block-pinned RPC reads · ${liveTelemetry.mainnet.rpcLatencyMs} ms · ${new Date(liveTelemetry.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : telemetryLoadState === "UNAVAILABLE" ? "Live chain telemetry is unavailable. No current-market value is inferred; retry before loading a current request." : "Provider decisions remain available while live chain telemetry synchronises."}</p>
           </div>
         </div>
       </section>
@@ -122,8 +140,8 @@ export function MarketplaceView({
           </div>
           <div className="registry-summary" aria-label="Registry status">
             <span><strong>{providers.length || "-"}</strong> providers</span>
-            <span><strong>4/4</strong> categories</span>
-            <span><strong>{matrix.size ? `${matrix.size}/4` : "-"}</strong> conformance</span>
+            <span><strong>{new Set(providers.map((provider) => provider.service)).size}/4</strong> categories</span>
+            <span><strong>{matrixLoadState === "UNAVAILABLE" ? "Unavailable" : matrix.size ? `${matrix.size}/4` : "-"}</strong> conformance</span>
           </div>
         </div>
 
@@ -168,6 +186,7 @@ export function MarketplaceView({
                     const task = TASKS.find((candidate) => candidate.id === provider.service);
                     const Icon = task?.icon;
                     const result = matrix.get(provider.service);
+                    const availability = matrixStatus(result);
                     return (
                       <tr
                         key={provider.providerId}
@@ -187,7 +206,7 @@ export function MarketplaceView({
                         <td><span className="category-label">{provider.category}</span></td>
                         <td><span className="trial-price"><strong>{provider.price.amount} {provider.price.token}</strong><small>Trial free</small></span></td>
                         <td><span className="verification-label"><BadgeCheck size={14} /> {result?.result.evaluation.score ?? "-"}/100</span></td>
-                        <td><span className={`availability-label ${result ? "ready" : "pending"}`}><i /> {result ? "Reachable" : "Checking"}</span></td>
+                        <td><span className={`availability-label ${availability.className}`}><i /> {availability.label}</span></td>
                       </tr>
                     );
                   })}
@@ -207,7 +226,7 @@ export function MarketplaceView({
                 </div>
                 <div className="provider-detail-meta">
                   <strong>$0.00<small>current block-pinned hire · no wallet</small></strong>
-                  <span className={`availability-label ${selectedResult ? "ready" : "pending"}`}><i /> {selectedResult ? "Reachable" : "Checking"}</span>
+                  <span className={`availability-label ${matrixStatus(selectedResult).className}`}><i /> {matrixStatus(selectedResult).label}</span>
                 </div>
                 <p className="provider-summary">{selected.summary}</p>
                 <dl className="provider-facts">
@@ -217,7 +236,7 @@ export function MarketplaceView({
                   <div><dt><Code2 size={14} /> Machine contract</dt><dd><a href={selected.manifestEndpoint} target="_blank" rel="noreferrer">Inspect provider manifest <ExternalLink size={11} aria-hidden="true" /></a></dd></div>
                   <div><dt><Database size={14} /> Request</dt><dd><code>{selected.requestSchema}</code></dd></div>
                   <div><dt><Code2 size={14} /> Deliverable</dt><dd><code>{selected.deliverableSchema}</code></dd></div>
-                  <div><dt><BadgeCheck size={14} /> Conformance</dt><dd>{selectedResult?.result.evaluation.score ?? "-"}/100 · {selectedResult?.result.job.state ?? "Checking"}</dd></div>
+                  <div><dt><BadgeCheck size={14} /> Conformance</dt><dd>{selectedResult ? `${selectedResult.result.evaluation.score}/100 · ${selectedResult.result.job.state}` : matrixLoadState === "UNAVAILABLE" ? "Unavailable · retry live data" : "Checking"}</dd></div>
                 </dl>
                 <button className="primary-action" type="button" onClick={() => onCreateJob(selected.service)}>
                   {selectedTask?.currentAction ?? `Open current ${serviceLabel(selected.service).toLowerCase()} hire`}

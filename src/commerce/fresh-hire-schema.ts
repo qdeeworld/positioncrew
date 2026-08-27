@@ -3,6 +3,7 @@ import { BoundedGridRequestSchema } from "../contracts/bounded-grid.js";
 import { LendingRescueRequestSchema } from "../contracts/lending-rescue.js";
 import { LpRebalanceRequestSchema } from "../contracts/lp-rebalance.js";
 import { YieldOptimizationRequestSchema } from "../contracts/yield-optimization.js";
+import { LendingProviderAuditionSchema } from "../marketplace/lending-provider-audition.js";
 
 export const FRESH_MARKETPLACE_HISTORICAL_TASKS = {
   "lending-rescue": {
@@ -123,6 +124,7 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
   freshnessAtCreation: z.enum(["FRESH", "STALE", "FUTURE_DATED"]),
   evaluatedAt: IsoTimestampSchema,
   maxDataAgeSeconds: z.number().int().min(15).max(3_600),
+  providerAudition: LendingProviderAuditionSchema.optional(),
 }).strict();
 
 export const HistoricalFixtureEvidenceSchema = z.object({
@@ -150,6 +152,26 @@ export const CurrentLendingMarketplaceHireRequestSchema = z.object({
   }
   // Entry-level timestamp/source inconsistencies remain valid persisted inputs so the
   // existing provider and evaluator can return a durable REFUSED_INCONSISTENT_DATA receipt.
+});
+
+export const LendingProviderAuditionHireRequestSchema = z.object({
+  schemaVersion: z.literal("positioncrew.lending-provider-audition-hire-request.v1"),
+  idempotencyKey: IdempotencyKeySchema,
+  evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
+  observation: CurrentBlockPinnedObservationSchema,
+  request: LendingRescueRequestSchema,
+}).strict().superRefine((value, context) => {
+  validateCurrentBlockBinding(value, context, {
+    protocol: "Venus Classic",
+    sourceId: `venus-mainnet-block-${value.observation.blockNumber}`,
+  });
+  if (value.request.market.toLowerCase() !== "0xfd36e2c2a6789db23113685031d7f16329158384") {
+    context.addIssue({
+      code: "custom",
+      path: ["request", "market"],
+      message: "Current lending auditions require the Venus Classic Comptroller",
+    });
+  }
 });
 
 export const CurrentLpMarketplaceHireRequestSchema = z.object({
@@ -316,6 +338,25 @@ export const FreshMarketplaceChainSchema = z.object({
       path: ["hire", "evidence"],
       message: "Current block-pinned hires require provider and evidence commitments",
     });
+  }
+  const evidence = value.hire.evidence;
+  if (evidence?.evidenceClass === "CURRENT_BLOCK_PINNED") {
+    const audition = evidence.providerAudition;
+    if (audition && (
+      value.hire.service !== "LENDING_RESCUE" ||
+      audition.requestHash !== value.hire.requestHash ||
+      audition.selection.winnerProviderId !== value.hire.providerId ||
+      audition.selection.winnerProviderSlug !== value.hire.providerSlug ||
+      audition.observation.blockNumber !== evidence.source.blockNumber ||
+      audition.observation.observedAt !== evidence.source.observedAt ||
+      audition.observation.explorerUrl !== evidence.source.explorerUrl
+    )) {
+      context.addIssue({
+        code: "custom",
+        path: ["hire", "evidence", "providerAudition"],
+        message: "Provider audition must bind the persisted request, observation, and selected provider",
+      });
+    }
   }
 });
 

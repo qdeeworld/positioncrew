@@ -1,9 +1,15 @@
 import {
+  CurrentBlockPinnedEvidenceSchema,
+  FRESH_MARKETPLACE_TASKS,
   FreshMarketplaceChainSchema,
+  canonicalJson,
   freshMarketplaceClaimBoundary,
+  sha256Commitment,
+  type CurrentBlockPinnedEvidence,
   type FreshMarketplaceChain,
   type FreshMarketplaceHireRequest,
 } from "./fresh-hire-schema.js";
+import { verifyLendingProviderAuditionCommitment } from "../marketplace/lending-provider-audition.js";
 
 export interface D1Result {
   success: boolean;
@@ -141,7 +147,126 @@ function jobStatus(state: string): FreshMarketplaceChain["job"]["status"] {
   throw new Error("Unknown persisted job state");
 }
 
-function rowToChain(row: JoinedRow): FreshMarketplaceChain {
+type LendingProviderAudition = NonNullable<CurrentBlockPinnedEvidence["providerAudition"]>;
+
+function lendingProviderAuditionReplayPayload(audition: LendingProviderAudition): unknown {
+  return {
+    schemaVersion: audition.schemaVersion,
+    policyVersion: audition.policyVersion,
+    service: audition.service,
+    requestHash: audition.requestHash,
+    observation: audition.observation,
+    candidates: audition.candidates,
+    selection: audition.selection,
+    claimBoundary: audition.claimBoundary,
+  };
+}
+
+function currentEvidenceReplayPayload(
+  evidence: CurrentBlockPinnedEvidence,
+  includeProviderAudition = true,
+): unknown {
+  const payload = {
+    schemaVersion: evidence.schemaVersion,
+    evidenceClass: evidence.evidenceClass,
+    chainId: evidence.chainId,
+    source: evidence.source,
+    maxDataAgeSeconds: evidence.maxDataAgeSeconds,
+  };
+  return includeProviderAudition
+    ? {
+        ...payload,
+        providerAudition: evidence.providerAudition
+          ? lendingProviderAuditionReplayPayload(evidence.providerAudition)
+          : null,
+      }
+    : payload;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function embeddedReceiptHashes(response: unknown): {
+  deliverableHash: string | null;
+  evaluationHash: string | null;
+} {
+  if (!isRecord(response) || !isRecord(response.result)) {
+    return { deliverableHash: null, evaluationHash: null };
+  }
+  const job = isRecord(response.result.job) ? response.result.job : null;
+  const deliverable = job && isRecord(job.deliverable) ? job.deliverable : null;
+  const evaluation = isRecord(response.result.evaluation) ? response.result.evaluation : null;
+  return {
+    deliverableHash: deliverable && typeof deliverable.deliverableHash === "string"
+      ? deliverable.deliverableHash
+      : null,
+    evaluationHash: evaluation && typeof evaluation.evaluationHash === "string"
+      ? evaluation.evaluationHash
+      : null,
+  };
+}
+
+async function verifyPersistedCommitments(chain: FreshMarketplaceChain): Promise<void> {
+  if (await sha256Commitment(chain.hire.request) !== chain.hire.requestHash) {
+    throw new Error("Persisted marketplace request commitment mismatch");
+  }
+
+  const commitmentPresence = [
+    chain.hire.providerHash !== null,
+    chain.hire.evidence !== null,
+    chain.hire.evidenceHash !== null,
+  ];
+  if (commitmentPresence.some((present) => present !== commitmentPresence[0])) {
+    throw new Error("Persisted marketplace evidence commitment set is incomplete");
+  }
+  if (chain.hire.providerHash !== null) {
+    const task = FRESH_MARKETPLACE_TASKS[chain.hire.benchmarkSlug];
+    const expectedProviderHash = await sha256Commitment({
+      providerSlug: chain.hire.providerSlug,
+      providerId: chain.hire.providerId,
+      service: chain.hire.service,
+      requestSchema: task.requestSchema,
+    });
+    if (expectedProviderHash !== chain.hire.providerHash) {
+      throw new Error("Persisted marketplace provider commitment mismatch");
+    }
+  }
+  if (
+    chain.hire.evidence !== null &&
+    chain.hire.evidenceHash !== null &&
+    await sha256Commitment(chain.hire.evidence) !== chain.hire.evidenceHash
+  ) {
+    throw new Error("Persisted marketplace evidence commitment mismatch");
+  }
+  const audition = chain.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
+    ? chain.hire.evidence.providerAudition
+    : undefined;
+  if (audition && !await verifyLendingProviderAuditionCommitment(audition)) {
+    throw new Error("Persisted marketplace provider audition commitment mismatch");
+  }
+
+  if (chain.receipt) {
+    if (await sha256Commitment(chain.receipt.response) !== chain.receipt.responseHash) {
+      throw new Error("Persisted marketplace response commitment mismatch");
+    }
+    const embedded = embeddedReceiptHashes(chain.receipt.response);
+    if (
+      embedded.deliverableHash !== null &&
+      embedded.deliverableHash !== chain.receipt.deliverableHash
+    ) {
+      throw new Error("Persisted marketplace deliverable commitment mismatch");
+    }
+    if (
+      embedded.evaluationHash !== null &&
+      embedded.evaluationHash !== chain.receipt.evaluationHash
+    ) {
+      throw new Error("Persisted marketplace evaluation commitment mismatch");
+    }
+  }
+}
+
+async function rowToChain(row: JoinedRow): Promise<FreshMarketplaceChain> {
   const request = JSON.parse(row.request_json) as Record<string, unknown>;
   const receipt = row.receipt_id === null ? null : {
     receiptId: row.receipt_id,
@@ -152,7 +277,7 @@ function rowToChain(row: JoinedRow): FreshMarketplaceChain {
     createdAt: row.receipt_created_at,
     response: JSON.parse(row.response_json ?? "null") as unknown,
   };
-  return FreshMarketplaceChainSchema.parse({
+  const chain = FreshMarketplaceChainSchema.parse({
     schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
     claimBoundary: [...freshMarketplaceClaimBoundary(row.evidence_mode as FreshMarketplaceChain["hire"]["evidenceMode"])],
     hire: {
@@ -191,6 +316,8 @@ function rowToChain(row: JoinedRow): FreshMarketplaceChain {
     },
     receipt,
   });
+  await verifyPersistedCommitments(chain);
+  return chain;
 }
 
 const JOINED_SELECT = [
@@ -286,12 +413,12 @@ export class FreshMarketplaceStore {
 
   async getHire(hireId: string): Promise<FreshMarketplaceChain | null> {
     const row = await this.db.prepare(JOINED_SELECT + " WHERE h.hire_id = ?").bind(hireId).first<JoinedRow>();
-    return row ? rowToChain(row) : null;
+    return row ? await rowToChain(row) : null;
   }
 
   async getReceipt(receiptId: string): Promise<FreshMarketplaceChain | null> {
     const row = await this.db.prepare(JOINED_SELECT + " WHERE r.receipt_id = ?").bind(receiptId).first<JoinedRow>();
-    return row ? rowToChain(row) : null;
+    return row ? await rowToChain(row) : null;
   }
 
   async claimJob(hireId: string, startedAt: string): Promise<{
@@ -392,7 +519,7 @@ export class FreshMarketplaceStore {
     const row = await this.db.prepare(JOINED_SELECT + " WHERE h.idempotency_key = ?")
       .bind(idempotencyKey)
       .first<JoinedRow>();
-    return row ? rowToChain(row) : null;
+    return row ? await rowToChain(row) : null;
   }
 
   private matchReplay(
@@ -406,6 +533,39 @@ export class FreshMarketplaceStore {
       existing.hire.requestHash !== input.requestHash
     ) {
       throw new FreshMarketplaceIdempotencyConflict();
+    }
+    if (input.evidenceMode === "CURRENT_BLOCK_PINNED") {
+      if (
+        existing.hire.providerId !== input.providerId ||
+        existing.hire.service !== input.service ||
+        existing.hire.providerHash !== input.providerHash ||
+        existing.hire.evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED"
+      ) {
+        throw new FreshMarketplaceIdempotencyConflict();
+      }
+      const proposedEvidence = CurrentBlockPinnedEvidenceSchema.parse(
+        JSON.parse(input.evidenceJson) as unknown,
+      );
+      const legacyLendingReplay = input.service === "LENDING_RESCUE" &&
+        !existing.hire.evidence.providerAudition &&
+        Boolean(proposedEvidence.providerAudition);
+      if (
+        canonicalJson(currentEvidenceReplayPayload(
+          existing.hire.evidence,
+          !legacyLendingReplay,
+        )) !== canonicalJson(currentEvidenceReplayPayload(
+          proposedEvidence,
+          !legacyLendingReplay,
+        ))
+      ) {
+        throw new FreshMarketplaceIdempotencyConflict();
+      }
+      if (
+        input.service === "LENDING_RESCUE" &&
+        !proposedEvidence.providerAudition
+      ) {
+        throw new FreshMarketplaceIdempotencyConflict();
+      }
     }
     return { chain: existing, replayed: true };
   }

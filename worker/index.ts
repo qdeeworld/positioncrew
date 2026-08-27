@@ -35,6 +35,7 @@ import {
   FreshMarketplaceChainSchema,
   FreshMarketplaceHireRequestSchema,
   HistoricalFixtureEvidenceSchema,
+  LendingProviderAuditionHireRequestSchema,
   canonicalJson,
   sha256Commitment,
   type FreshMarketplaceChain,
@@ -68,6 +69,10 @@ import {
   getProviderBySlug,
   getSchemaDocument,
 } from "../src/marketplace/discovery.js";
+import {
+  createLendingProviderAudition,
+  isNoEligibleLendingProviderError,
+} from "../src/marketplace/lending-provider-audition.js";
 import {
   parseProductionTrackRecordSnapshot,
   unavailableProductionTrackRecord,
@@ -217,20 +222,71 @@ class FreshMarketplaceRequestError extends Error {
 }
 
 async function boundedJson(request: Request): Promise<unknown> {
-  const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_FRESH_MARKETPLACE_REQUEST_BYTES) {
-    throw new FreshMarketplaceRequestError(
-      413,
-      "REQUEST_TOO_LARGE",
-      `Fresh marketplace request exceeds ${MAX_FRESH_MARKETPLACE_REQUEST_BYTES} bytes`,
-    );
+  const declaredLengthHeader = request.headers.get("Content-Length");
+  if (declaredLengthHeader !== null) {
+    const normalizedLength = declaredLengthHeader.trim();
+    if (!/^\d+$/.test(normalizedLength)) {
+      throw new FreshMarketplaceRequestError(
+        400,
+        "INVALID_JSON",
+        "Fresh marketplace Content-Length must be a non-negative integer",
+      );
+    }
+    const declaredLength = Number(normalizedLength);
+    if (
+      !Number.isSafeInteger(declaredLength) ||
+      declaredLength > MAX_FRESH_MARKETPLACE_REQUEST_BYTES
+    ) {
+      throw new FreshMarketplaceRequestError(
+        413,
+        "REQUEST_TOO_LARGE",
+        `Fresh marketplace request exceeds ${MAX_FRESH_MARKETPLACE_REQUEST_BYTES} bytes`,
+      );
+    }
   }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_FRESH_MARKETPLACE_REQUEST_BYTES) {
+
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  if (request.body !== null) {
+    const reader = request.body.getReader();
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        receivedBytes += chunk.value.byteLength;
+        if (receivedBytes > MAX_FRESH_MARKETPLACE_REQUEST_BYTES) {
+          try {
+            await reader.cancel("Fresh marketplace request exceeded its byte limit");
+          } catch {
+            // The bounded request is rejected even if stream cancellation itself fails.
+          }
+          throw new FreshMarketplaceRequestError(
+            413,
+            "REQUEST_TOO_LARGE",
+            `Fresh marketplace request exceeds ${MAX_FRESH_MARKETPLACE_REQUEST_BYTES} bytes`,
+          );
+        }
+        chunks.push(chunk.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  const bytes = new Uint8Array(receivedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
     throw new FreshMarketplaceRequestError(
-      413,
-      "REQUEST_TOO_LARGE",
-      `Fresh marketplace request exceeds ${MAX_FRESH_MARKETPLACE_REQUEST_BYTES} bytes`,
+      400,
+      "INVALID_JSON",
+      "Fresh marketplace request body must be valid UTF-8 JSON",
     );
   }
   try {
@@ -1228,7 +1284,10 @@ async function freshMarketplaceRateLimitKey(request: Request): Promise<string> {
   });
 }
 
-async function createFreshMarketplaceHire(request: Request, env: Env): Promise<Response> {
+async function createFreshMarketplaceHire(
+  request: Request,
+  env: Env,
+): Promise<Response> {
   if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
   const parsed = FreshMarketplaceHireRequestSchema.parse(await boundedJson(request));
   const task = FRESH_MARKETPLACE_TASKS[parsed.benchmarkSlug];
@@ -1240,6 +1299,31 @@ async function createFreshMarketplaceHire(request: Request, env: Env): Promise<R
   }
   const createdAt = new Date().toISOString();
   const currentBlockPinned = parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2";
+  const providerAudition =
+    parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
+      parsed.benchmarkSlug === "lending-rescue"
+      ? await createLendingProviderAudition(parsed.request, parsed.observation, new Date(createdAt))
+      : undefined;
+  if (providerAudition) {
+    if (parsed.schemaVersion !== "positioncrew.fresh-marketplace-hire-request.v2") {
+      return apiError(409, "AUDITION_REQUEST_VERSION_MISMATCH", [
+        "Provider auditions require a current block-pinned marketplace request.",
+      ]);
+    }
+    if (
+      task.service !== "LENDING_RESCUE" ||
+      provider.providerId !== providerAudition.selection.winnerProviderId ||
+      provider.slug !== providerAudition.selection.winnerProviderSlug ||
+      await sha256Commitment(parsed.request) !== providerAudition.requestHash ||
+      parsed.observation.blockNumber !== providerAudition.observation.blockNumber ||
+      parsed.observation.observedAt !== providerAudition.observation.observedAt ||
+      parsed.observation.explorerUrl !== providerAudition.observation.explorerUrl
+    ) {
+      return apiError(409, "AUDITION_BINDING_MISMATCH", [
+        "The server-selected provider audition does not bind the exact persisted request and observation.",
+      ]);
+    }
+  }
   const persistedRequest = currentBlockPinned
     ? parsed.request
     : {
@@ -1267,6 +1351,9 @@ async function createFreshMarketplaceHire(request: Request, env: Env): Promise<R
             : "FRESH",
         evaluatedAt: createdAt,
         maxDataAgeSeconds: parsed.request.maxDataAgeSeconds,
+        ...(providerAudition
+          ? { providerAudition }
+          : {}),
       })
     : HistoricalFixtureEvidenceSchema.parse({
         schemaVersion: "positioncrew.historical-fixture-evidence.v1",
@@ -1288,9 +1375,7 @@ async function createFreshMarketplaceHire(request: Request, env: Env): Promise<R
     jobId: crypto.randomUUID(),
     createdAt,
     requestJson,
-    requestHash: currentBlockPinned
-      ? canonicalHash(persistedRequest)
-      : await sha256Commitment(persistedRequest),
+    requestHash: await sha256Commitment(persistedRequest),
     providerHash: await sha256Commitment(providerBinding),
     evidenceMode,
     evidenceJson: canonicalJson(evidence),
@@ -1299,6 +1384,30 @@ async function createFreshMarketplaceHire(request: Request, env: Env): Promise<R
     rateLimitKey: await freshMarketplaceRateLimitKey(request),
   });
   return json(result.chain, result.replayed ? 200 : 201);
+}
+
+async function createLendingProviderAuditionHire(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
+  const parsed = LendingProviderAuditionHireRequestSchema.parse(await boundedJson(request));
+  const delegatedHeaders = new Headers(request.headers);
+  delegatedHeaders.delete("Content-Length");
+  const delegatedRequest = new Request(request.url, {
+    method: "POST",
+    headers: delegatedHeaders,
+    body: JSON.stringify({
+      schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
+      idempotencyKey: parsed.idempotencyKey,
+      benchmarkSlug: "lending-rescue",
+      providerSlug: "lending-rescue",
+      evidenceMode: "CURRENT_BLOCK_PINNED",
+      observation: parsed.observation,
+      request: parsed.request,
+    }),
+  });
+  return createFreshMarketplaceHire(delegatedRequest, env);
 }
 
 async function finishFreshMarketplaceJob(
@@ -1326,9 +1435,19 @@ async function finishFreshMarketplaceJob(
     if (
       hire.evidenceMode === "CURRENT_BLOCK_PINNED" &&
       (response.evidenceMode !== "CURRENT_BLOCK_PINNED" ||
-        canonicalHash(response.result.request) !== hire.requestHash)
+        await sha256Commitment(response.result.request) !== hire.requestHash)
     ) {
       throw new Error("Current provider response did not match the persisted request commitment");
+    }
+    const persistedEvidence = hire.evidence;
+    const providerAudition = persistedEvidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
+      ? persistedEvidence.providerAudition
+      : undefined;
+    if (providerAudition && (
+      response.result.job.providerId !== providerAudition.selection.winnerProviderId ||
+      await sha256Commitment(response.result.request) !== providerAudition.requestHash
+    )) {
+      throw new Error("Provider result did not match the persisted audition selection");
     }
     const deliverable = response.result.job.deliverable;
     const responseJson = canonicalJson(response);
@@ -1683,6 +1802,10 @@ async function api(
       return json(VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE, 200, "public, max-age=31536000, immutable");
     }
 
+    if (url.pathname === "/api/provider-auditions/lending/hires") {
+      return await createLendingProviderAuditionHire(request, env);
+    }
+
     if (url.pathname === "/api/benchmark-hires") {
       return await createFreshMarketplaceHire(request, env);
     }
@@ -1910,6 +2033,9 @@ async function api(
     if (url.pathname === "/api/rescue") return rescue(request);
     return apiError(404, "NOT_FOUND", ["Unknown PositionCrew API route."]);
   } catch (error) {
+    if (isNoEligibleLendingProviderError(error)) {
+      return apiError(409, "NO_ELIGIBLE_PROVIDER", [error.message]);
+    }
     if (isFreshMarketplaceCapacityExceeded(error)) {
       return apiError(429, "HIRE_CAPACITY_EXCEEDED", [error.message]);
     }
@@ -1926,8 +2052,18 @@ async function api(
         error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
       );
     }
+    const correlationId = crypto.randomUUID();
+    console.error(JSON.stringify({
+      level: "error",
+      event: "positioncrew.api.request_failed",
+      correlationId,
+      method: request.method,
+      path: url.pathname,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorMessage: error instanceof Error ? error.message.slice(0, 500) : "Unknown error",
+    }));
     return apiError(500, "REQUEST_FAILED", [
-      error instanceof Error ? error.message : "Unknown error",
+      `Unexpected server error. Reference: ${correlationId}`,
     ]);
   }
 }

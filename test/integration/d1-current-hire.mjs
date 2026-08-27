@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -418,7 +418,7 @@ async function main() {
   const stateDirectory = await mkdtemp(join(tmpdir(), "positioncrew-d1-integration-"));
   let worker;
   try {
-    await execFileAsync(
+    execFileSync(
       wrangler,
       [
         "d1",
@@ -434,7 +434,7 @@ async function main() {
       {
         cwd: root,
         env: { ...process.env, CI: "1" },
-        maxBuffer: 2 * 1024 * 1024,
+        stdio: "ignore",
       },
     );
 

@@ -1,5 +1,5 @@
 import { RecentJobsPanel } from "./RecentJobsPanel";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -124,6 +124,34 @@ const EMPTY_DRAFT: JobDraft = {
 
 const REFERENCE_PANCAKE_POSITION_ID = "1456267";
 const SAFE_REFUSAL_ACCOUNT = "0x0000000000000000000000000000000000000000";
+const EVM_ACCOUNT_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+const PROBE_TIMEOUT_MS = 12_000;
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = PROBE_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const upstreamSignal = init.signal;
+  let timedOut = false;
+  const abortFromUpstream = () => controller.abort();
+  if (upstreamSignal?.aborted) controller.abort();
+  else upstreamSignal?.addEventListener("abort", abortFromUpstream, { once: true });
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (requestError) {
+    if (timedOut) throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1_000)} seconds`);
+    throw requestError;
+  } finally {
+    window.clearTimeout(timeout);
+    upstreamSignal?.removeEventListener("abort", abortFromUpstream);
+  }
+}
 
 type JobRequest = FixtureJobResponse["result"]["request"];
 
@@ -272,6 +300,8 @@ function NumberField({
   max: string;
   step: string;
 }) {
+  const errorId = useId();
+  const error = numericFieldError(value, label, min, max, step);
   return (
     <label>
       <span>{label}</span>
@@ -282,10 +312,63 @@ function NumberField({
         max={max}
         step={step}
         value={value}
+        required
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? errorId : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
+      {error && <small className="field-error" id={errorId}>{error}</small>}
     </label>
   );
+}
+
+function numericFieldError(value: string, label: string, min: string, max: string, step: string): string | null {
+  if (!value.trim()) return `${label} is required.`;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return `${label} must be a number.`;
+  if (parsed < Number(min) || parsed > Number(max)) return `${label} must be between ${min} and ${max}.`;
+  if (Number(step) >= 1 && !Number.isInteger(parsed)) return `${label} must be a whole number.`;
+  return null;
+}
+
+function draftValidationErrors(service: ServiceId, draft: JobDraft): string[] {
+  const fields: Array<[string, string, string, string, string]> = service === "LENDING_RESCUE"
+    ? [
+        [draft.targetHealth, "Target health factor", "1.01", "3", "0.01"],
+        [draft.maxAction, "Maximum action", "1", "10000", "1"],
+        [draft.stressDrop, "Stress price drop", "0", "5000", "100"],
+        [draft.maxSlippage, "Maximum slippage", "0", "2000", "1"],
+      ]
+    : service === "LP_REBALANCE"
+      ? [
+          [draft.lpCurrentTick, "Current tick", "-887272", "887272", "1"],
+          [draft.lpMinimumBenefit, "Minimum net benefit", "0", "100000", "0.01"],
+          [draft.lpGas, "Estimated gas", "0", "10000", "0.01"],
+          [draft.lpSwapCost, "Estimated swap cost", "0", "10000", "0.01"],
+          [draft.lpHorizon, "Evaluation horizon", "1", "720", "1"],
+          [draft.lpMaximumGas, "Maximum gas", "0", "10000", "0.01"],
+        ]
+      : service === "YIELD_OPTIMIZATION"
+        ? [
+            [draft.yieldCapital, "Capital", "1", "10000000", "1"],
+            [draft.yieldCandidateApy, "Leading base APY", "0", "1000000", "1"],
+            [draft.yieldMinimumLiquidity, "Minimum liquidity", "0", "10000000000", "1"],
+            [draft.yieldMinimumBenefit, "Minimum net benefit", "0", "1000000", "0.01"],
+            [draft.yieldHorizon, "Evaluation horizon", "1", "365", "1"],
+          ]
+        : [
+            [draft.gridMidPrice, "Mid price", "0.000001", "10000000", "0.01"],
+            [draft.gridLowerPrice, "Lower price", "0.000001", "10000000", "0.01"],
+            [draft.gridUpperPrice, "Upper price", "0.000001", "10000000", "0.01"],
+            [draft.gridCapital, "Capital", "1", "10000000", "1"],
+            [draft.gridLevels, "Grid levels", "2", "100", "1"],
+            [draft.gridMaximumInventory, "Maximum inventory", "1", "10000000", "1"],
+            [draft.gridMaximumLoss, "Maximum loss", "0.01", "10000000", "0.01"],
+            [draft.gridMinimumProfit, "Minimum expected profit", "0", "10000000", "0.01"],
+            [draft.gridMaximumVolatility, "Maximum volatility", "1", "100000", "1"],
+            [draft.gridExpectedCycles, "Expected completed cycles", "1", "1000", "1"],
+          ];
+  return fields.map(([value, label, min, max, step]) => numericFieldError(value, label, min, max, step)).filter((error): error is string => Boolean(error));
 }
 
 function displayHealthFactor(value: number | null): string {
@@ -363,6 +446,104 @@ function LendingPositionBar({ request }: { request: JobRequest | null }) {
         <span><i className="dot target" /> Target {position.target}</span>
       </div>
     </div>
+  );
+}
+
+function LendingProviderAuditionPanel({
+  trace,
+}: {
+  trace: FreshMarketplaceChain | null;
+}) {
+  const evidence = trace?.hire.evidence;
+  const audition = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
+    ? evidence.providerAudition
+    : undefined;
+  if (!audition) return null;
+  const eligibleCount = audition.candidates.filter((candidate) =>
+    candidate.checks.every((check) => check.status === "PASS")
+  ).length;
+
+  return (
+    <section
+      className="provider-audition-panel"
+      aria-labelledby="provider-audition-title"
+      data-testid="lending-provider-audition"
+    >
+      <div className="provider-audition-heading">
+        <div>
+          <span className="section-kicker">Eligibility before execution</span>
+          <h3 id="provider-audition-title">{eligibleCount === 1 ? "Sole eligible provider selected" : "Provider eligibility recorded"}</h3>
+          <p>
+            The same block-pinned Lending request was checked against each candidate&apos;s
+            contract and execution path. This is an eligibility decision, not a performance ranking.
+          </p>
+        </div>
+        <span className="provider-audition-selection">
+          <CheckCircle2 size={15} aria-hidden="true" /> {eligibleCount} eligible / {audition.candidates.length} checked
+        </span>
+      </div>
+
+      <div className="provider-audition-grid">
+        {audition.candidates.map((candidate) => {
+          const selected = candidate.candidateId === audition.selection.winnerCandidateId;
+          return (
+            <article
+              className={`provider-audition-candidate ${selected ? "selected" : "ineligible"}`}
+              key={candidate.candidateId}
+            >
+              <div className="provider-audition-candidate-head">
+                <div>
+                  <span>{candidate.relationship === "FIRST_PARTY" ? "First-party provider" : "External identity"}</span>
+                  <h4>{candidate.name}</h4>
+                </div>
+                <strong>
+                  {selected ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}
+                  {selected ? "Eligible / selected" : "Ineligible / not invoked"}
+                </strong>
+              </div>
+
+              <div className="provider-audition-facts">
+                <div>
+                  <span>Identity evidence</span>
+                  <b>ERC-8004 / BSC mainnet / token #{candidate.identity.agentTokenId}</b>
+                  <small>
+                    {selected
+                      ? "Mainnet identity evidence only; it does not create or prove a TermiX order."
+                      : "The identity snapshot is evidence of registration, not a callable PositionCrew job contract."}
+                  </small>
+                </div>
+                <div>
+                  <span>Execution path</span>
+                  <b>{candidate.executionAdapter.callable ? "Local PositionCrew adapter" : "No supported adapter"}</b>
+                  <small>
+                    {selected
+                      ? "The existing durable worker evaluates the persisted request locally."
+                      : "PositionCrew did not call this external provider."}
+                  </small>
+                </div>
+              </div>
+
+              <ul className="provider-audition-checks">
+                {candidate.checks.map((check) => (
+                  <li className={check.status.toLowerCase()} key={check.code}>
+                    <span>{check.status}</span>
+                    <p>{check.detail}</p>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          );
+        })}
+      </div>
+
+      <footer className="provider-audition-boundary">
+        <ShieldCheck size={15} aria-hidden="true" />
+        <span>
+          No payment, marketplace order, external-provider execution, settlement, signature, custody,
+          or protocol transaction occurred. Audition receipt <code>{shortHash(audition.auditionHash, 18)}</code>.
+        </span>
+      </footer>
+    </section>
   );
 }
 
@@ -698,9 +879,25 @@ function WalletRiskProbe({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [safeExample, setSafeExample] = useState(false);
+  const activeProbeController = useRef<AbortController | null>(null);
+  const probeOperation = useRef(0);
+  const validAccount = EVM_ACCOUNT_PATTERN.test(account.trim());
+
+  useEffect(() => () => {
+    probeOperation.current += 1;
+    activeProbeController.current?.abort();
+  }, []);
 
   async function inspect(address: string, mode: "ACCOUNT" | "SAFE_REFUSAL") {
     const requestedAccount = address.trim();
+    if (!EVM_ACCOUNT_PATTERN.test(requestedAccount)) {
+      setError("Enter a 0x-prefixed address with exactly 40 hexadecimal characters");
+      return;
+    }
+    activeProbeController.current?.abort();
+    const controller = new AbortController();
+    const operation = ++probeOperation.current;
+    activeProbeController.current = controller;
     onClearRequest();
     setLoading(true);
     setError(null);
@@ -708,14 +905,16 @@ function WalletRiskProbe({
     setSafeExample(mode === "SAFE_REFUSAL");
     if (mode === "SAFE_REFUSAL") setAccount(SAFE_REFUSAL_ACCOUNT);
     try {
-      const response = await fetch(`/api/wallets/${requestedAccount}/venus`, {
+      const response = await fetchWithTimeout(`/api/wallets/${requestedAccount}/venus`, {
         headers: { Accept: "application/json" },
+        signal: controller.signal,
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { details?: unknown } | null;
         throw new Error(Array.isArray(body?.details) ? String(body.details[0]) : `Wallet probe failed (${response.status})`);
       }
       const next = await response.json() as VenusAccountProbe;
+      if (operation !== probeOperation.current || controller.signal.aborted) return;
       setProbe(next);
       if (next.rescueRequest) {
         const source = objectValue((next.rescueRequest.sources as unknown[] | undefined)?.[0]);
@@ -728,9 +927,13 @@ function WalletRiskProbe({
         });
       }
     } catch (probeError) {
+      if (controller.signal.aborted || operation !== probeOperation.current) return;
       setError(probeError instanceof Error ? probeError.message : "Wallet probe failed");
     } finally {
-      setLoading(false);
+      if (operation === probeOperation.current) {
+        setLoading(false);
+        activeProbeController.current = null;
+      }
     }
   }
 
@@ -753,7 +956,7 @@ function WalletRiskProbe({
             disabled={loading}
             placeholder="0x account address"
             value={account}
-            aria-invalid={Boolean(error)}
+            aria-invalid={Boolean(error) || (account.trim().length > 0 && !validAccount)}
             aria-describedby={error ? "wallet-probe-help wallet-probe-error" : "wallet-probe-help"}
             onChange={(event) => {
               setAccount(event.target.value);
@@ -762,9 +965,12 @@ function WalletRiskProbe({
               setSafeExample(false);
               onClearRequest();
             }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && validAccount && !loading) void inspect(account, "ACCOUNT");
+            }}
           />
         </label>
-        <button type="button" onClick={() => void inspect(account, "ACCOUNT")} disabled={loading || account.trim().length !== 42}>
+        <button type="button" onClick={() => void inspect(account, "ACCOUNT")} disabled={loading || !validAccount}>
           {loading ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}
           {loading ? "Loading" : "Load position"}
         </button>
@@ -778,7 +984,7 @@ function WalletRiskProbe({
           See how safe refusal works
         </button>
       </div>
-      <p className="wallet-probe-help" id="wallet-probe-help">No address ready? Use a fresh zero-address read to see how PositionCrew safely refuses when no lending position exists.</p>
+      <p className="wallet-probe-help" id="wallet-probe-help">Enter a 0x-prefixed, 40-hex-character address. No address ready? Use a fresh zero-address read to see how PositionCrew safely refuses when no lending position exists.</p>
       {error && <div className="wallet-probe-error" id="wallet-probe-error" role="alert"><AlertTriangle size={14} /> {error}</div>}
       {probe && (
         <div className="wallet-probe-result" aria-live="polite">
@@ -1070,11 +1276,18 @@ function YieldMarketProbe({
 
 function MachineJson({ response }: { response: FixtureJobResponse }) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const json = JSON.stringify(response.result.deliverable, null, 2);
   async function copyJson() {
-    await navigator.clipboard.writeText(json);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(json);
+      setCopyError(null);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+      setCopyError("Clipboard access is unavailable. Select the JSON to copy it manually.");
+    }
   }
   return (
     <div className="json-view">
@@ -1084,6 +1297,7 @@ function MachineJson({ response }: { response: FixtureJobResponse }) {
           <Clipboard size={14} aria-hidden="true" /> {copied ? "Copied" : "Copy"}
         </button>
       </div>
+      {copyError && <p className="json-copy-status" role="status">{copyError}</p>}
       <pre>{json}</pre>
     </div>
   );
@@ -1096,6 +1310,7 @@ export function JobWorkspace({
   activeJob,
   marketplaceTrace,
   loading,
+  jobError,
   onRun,
   onSelectJob,
   onSelectService,
@@ -1116,6 +1331,7 @@ export function JobWorkspace({
   activeJob: SessionJob | null;
   marketplaceTrace: FreshMarketplaceChain | null;
   loading: boolean;
+  jobError: string | null;
   onRun: (
     request: Record<string, unknown>,
     mode: JobRequestMode,
@@ -1142,6 +1358,10 @@ export function JobWorkspace({
   const [liveRequest, setLiveRequest] = useState<JobRequest | null>(null);
   const [liveObservation, setLiveObservation] = useState<CurrentMarketplaceObservation | null>(null);
   const liveRequestRef = useRef<JobRequest | null>(null);
+  const selectedServiceRef = useRef(service);
+  const resultPanelRef = useRef<HTMLDivElement | null>(null);
+  const focusedJobId = useRef<string | null>(null);
+  selectedServiceRef.current = service;
   const shownResponse = activeJob?.response ?? null;
   const receiptTrace = activeJob?.marketplaceTrace ?? marketplaceTrace;
   const matchedForwardShadowWindow = service === "BOUNDED_GRID" &&
@@ -1189,6 +1409,14 @@ export function JobWorkspace({
     if (!liveRequestRef.current) setDraft(draftFromRequest(fixtureRequest));
   }, [fixtureRequest]);
 
+  useEffect(() => {
+    const nextJobId = activeJob?.response.result.job.jobId ?? null;
+    if (!nextJobId || focusedJobId.current === nextJobId) return;
+    focusedJobId.current = nextJobId;
+    setResultView("summary");
+    window.requestAnimationFrame(() => resultPanelRef.current?.focus());
+  }, [activeJob]);
+
   const draftRequest = useMemo(
     () => inputRequest ? applyDraft(inputRequest, draft, Boolean(liveRequest)) : null,
     [inputRequest, draft, liveRequest],
@@ -1207,12 +1435,14 @@ export function JobWorkspace({
   const historicalHireReady = inputMode === "locked" && service !== "YIELD_OPTIMIZATION" && Boolean(fixture);
   const liveMarketPending = inputMode === "interactive" && !currentHireReady;
   const inputsDisabled = loading || inputMode === "locked" || !currentHireReady || service === "LENDING_RESCUE";
+  const draftErrors = useMemo(() => draftValidationErrors(service, draft), [service, draft]);
 
   function updateDraft<K extends keyof JobDraft>(key: K, value: JobDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
   async function submitJob() {
+    if (loading || draftErrors.length > 0) return;
     if (!inputRequest || !draftRequest) return;
     if (inputMode === "interactive" && (!liveRequest || !liveObservation)) return;
     if (inputMode === "locked" && !historicalHireReady) return;
@@ -1242,6 +1472,7 @@ export function JobWorkspace({
   }
 
   function useLiveRequest(request: JobRequest, observation: CurrentMarketplaceObservation) {
+    if (request.service !== selectedServiceRef.current) return;
     const next = structuredClone(request);
     liveRequestRef.current = next;
     setLiveRequest(next);
@@ -1259,17 +1490,34 @@ export function JobWorkspace({
     setResultView("summary");
   }
 
+  function handleResultTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const tabs: ResultView[] = ["summary", "json", "receipt"];
+    const currentIndex = tabs.indexOf(resultView);
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    const next = tabs[nextIndex];
+    setResultView(next);
+    window.requestAnimationFrame(() => document.getElementById(`result-tab-${next}`)?.focus());
+  }
+
   return (
     <main className="page-shell jobs-page">
       <div className="page-title-row compact">
         <div>
           <span className="page-kicker">Current capital check</span>
           <h1>Get a bounded answer with evidence you can inspect.</h1>
-          <p>Choose a specialist, load current evidence or a clearly labelled replay, and receive either a clear action or a provable refusal with a durable receipt.</p>
+          <p>{service === "LENDING_RESCUE"
+            ? "Load one current Venus position, let PositionCrew check exact-contract eligibility, and receive a persisted rescue plan or explicit refusal."
+            : "Choose a specialist, load current evidence or a clearly labelled replay, and receive either a clear action or a provable refusal with a durable receipt."}</p>
         </div>
         <label className="provider-select">
-          <span>Provider</span>
-          <select value={service} onChange={(event) => onSelectService(event.target.value as ServiceId)}>
+          <span>Job</span>
+          <select value={service} disabled={loading} onChange={(event) => onSelectService(event.target.value as ServiceId)}>
             {TASKS.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.shortTitle}</option>)}
           </select>
         </label>
@@ -1278,7 +1526,7 @@ export function JobWorkspace({
       <div className="job-layout">
         <section className="job-composer" aria-labelledby="composer-title" aria-busy={loading}>
           <div className="section-bar">
-            <div><span className="section-kicker">Request</span><h2 id="composer-title">{provider?.name ?? task.title}</h2></div>
+            <div><span className="section-kicker">Request</span><h2 id="composer-title">{service === "LENDING_RESCUE" ? "Lending provider eligibility" : provider?.name ?? task.title}</h2></div>
             <div className="composer-mode-actions">
               {service === "LENDING_RESCUE" ? (
                 <a className="historical-evidence-link" href="#evidence">Historical replay in Evidence <ArrowRight size={12} aria-hidden="true" /></a>
@@ -1297,7 +1545,9 @@ export function JobWorkspace({
               )}
             </div>
           </div>
-          <p className="composer-summary">{provider?.summary ?? task.description}</p>
+          <p className="composer-summary">{service === "LENDING_RESCUE"
+            ? "PositionCrew admits only a provider with an exact Lending request adapter and output validator, then persists that provider's bounded result."
+            : provider?.summary ?? task.description}</p>
           {service === "LENDING_RESCUE" ? (
             <>
               <WalletRiskProbe telemetry={telemetry} onUseRequest={useLiveRequest} onClearRequest={clearLiveRequest} />
@@ -1388,6 +1638,14 @@ export function JobWorkspace({
                 ? "Current-clock scenario with custom bounds. Inputs and timestamps are caller-controlled; this is not benchmark evidence or live wallet execution."
                 : "Current-clock simulation seeded from the August 12 fixture. Observation timestamps are rebased for the scenario; values are not fetched live."}</span>
           </div>
+          {jobError && (
+            <div className="job-run-error" role="alert">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span><strong>This hire did not finish.</strong><small>{jobError}</small></span>
+              <button type="button" onClick={() => void submitJob()} disabled={loading || draftErrors.length > 0 || (inputMode === "interactive" ? !currentHireReady : !historicalHireReady) || (service === "LENDING_RESCUE" && !draft.allowRepay && !draft.allowCollateral)}><RefreshCw size={14} aria-hidden="true" /> Retry current hire</button>
+            </div>
+          )}
+          <LendingProviderAuditionPanel trace={marketplaceTrace} />
           {marketplaceTrace && (
             <div className="request-boundary" role="status" aria-live="polite">
               {marketplaceTrace.job.status === "COMPLETED"
@@ -1429,14 +1687,16 @@ export function JobWorkspace({
               type="button"
               onClick={submitJob}
               aria-describedby="request-boundary"
-              disabled={loading || (inputMode === "interactive" ? !currentHireReady : !historicalHireReady) || (service === "LENDING_RESCUE" && !draft.allowRepay && !draft.allowCollateral)}
+              disabled={loading || draftErrors.length > 0 || (inputMode === "interactive" ? !currentHireReady : !historicalHireReady) || (service === "LENDING_RESCUE" && !draft.allowRepay && !draft.allowCollateral)}
             >
               {loading ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
               {loading
-                ? (marketplaceTrace?.job.status.replaceAll("_", " ") ?? "Recording hire")
+                ? (marketplaceTrace?.job.status.replaceAll("_", " ") ?? (service === "LENDING_RESCUE" ? "Checking provider eligibility" : "Recording hire"))
                 : inputMode === "interactive"
-                  ? safeLiveRefusal
-                    ? "Hire and persist safe refusal"
+                  ? service === "LENDING_RESCUE"
+                    ? safeLiveRefusal
+                      ? "Check eligibility and persist refusal"
+                      : "Check eligibility and hire"
                     : "Hire and run current request"
                   : "Replay historical receipt"}
               {!loading && <ArrowRight size={15} />}
@@ -1444,15 +1704,17 @@ export function JobWorkspace({
           </div>
         </section>
 
-        <section className="job-result" aria-label="Provider result" aria-live="polite">
+        <section className="job-result" aria-label="Provider result">
+          <span className="sr-only" role="status" aria-live="polite">{loading ? "Provider job in progress." : shownResponse ? `${serviceLabel(shownResponse.result.deliverable.service)} result ready.` : "Ready for a provider request."}</span>
           <div className="result-nav">
-            <div>
-              <button className={resultView === "summary" ? "active" : ""} type="button" onClick={() => setResultView("summary")}><ShieldCheck size={14} /> Result</button>
-              <button className={resultView === "json" ? "active" : ""} type="button" onClick={() => setResultView("json")}><Code2 size={14} /> JSON</button>
-              <button className={resultView === "receipt" ? "active" : ""} type="button" onClick={() => setResultView("receipt")}><ReceiptText size={14} /> Receipt</button>
+            <div role="tablist" aria-label="Provider result views" onKeyDown={handleResultTabKeyDown}>
+              <button id="result-tab-summary" role="tab" aria-selected={resultView === "summary"} aria-controls="result-panel" tabIndex={resultView === "summary" ? 0 : -1} className={resultView === "summary" ? "active" : ""} type="button" onClick={() => setResultView("summary")}><ShieldCheck size={14} aria-hidden="true" /> Result</button>
+              <button id="result-tab-json" role="tab" aria-selected={resultView === "json"} aria-controls="result-panel" tabIndex={resultView === "json" ? 0 : -1} className={resultView === "json" ? "active" : ""} type="button" onClick={() => setResultView("json")}><Code2 size={14} aria-hidden="true" /> JSON</button>
+              <button id="result-tab-receipt" role="tab" aria-selected={resultView === "receipt"} aria-controls="result-panel" tabIndex={resultView === "receipt" ? 0 : -1} className={resultView === "receipt" ? "active" : ""} type="button" onClick={() => setResultView("receipt")}><ReceiptText size={14} aria-hidden="true" /> Receipt</button>
             </div>
             {activeJob && <span>{activeJob.responseTimeMs} ms API</span>}
           </div>
+          <div id="result-panel" className="result-panel" role="tabpanel" aria-labelledby={`result-tab-${resultView}`} tabIndex={-1} ref={resultPanelRef}>
           {shownResponse ? (
             resultView === "summary" ? (
               <SummaryResult
@@ -1480,6 +1742,7 @@ export function JobWorkspace({
               </div>
             </div>
           )}
+          </div>
         </section>
       </div>
       <RecentJobsPanel onOpenJob={onSelectJob} />

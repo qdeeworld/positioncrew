@@ -77,6 +77,16 @@ class FakeD1 implements D1Database {
     private readonly denyCreates = false,
   ) {}
 
+  async downgradeStoredLendingEvidenceToLegacy(): Promise<void> {
+    if (!this.hire || typeof this.hire.evidence_json !== "string") {
+      throw new Error("No stored hire evidence is available");
+    }
+    const evidence = JSON.parse(this.hire.evidence_json) as Record<string, unknown>;
+    delete evidence.providerAudition;
+    this.hire.evidence_json = canonicalJson(evidence);
+    this.hire.evidence_hash = await sha256Commitment(evidence);
+  }
+
   markRunning(startedAt: string): void {
     if (!this.job) throw new Error("Create the fake job before marking it RUNNING");
     this.job.job_state = "RUNNING";
@@ -404,11 +414,24 @@ function indexedUuid(marker: "1" | "2" | "4", index: number): string {
   return `${marker.repeat(8)}-${marker.repeat(4)}-4${marker.repeat(3)}-8${marker.repeat(3)}-${suffix}`;
 }
 
-function rateLimitHireInput(
+async function rateLimitHireInput(
   index: number,
   createdAt: string,
   rateLimitKey = HASH_A,
-): CreateFreshMarketplaceHire {
+): Promise<CreateFreshMarketplaceHire> {
+  const request = { requestSchema: "positioncrew.lending-rescue.request.v1" };
+  const provider = {
+    providerSlug: "lending-rescue",
+    providerId: "positioncrew:provider:lending-rescue:v1",
+    service: "LENDING_RESCUE",
+    requestSchema: "positioncrew.lending-rescue.request.v1",
+  };
+  const evidence = {
+    schemaVersion: "positioncrew.historical-fixture-evidence.v1",
+    evidenceClass: "HISTORICAL_FIXTURE",
+    benchmarkSlug: "lending-rescue",
+    requestSchema: "positioncrew.lending-rescue.request.v1",
+  } as const;
   return {
     request: FreshMarketplaceHireRequestSchema.parse({
       schemaVersion: "positioncrew.fresh-marketplace-hire-request.v1",
@@ -420,17 +443,12 @@ function rateLimitHireInput(
     hireId: indexedUuid("1", index),
     jobId: indexedUuid("2", index),
     createdAt,
-    requestJson: canonicalJson({ requestSchema: "positioncrew.lending-rescue.request.v1" }),
-    requestHash: HASH_A,
-    providerHash: HASH_B,
+    requestJson: canonicalJson(request),
+    requestHash: await sha256Commitment(request),
+    providerHash: await sha256Commitment(provider),
     evidenceMode: "HISTORICAL_FIXTURE",
-    evidenceJson: canonicalJson({
-      schemaVersion: "positioncrew.historical-fixture-evidence.v1",
-      evidenceClass: "HISTORICAL_FIXTURE",
-      benchmarkSlug: "lending-rescue",
-      requestSchema: "positioncrew.lending-rescue.request.v1",
-    }),
-    evidenceHash: HASH_C,
+    evidenceJson: canonicalJson(evidence),
+    evidenceHash: await sha256Commitment(evidence),
     service: "LENDING_RESCUE",
     rateLimitKey,
   };
@@ -571,6 +589,47 @@ describe("fresh marketplace hire contract", () => {
     });
   });
 
+  it("replays a pre-audition current Lending hire without weakening immutable bindings", async () => {
+    const database = new FakeD1();
+    const environment = { DB: database, ASSETS: TEST_ASSETS };
+    const { httpRequest } = currentLendingHireRequest();
+    const retryBody = await httpRequest.clone().text();
+    const retryHeaders = new Headers(httpRequest.headers);
+
+    const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
+    expect(createdResponse.status).toBe(201);
+    const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
+    const createdEvidence = created.hire.evidence;
+    expect(createdEvidence?.evidenceClass).toBe("CURRENT_BLOCK_PINNED");
+    if (!createdEvidence || createdEvidence.evidenceClass !== "CURRENT_BLOCK_PINNED") {
+      throw new Error("Expected current block-pinned evidence");
+    }
+    expect(createdEvidence.providerAudition).toBeDefined();
+
+    await database.downgradeStoredLendingEvidenceToLegacy();
+    const replayResponse = await positionCrewWorker.fetch(
+      new Request("https://positioncrew.example/api/benchmark-hires", {
+        method: "POST",
+        headers: retryHeaders,
+        body: retryBody,
+      }),
+      environment,
+      TEST_CONTEXT,
+    );
+
+    expect(replayResponse.status).toBe(200);
+    const replayed = FreshMarketplaceChainSchema.parse(await replayResponse.json());
+    expect(replayed.hire.hireId).toBe(created.hire.hireId);
+    expect(replayed.hire.requestHash).toBe(created.hire.requestHash);
+    expect(replayed.hire.providerHash).toBe(created.hire.providerHash);
+    const replayedEvidence = replayed.hire.evidence;
+    expect(replayedEvidence?.evidenceClass).toBe("CURRENT_BLOCK_PINNED");
+    if (!replayedEvidence || replayedEvidence.evidenceClass !== "CURRENT_BLOCK_PINNED") {
+      throw new Error("Expected replayed current block-pinned evidence");
+    }
+    expect(replayedEvidence.providerAudition).toBeUndefined();
+  });
+
   it("classifies malformed and oversized hire bodies as client errors", async () => {
     const environment = { DB: new FakeD1(), ASSETS: TEST_ASSETS };
     const malformed = await positionCrewWorker.fetch(
@@ -603,7 +662,7 @@ describe("fresh marketplace hire contract", () => {
     const environment = { DB: database, ASSETS: TEST_ASSETS };
     const { httpRequest, providerRequest } = currentLendingHireRequest();
     const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
-    expect(createdResponse.status).toBe(201);
+    expect(createdResponse.status, await createdResponse.clone().text()).toBe(201);
     const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
     expect(created.hire.evidenceMode).toBe("CURRENT_BLOCK_PINNED");
     expect(created.hire.request).toEqual(providerRequest);
@@ -857,7 +916,7 @@ describe("fresh marketplace hire contract", () => {
 
     for (const [index, offset] of [0, 30_000, 60_000, 90_000, 120_000].entries()) {
       await store.createHire(
-        rateLimitHireInput(index, new Date(startedAt + offset).toISOString()),
+        await rateLimitHireInput(index, new Date(startedAt + offset).toISOString()),
       );
     }
 
@@ -877,11 +936,11 @@ describe("fresh marketplace hire contract", () => {
 
     for (let index = 0; index < FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW; index += 1) {
       await store.createHire(
-        rateLimitHireInput(index, new Date(startedAt + index * 1_000).toISOString()),
+        await rateLimitHireInput(index, new Date(startedAt + index * 1_000).toISOString()),
       );
     }
 
-    await expect(store.createHire(rateLimitHireInput(
+    await expect(store.createHire(await rateLimitHireInput(
       FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW,
       new Date(
         startedAt + FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW * 1_000,

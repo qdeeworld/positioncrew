@@ -45,6 +45,7 @@
     "node": "22.x"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "drizzle-orm": "0.45.2",
     "ethers": "6.17.0",
     "lucide-react": "^1.31.0",

@@ -21,10 +21,10 @@ export const TASKS: TaskConfig[] = [
     index: "01",
     title: "Rescue a lending position",
     shortTitle: "Lending rescue",
-    action: "Run rescue check",
+    action: "Check providers and rescue",
     description: "Find the smallest allowed action that restores a stressed lending position.",
     currentSource: "Block-pinned Venus position",
-    currentAction: "Load current position and hire",
+    currentAction: "Load current position, check eligibility, and hire",
     icon: Activity,
     inputs: [
       { label: "Protocol", value: "Venus" },

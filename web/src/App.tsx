@@ -38,6 +38,37 @@ import type {
   SystemTelemetry,
 } from "./types";
 
+type ResourceLoadState = "LOADING" | "AVAILABLE" | "UNAVAILABLE";
+
+const CONTEXT_REQUEST_TIMEOUT_MS = 12_000;
+const JOB_REQUEST_TIMEOUT_MS = 12_000;
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = CONTEXT_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const upstreamSignal = init.signal;
+  let timedOut = false;
+  const abortFromUpstream = () => controller.abort();
+  if (upstreamSignal?.aborted) controller.abort();
+  else upstreamSignal?.addEventListener("abort", abortFromUpstream, { once: true });
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (requestError) {
+    if (timedOut) throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1_000)} seconds`);
+    throw requestError;
+  } finally {
+    window.clearTimeout(timeout);
+    upstreamSignal?.removeEventListener("abort", abortFromUpstream);
+  }
+}
+
 const CURRENT_HIRE_SLUG_BY_SERVICE: Record<ServiceId, FreshMarketplaceBenchmarkSlug> = {
   LENDING_RESCUE: "lending-rescue",
   LP_REBALANCE: "lp-rebalance",
@@ -69,6 +100,9 @@ export default function App() {
   const [selectedService, setSelectedService] = useState<ServiceId>("LENDING_RESCUE");
   const [providers, setProviders] = useState<ProviderListing[]>(() => [...PROVIDER_CATALOG]);
   const [catalogOnline, setCatalogOnline] = useState(false);
+  const [catalogLoadState, setCatalogLoadState] = useState<ResourceLoadState>("LOADING");
+  const [matrixLoadState, setMatrixLoadState] = useState<ResourceLoadState>("LOADING");
+  const [telemetryLoadState, setTelemetryLoadState] = useState<ResourceLoadState>("LOADING");
   const [matrix, setMatrix] = useState<Map<ServiceId, FixtureJobResponse>>(new Map());
   const [telemetry, setTelemetry] = useState<SystemTelemetry | null>(null);
   const [benchmarks, setBenchmarks] = useState<BenchmarkRepeatabilityResponse[]>([]);
@@ -89,7 +123,12 @@ export default function App() {
   const [activeJob, setActiveJob] = useState<SessionJob | null>(null);
   const [marketplaceTrace, setMarketplaceTrace] = useState<FreshMarketplaceChain | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [registryError, setRegistryError] = useState<string | null>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
+  const registryLoadController = useRef<AbortController | null>(null);
+  const jobRunController = useRef<AbortController | null>(null);
+  const jobRunId = useRef(0);
+  const previousView = useRef(view);
   const unresolvedFreshHire = useRef<{
     benchmarkSlug: FreshMarketplaceBenchmarkSlug;
     providerSlug: string;
@@ -105,35 +144,60 @@ export default function App() {
   const fixture = matrix.get(selectedService);
 
   async function loadRegistry() {
-    setError(null);
+    registryLoadController.current?.abort();
+    const controller = new AbortController();
+    registryLoadController.current = controller;
+    const registryFetch = (input: RequestInfo | URL, init: RequestInit = {}) =>
+      fetchWithTimeout(input, { ...init, signal: controller.signal });
+
+    setRegistryError(null);
     setCatalogOnline(false);
+    setCatalogLoadState("LOADING");
+    setMatrixLoadState("LOADING");
+    setTelemetryLoadState("LOADING");
+    setMatrix(new Map());
+    setTelemetry(null);
 
     const contextualLoads = [
-      fetch("/api/evidence/external-comparisons/2026-08-24", { headers: { Accept: "application/json" } })
+      registryFetch("/api/evidence/external-comparisons/2026-08-24", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<ExternalComparisonSnapshot>(response))
         .then(setExternalComparisons),
-      fetch("/api/matrix", { headers: { Accept: "application/json" } })
+      registryFetch("/api/matrix", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<MatrixResponse>(response))
-        .then((payload) => setMatrix(new Map(payload.results.map((item) => [item.result.request.service, item])))),
-      fetch("/api/status", { headers: { Accept: "application/json" } })
+        .then((payload) => {
+          setMatrix(new Map(payload.results.map((item) => [item.result.request.service, item])));
+          setMatrixLoadState("AVAILABLE");
+        })
+        .catch((loadError) => {
+          if (!controller.signal.aborted) setMatrixLoadState("UNAVAILABLE");
+          throw loadError;
+        }),
+      registryFetch("/api/status", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<SystemTelemetry>(response))
-        .then(setTelemetry),
-      fetch("/api/benchmarks/repeatability", { headers: { Accept: "application/json" } })
+        .then((payload) => {
+          setTelemetry(payload);
+          setTelemetryLoadState("AVAILABLE");
+        })
+        .catch((loadError) => {
+          if (!controller.signal.aborted) setTelemetryLoadState("UNAVAILABLE");
+          throw loadError;
+        }),
+      registryFetch("/api/benchmarks/repeatability", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<BenchmarkRepeatabilityMatrixResponse>(response))
         .then((payload) => setBenchmarks(payload.records)),
-      fetch("/api/benchmarks/captures", { headers: { Accept: "application/json" } })
+      registryFetch("/api/benchmarks/captures", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<AgentCaptureManifestResponse>(response))
         .then(setCaptureManifest),
-      fetch("/api/benchmarks/marketplace-provenance", { headers: { Accept: "application/json" } })
+      registryFetch("/api/benchmarks/marketplace-provenance", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<MarketplaceInvocationEvidence>(response))
         .then(setMarketplaceProvenance),
-      fetch("/api/commerce/erc8183", { headers: { Accept: "application/json" } })
+      registryFetch("/api/commerce/erc8183", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<Erc8183TestnetLedger>(response))
         .then(setCommerceLedger),
-      fetch("/api/commerce/aacp", { headers: { Accept: "application/json" } })
+      registryFetch("/api/commerce/aacp", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<AacpProductionReadiness>(response))
         .then((payload) => setAacpReadiness(payload.state === "SOURCE_UNAVAILABLE" ? null : payload)),
-      fetch("/api/benchmarks/status", {
+      registryFetch("/api/benchmarks/status", {
         cache: "no-store",
         headers: { Accept: "application/json" },
       })
@@ -146,7 +210,7 @@ export default function App() {
           setAdvantagePublication(null);
           setAdvantagePublicationLoadState("UNAVAILABLE");
         }),
-      fetch("/api/benchmarks/founder-comparison/status", {
+      registryFetch("/api/benchmarks/founder-comparison/status", {
         cache: "no-store",
         headers: { Accept: "application/json" },
       })
@@ -159,10 +223,10 @@ export default function App() {
           setFounderAdvantagePublication(null);
           setFounderAdvantagePublicationLoadState("UNAVAILABLE");
         }),
-      fetch("/api/operations/production", { headers: { Accept: "application/json" } })
+      registryFetch("/api/operations/production", { headers: { Accept: "application/json" } })
         .then((response) => jsonResponse<ProductionTrackRecord>(response))
         .then(setProductionTrackRecord),
-      fetch("/api/evidence/bounded-grid-forward-shadow", {
+      registryFetch("/api/evidence/bounded-grid-forward-shadow", {
         cache: "no-store",
         headers: { Accept: "application/json" },
       })
@@ -172,22 +236,41 @@ export default function App() {
     void Promise.allSettled(contextualLoads);
 
     try {
-      const catalog = await fetch("/api/providers", {
+      const catalog = await registryFetch("/api/providers", {
         headers: { Accept: "application/json" },
       }).then((response) => jsonResponse<ProviderCatalogResponse>(response));
+      if (controller.signal.aborted) return;
       setProviders(catalog.providers);
       setCatalogOnline(catalog.providers.length === 4);
+      setCatalogLoadState("AVAILABLE");
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Provider registry unavailable");
+      if (controller.signal.aborted) return;
+      setCatalogLoadState("UNAVAILABLE");
+      setRegistryError(loadError instanceof Error ? loadError.message : "Provider registry unavailable");
     }
   }
 
   useEffect(() => {
     void loadRegistry();
-    function onHashChange() { setView(viewFromHash()); }
+    function onHashChange() {
+      const nextView = viewFromHash();
+      if (nextView !== "jobs") cancelJobRun();
+      setView(nextView);
+    }
     window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+      registryLoadController.current?.abort();
+      jobRunController.current?.abort();
+      jobRunId.current += 1;
+    };
   }, []);
+
+  useEffect(() => {
+    if (previousView.current === view) return;
+    previousView.current = view;
+    window.requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+  }, [view]);
 
   useEffect(() => {
     const completedService = activeJob?.response.result.deliverable.service;
@@ -224,9 +307,10 @@ export default function App() {
     let active = true;
     setFounderAdvantageAtAGlance(null);
     setFounderAdvantageAtAGlanceLoadState("LOADING");
-    void fetch(
+    void fetchWithTimeout(
       `${founderAdvantagePublication.reportUrl}founder-agent-advantage-report.json`,
       { cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal },
+      CONTEXT_REQUEST_TIMEOUT_MS,
     )
       .then((response) => jsonResponse<unknown>(response))
       .then(async (report) => {
@@ -260,7 +344,16 @@ export default function App() {
     founderAdvantagePublicationLoadState,
   ]);
 
+  function cancelJobRun() {
+    if (!jobRunController.current) return;
+    jobRunId.current += 1;
+    jobRunController.current.abort();
+    jobRunController.current = null;
+    setLoading(false);
+  }
+
   function navigate(next: AppView) {
+    if (next !== "jobs") cancelJobRun();
     if (window.location.hash !== `#${next}`) window.location.hash = next;
     setView(next);
   }
@@ -277,8 +370,16 @@ export default function App() {
     mode: JobRequestMode,
     observation?: CurrentMarketplaceObservation,
   ) {
+    jobRunController.current?.abort();
+    const controller = new AbortController();
+    const runId = ++jobRunId.current;
+    jobRunController.current = controller;
+    const isCurrentRun = () => jobRunId.current === runId && !controller.signal.aborted;
+    const assertCurrentRun = () => {
+      if (!isCurrentRun()) throw new DOMException("Stale job operation", "AbortError");
+    };
     setLoading(true);
-    setError(null);
+    setJobError(null);
     const startedAt = performance.now();
     try {
       const service = request.service as ServiceId;
@@ -290,40 +391,61 @@ export default function App() {
         ? CURRENT_HIRE_SLUG_BY_SERVICE[service]
         : HISTORICAL_HIRE_SLUG_BY_SERVICE[service];
       const selectedProvider = providers.find((candidate) => candidate.service === request.service);
+      const serverOwnedLendingAudition = currentPinnedHire && service === "LENDING_RESCUE";
+      const providerSelectionKey = serverOwnedLendingAudition
+        ? "server-owned:lending-provider-audition"
+        : selectedProvider?.slug ?? "";
       const historicalFixture = mode === "FROZEN_FIXTURE";
-      if (currentPinnedHire && (!benchmarkSlug || !selectedProvider)) {
+      if (currentPinnedHire && (!benchmarkSlug || (!serverOwnedLendingAudition && !selectedProvider))) {
         throw new Error("Current persisted hiring is unavailable for this provider");
       }
       if (historicalFixture && (!benchmarkSlug || !selectedProvider)) {
         throw new Error("Historical persisted replay is unavailable for this provider");
       }
-      if ((currentPinnedHire || historicalFixture) && benchmarkSlug && selectedProvider) {
+      if (
+        (currentPinnedHire || historicalFixture) &&
+        benchmarkSlug &&
+        (serverOwnedLendingAudition || selectedProvider)
+      ) {
         const requestKey = currentPinnedHire
           ? JSON.stringify({ request, observation })
           : `historical-fixture:${benchmarkSlug}`;
         const pendingHire = unresolvedFreshHire.current?.benchmarkSlug === benchmarkSlug &&
-            unresolvedFreshHire.current.providerSlug === selectedProvider.slug &&
+            unresolvedFreshHire.current.providerSlug === providerSelectionKey &&
             unresolvedFreshHire.current.requestKey === requestKey
           ? unresolvedFreshHire.current
           : null;
         const logicalHire = pendingHire ?? {
           benchmarkSlug,
-          providerSlug: selectedProvider.slug,
+          providerSlug: providerSelectionKey,
           idempotencyKey: crypto.randomUUID(),
           requestKey,
         };
         unresolvedFreshHire.current = logicalHire;
         let trace = logicalHire.chain;
         if (!trace) {
-          const createResponse = await fetch("/api/benchmark-hires", {
+          const createResponse = await fetchWithTimeout(
+            serverOwnedLendingAudition
+              ? "/api/provider-auditions/lending/hires"
+              : "/api/benchmark-hires",
+            {
             method: "POST",
             headers: { Accept: "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify(currentPinnedHire
+            signal: controller.signal,
+            body: JSON.stringify(serverOwnedLendingAudition
+              ? {
+                  schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
+                  idempotencyKey: logicalHire.idempotencyKey,
+                  evidenceMode: "CURRENT_BLOCK_PINNED",
+                  request,
+                  observation,
+                }
+              : currentPinnedHire
               ? {
                   schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
                   idempotencyKey: logicalHire.idempotencyKey,
                   benchmarkSlug,
-                  providerSlug: selectedProvider.slug,
+                  providerSlug: selectedProvider!.slug,
                   evidenceMode: "CURRENT_BLOCK_PINNED",
                   request,
                   observation,
@@ -332,9 +454,12 @@ export default function App() {
                   schemaVersion: "positioncrew.fresh-marketplace-hire-request.v1",
                   idempotencyKey: logicalHire.idempotencyKey,
                   benchmarkSlug,
-                  providerSlug: selectedProvider.slug,
+                  providerSlug: selectedProvider!.slug,
                 }),
-          });
+            },
+            JOB_REQUEST_TIMEOUT_MS,
+          );
+          assertCurrentRun();
           try {
             trace = await jsonResponse<FreshMarketplaceChain>(createResponse);
           } catch (createError) {
@@ -347,25 +472,35 @@ export default function App() {
         }
         if (!trace) throw new Error("Persisted marketplace hire did not return a chain");
         let activeTrace: FreshMarketplaceChain = trace;
+        assertCurrentRun();
         setMarketplaceTrace(activeTrace);
         rememberRecentJobOnDevice({
           hireId: activeTrace.hire.hireId,
           service: activeTrace.hire.service,
           rememberedAt: activeTrace.hire.createdAt,
         });
-        const runResponse = await fetch("/api/benchmark-hires/" + encodeURIComponent(activeTrace.hire.hireId) + "/jobs", {
-          method: "POST",
-          headers: { Accept: "application/json" },
-        });
-        activeTrace = await jsonResponse<FreshMarketplaceChain>(runResponse);
-        unresolvedFreshHire.current = { ...logicalHire, chain: activeTrace };
-        setMarketplaceTrace(activeTrace);
-        for (let attempt = 0; activeTrace.job.state === "RUNNING" && attempt < 80; attempt += 1) {
+        if (activeTrace.job.state === "CREATED") {
+          const runResponse = await fetchWithTimeout("/api/benchmark-hires/" + encodeURIComponent(activeTrace.hire.hireId) + "/jobs", {
+            method: "POST",
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+          }, JOB_REQUEST_TIMEOUT_MS);
+          activeTrace = await jsonResponse<FreshMarketplaceChain>(runResponse);
+          assertCurrentRun();
+          unresolvedFreshHire.current = { ...logicalHire, chain: activeTrace };
+          setMarketplaceTrace(activeTrace);
+        }
+        const pollingDeadline = Date.now() + 20_000;
+        for (let attempt = 0; activeTrace.job.state === "RUNNING" && attempt < 80 && Date.now() < pollingDeadline; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, 250));
-          activeTrace = await fetch("/api/benchmark-hires/" + encodeURIComponent(activeTrace.hire.hireId), {
+          assertCurrentRun();
+          const remainingMs = Math.max(250, pollingDeadline - Date.now());
+          activeTrace = await fetchWithTimeout("/api/benchmark-hires/" + encodeURIComponent(activeTrace.hire.hireId), {
             headers: { Accept: "application/json" },
             cache: "no-store",
-          }).then((response) => jsonResponse<FreshMarketplaceChain>(response));
+            signal: controller.signal,
+          }, Math.min(4_000, remainingMs)).then((response) => jsonResponse<FreshMarketplaceChain>(response));
+          assertCurrentRun();
           unresolvedFreshHire.current = { ...logicalHire, chain: activeTrace };
           setMarketplaceTrace(activeTrace);
         }
@@ -382,33 +517,42 @@ export default function App() {
           ranAt: activeTrace.job.completedAt ?? new Date().toISOString(),
           marketplaceTrace: activeTrace,
         };
+        assertCurrentRun();
         setActiveJob(sessionJob);
         setSessionJobs((jobs) => [sessionJob, ...jobs].slice(0, 20));
         unresolvedFreshHire.current = null;
         return;
       }
       const endpoint = providers.find((candidate) => candidate.service === request.service)?.endpoint ?? "/api/jobs";
-      const response = await fetch(endpoint, {
+      const response = await fetchWithTimeout(endpoint, {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({ mode, request }),
-      });
+        signal: controller.signal,
+      }, JOB_REQUEST_TIMEOUT_MS);
       const payload = await jsonResponse<FixtureJobResponse>(response);
       const sessionJob: SessionJob = {
         response: payload,
         responseTimeMs: Math.max(1, Math.round(performance.now() - startedAt)),
         ranAt: new Date().toISOString(),
       };
+      assertCurrentRun();
       setActiveJob(sessionJob);
       setSessionJobs((jobs) => [sessionJob, ...jobs].slice(0, 20));
     } catch (jobError) {
-      setError(jobError instanceof Error ? jobError.message : "Provider job failed");
+      if (!isCurrentRun()) return;
+      setJobError(jobError instanceof Error ? jobError.message : "Provider job failed");
     } finally {
-      setLoading(false);
+      if (isCurrentRun()) {
+        setLoading(false);
+        jobRunController.current = null;
+      }
     }
   }
 
   function selectSessionJob(job: SessionJob) {
+    cancelJobRun();
+    setJobError(null);
     setSelectedService(job.response.result.request.service);
     setActiveJob(job);
     setMarketplaceTrace(job.marketplaceTrace ?? null);
@@ -425,12 +569,15 @@ export default function App() {
           activeJob={activeJob}
           marketplaceTrace={marketplaceTrace}
           loading={loading}
+          jobError={jobError}
           onRun={runJob}
           onSelectJob={selectSessionJob}
           onSelectService={(service) => {
+            if (loading) return;
             setSelectedService(service);
             setActiveJob(null);
             setMarketplaceTrace(null);
+            setJobError(null);
           }}
           telemetry={telemetry}
           benchmarks={benchmarks}
@@ -455,26 +602,37 @@ export default function App() {
         onCreateJob={createJob}
         telemetry={telemetry}
         externalComparisons={externalComparisons}
+        telemetryLoadState={telemetryLoadState}
+        matrixLoadState={matrixLoadState}
+        catalogLoadState={catalogLoadState}
+        onRetryStatus={() => void loadRegistry()}
       />
     );
-  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, providers, matrix, selectedService, telemetry, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, founderAdvantageAtAGlance, founderAdvantageAtAGlanceLoadState, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord, forwardShadowLedger]);
+  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, jobError, providers, matrix, selectedService, telemetry, telemetryLoadState, matrixLoadState, catalogLoadState, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, founderAdvantageAtAGlance, founderAdvantageAtAGlanceLoadState, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord, forwardShadowLedger]);
+
+  const apiState = catalogLoadState === "UNAVAILABLE" || matrixLoadState === "UNAVAILABLE"
+    ? "unavailable"
+    : catalogOnline && matrix.size === 4
+      ? "online"
+      : "loading";
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <ShellHeader
         view={view}
         onNavigate={navigate}
-        apiOnline={catalogOnline && matrix.size === 4}
+        apiState={apiState}
         jobCount={sessionJobs.length}
       />
-      {error && (
+      {registryError && (
         <div className="global-error" role="alert">
           <AlertTriangle size={16} aria-hidden="true" />
-          <span>{error}</span>
-          <button type="button" onClick={loadRegistry}><RefreshCw size={14} aria-hidden="true" /> Retry</button>
+          <span>{registryError}</span>
+          <button type="button" onClick={loadRegistry}><RefreshCw size={14} aria-hidden="true" /> Retry registry</button>
         </div>
       )}
-      {content}
+      <div id="main-content" tabIndex={-1}>{content}</div>
     </div>
   );
 }
