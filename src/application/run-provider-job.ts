@@ -26,10 +26,10 @@ export async function runProviderJob(
   adapter: CommerceAdapter,
   requestInput: PositionCrewRequest,
   now: Date,
-  options: { persistExpiredRefusal?: boolean } = {},
+  options: { persistExpiredRefusal?: boolean; requestHash?: string } = {},
 ): Promise<ProviderJobResult> {
   const request = PositionCrewRequestSchema.parse(requestInput);
-  const requestHash = canonicalHash(request);
+  const requestHash = options.requestHash ?? canonicalHash(request);
   const providerId = PROVIDER_IDS[request.service];
   const evaluatorId = `positioncrew:evaluator:${request.service.toLowerCase()}:v1`;
   const persistExpiredRefusal =
@@ -78,6 +78,7 @@ export async function runProviderJob(
     deliverable,
     evaluatorId,
     now,
+    requestHash,
   );
   job = await adapter.evaluate(job.jobId, evaluation);
   return { job, request, deliverable, evaluation };

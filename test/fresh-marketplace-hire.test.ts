@@ -404,11 +404,24 @@ function indexedUuid(marker: "1" | "2" | "4", index: number): string {
   return `${marker.repeat(8)}-${marker.repeat(4)}-4${marker.repeat(3)}-8${marker.repeat(3)}-${suffix}`;
 }
 
-function rateLimitHireInput(
+async function rateLimitHireInput(
   index: number,
   createdAt: string,
   rateLimitKey = HASH_A,
-): CreateFreshMarketplaceHire {
+): Promise<CreateFreshMarketplaceHire> {
+  const request = { requestSchema: "positioncrew.lending-rescue.request.v1" };
+  const provider = {
+    providerSlug: "lending-rescue",
+    providerId: "positioncrew:provider:lending-rescue:v1",
+    service: "LENDING_RESCUE",
+    requestSchema: "positioncrew.lending-rescue.request.v1",
+  };
+  const evidence = {
+    schemaVersion: "positioncrew.historical-fixture-evidence.v1",
+    evidenceClass: "HISTORICAL_FIXTURE",
+    benchmarkSlug: "lending-rescue",
+    requestSchema: "positioncrew.lending-rescue.request.v1",
+  } as const;
   return {
     request: FreshMarketplaceHireRequestSchema.parse({
       schemaVersion: "positioncrew.fresh-marketplace-hire-request.v1",
@@ -420,17 +433,12 @@ function rateLimitHireInput(
     hireId: indexedUuid("1", index),
     jobId: indexedUuid("2", index),
     createdAt,
-    requestJson: canonicalJson({ requestSchema: "positioncrew.lending-rescue.request.v1" }),
-    requestHash: HASH_A,
-    providerHash: HASH_B,
+    requestJson: canonicalJson(request),
+    requestHash: await sha256Commitment(request),
+    providerHash: await sha256Commitment(provider),
     evidenceMode: "HISTORICAL_FIXTURE",
-    evidenceJson: canonicalJson({
-      schemaVersion: "positioncrew.historical-fixture-evidence.v1",
-      evidenceClass: "HISTORICAL_FIXTURE",
-      benchmarkSlug: "lending-rescue",
-      requestSchema: "positioncrew.lending-rescue.request.v1",
-    }),
-    evidenceHash: HASH_C,
+    evidenceJson: canonicalJson(evidence),
+    evidenceHash: await sha256Commitment(evidence),
     service: "LENDING_RESCUE",
     rateLimitKey,
   };
@@ -603,7 +611,7 @@ describe("fresh marketplace hire contract", () => {
     const environment = { DB: database, ASSETS: TEST_ASSETS };
     const { httpRequest, providerRequest } = currentLendingHireRequest();
     const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
-    expect(createdResponse.status).toBe(201);
+    expect(createdResponse.status, await createdResponse.clone().text()).toBe(201);
     const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
     expect(created.hire.evidenceMode).toBe("CURRENT_BLOCK_PINNED");
     expect(created.hire.request).toEqual(providerRequest);
@@ -857,7 +865,7 @@ describe("fresh marketplace hire contract", () => {
 
     for (const [index, offset] of [0, 30_000, 60_000, 90_000, 120_000].entries()) {
       await store.createHire(
-        rateLimitHireInput(index, new Date(startedAt + offset).toISOString()),
+        await rateLimitHireInput(index, new Date(startedAt + offset).toISOString()),
       );
     }
 
@@ -877,11 +885,11 @@ describe("fresh marketplace hire contract", () => {
 
     for (let index = 0; index < FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW; index += 1) {
       await store.createHire(
-        rateLimitHireInput(index, new Date(startedAt + index * 1_000).toISOString()),
+        await rateLimitHireInput(index, new Date(startedAt + index * 1_000).toISOString()),
       );
     }
 
-    await expect(store.createHire(rateLimitHireInput(
+    await expect(store.createHire(await rateLimitHireInput(
       FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW,
       new Date(
         startedAt + FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW * 1_000,

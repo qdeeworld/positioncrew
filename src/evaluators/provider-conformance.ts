@@ -47,11 +47,12 @@ export function evaluateProviderConformance(
   deliverableInput: PositionCrewDeliverable,
   evaluatorId: string,
   now: Date,
+  requestHashOverride?: string,
 ): EvaluationReceipt {
   const request = PositionCrewRequestSchema.parse(requestInput);
   const deliverable = PositionCrewDeliverableSchema.parse(deliverableInput);
   const expected = executeProvider(request, now);
-  const requestHash = canonicalHash(request);
+  const requestHash = requestHashOverride ?? canonicalHash(request);
   const deliverableHash = canonicalHash(deliverable);
   const checks: EvaluationCheck[] = [
     check(

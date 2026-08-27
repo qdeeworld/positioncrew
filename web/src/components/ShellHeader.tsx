@@ -11,12 +11,12 @@ const views: Array<{ id: AppView; label: string; icon: typeof Store }> = [
 export function ShellHeader({
   view,
   onNavigate,
-  apiOnline,
+  apiState,
   jobCount,
 }: {
   view: AppView;
   onNavigate: (view: AppView) => void;
-  apiOnline: boolean;
+  apiState: "online" | "loading" | "unavailable";
   jobCount: number;
 }) {
   return (
@@ -47,8 +47,8 @@ export function ShellHeader({
           </nav>
           <div className="header-actions">
             <span className="network-chip"><i /> BNB Smart Chain</span>
-            <span className={`api-state ${apiOnline ? "online" : "loading"}`} role="status">
-              <i /> {apiOnline ? "API reachable" : "Connecting"}
+            <span className={`api-state ${apiState}`} role="status">
+              <i /> {apiState === "online" ? "API reachable" : apiState === "unavailable" ? "API unavailable" : "Connecting"}
             </span>
             <a href="https://github.com/dolepee/positioncrew" target="_blank" rel="noreferrer">
               <GitBranch size={15} aria-hidden="true" /> Source

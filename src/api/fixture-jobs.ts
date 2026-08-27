@@ -21,6 +21,7 @@ import {
   type PositionCrewRequest,
 } from "../contracts/index.js";
 import { canonicalHash } from "../core/canonical.js";
+import { sha256Commitment } from "../commerce/fresh-hire-schema.js";
 
 const FIXTURE_NOW = new Date("2026-08-12T16:00:30.000Z");
 const FIXTURES = [lendingFixture, lpFixture, yieldFixture, gridFixture] as const;
@@ -235,6 +236,7 @@ export async function runCurrentBlockPinnedProviderRequest(
   const request = PositionCrewRequestSchema.parse(input);
   const result = await runProviderJob(new MemoryCommerceAdapter(), request, now, {
     persistExpiredRefusal: true,
+    requestHash: await sha256Commitment(request),
   });
   return {
     schemaVersion: "positioncrew.fixture-job-response.v1",

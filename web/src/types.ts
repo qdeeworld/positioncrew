@@ -498,6 +498,60 @@ export type HistoricalMarketplaceBenchmarkSlug = Exclude<
   "yield-optimization"
 >;
 
+export interface LendingProviderAuditionCheck {
+  code:
+    | "EXACT_SERVICE_MATCH"
+    | "REQUEST_CONTRACT_SUPPORTED"
+    | "POSITIONCREW_ACTIVATION_SUPPORTED"
+    | "EXECUTION_ADAPTER_AVAILABLE"
+    | "OUTPUT_VALIDATOR_AVAILABLE";
+  status: "PASS" | "FAIL";
+  detail: string;
+}
+
+export interface LendingProviderAuditionCandidate {
+  candidateId: string;
+  name: string;
+  relationship: "FIRST_PARTY" | "THIRD_PARTY_COMPARISON_ONLY";
+  identity: {
+    protocol: "ERC-8004";
+    chainId: 56;
+    registry: string;
+    agentTokenId: string;
+    owner: string;
+    explorerUrl: string;
+    listingUrl: string | null;
+  };
+  executionAdapter: {
+    mode: "POSITIONCREW_IN_PROCESS" | "NONE";
+    callable: boolean;
+    publicEndpoint: string | null;
+    externalProviderInvoked: false;
+  };
+  eligibility: "ELIGIBLE" | "INELIGIBLE";
+  executionState: "SELECTED_PENDING_RUN" | "INELIGIBLE_NOT_INVOKED";
+  checks: LendingProviderAuditionCheck[];
+}
+
+export interface LendingProviderAudition {
+  schemaVersion: "positioncrew.lending-provider-audition.v1";
+  policyVersion: "positioncrew.lending-provider-eligibility.v1";
+  service: "LENDING_RESCUE";
+  requestHash: string;
+  observation: CurrentMarketplaceObservation;
+  evaluatedAt: string;
+  candidates: LendingProviderAuditionCandidate[];
+  selection: {
+    winnerCandidateId: string;
+    winnerProviderId: string;
+    winnerProviderSlug: "lending-rescue";
+    eligibleCandidateCount: 1;
+    basis: "SOLE_ELIGIBLE_CANDIDATE";
+  };
+  claimBoundary: string[];
+  auditionHash: string;
+}
+
 export interface CurrentBlockPinnedMarketplaceEvidence {
   schemaVersion: "positioncrew.current-block-pinned-evidence.v1";
   evidenceClass: "CURRENT_BLOCK_PINNED";
@@ -506,6 +560,7 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
   freshnessAtCreation: "FRESH" | "STALE" | "FUTURE_DATED";
   evaluatedAt: string;
   maxDataAgeSeconds: number;
+  providerAudition?: LendingProviderAudition;
 }
 
 export interface HistoricalFixtureMarketplaceEvidence {
