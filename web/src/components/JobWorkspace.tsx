@@ -125,7 +125,7 @@ const EMPTY_DRAFT: JobDraft = {
 const REFERENCE_PANCAKE_POSITION_ID = "1456267";
 const SAFE_REFUSAL_ACCOUNT = "0x0000000000000000000000000000000000000000";
 const EVM_ACCOUNT_PATTERN = /^0x[0-9a-fA-F]{40}$/;
-const PROBE_TIMEOUT_MS = 12_000;
+const PROBE_TIMEOUT_MS = 30_000;
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
@@ -145,7 +145,12 @@ async function fetchWithTimeout(
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } catch (requestError) {
-    if (timedOut) throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1_000)} seconds`);
+    if (timedOut) {
+      throw new Error(
+        `Venus data did not respond within ${Math.ceil(timeoutMs / 1_000)} seconds. ` +
+        "No position or refusal was inferred; your address is unchanged, so retry Load position.",
+      );
+    }
     throw requestError;
   } finally {
     window.clearTimeout(timeout);
@@ -985,6 +990,7 @@ function WalletRiskProbe({
         </button>
       </div>
       <p className="wallet-probe-help" id="wallet-probe-help">Enter a 0x-prefixed, 40-hex-character address. No address ready? Use a fresh zero-address read to see how PositionCrew safely refuses when no lending position exists.</p>
+      {loading && <p className="wallet-probe-help" role="status">Reading block-pinned Venus state. BSC provider failover can take up to 30 seconds.</p>}
       {error && <div className="wallet-probe-error" id="wallet-probe-error" role="alert"><AlertTriangle size={14} /> {error}</div>}
       {probe && (
         <div className="wallet-probe-result" aria-live="polite">
