@@ -356,7 +356,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
                   <td data-label="Saved">{formatTime(chain?.hire.createdAt ?? item.reference.rememberedAt)}</td>
                   <td data-label="Service"><strong>{SERVICE_NAMES[item.reference.service]}</strong></td>
                   <td data-label="Status">
-                    <span className={`recent-job-state recent-job-state-${copy.label.toLowerCase()}`} role="status" aria-live="polite">{copy.label}</span>
+                    <span className={`recent-job-state recent-job-state-${copy.label.toLowerCase().replaceAll(" ", "-")}`} role="status" aria-live="polite">{copy.label}</span>
                   </td>
                   <td data-label="What happens next">
                     <span>{copy.detail}</span>
