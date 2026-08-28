@@ -631,7 +631,7 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
 
   await page.getByRole("button", { name: "Open live Lending Rescue" }).click();
   await expect(page.getByRole("heading", { name: "Get a bounded answer with evidence you can inspect." })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Historical replay in Evidence" })).toHaveAttribute("href", "#evidence");
+  await expect(page.getByRole("link", { name: "Past benchmark receipts · not a current check" })).toHaveAttribute("href", "#evidence");
   await expect(page.getByText(/Hire remains disabled until the exact request and block evidence are ready/)).toBeVisible();
   await expect(page.getByLabel("Lending position health")).toHaveCount(0);
   await expect(page.getByLabel("Target health factor")).toHaveCount(0);
@@ -1120,7 +1120,7 @@ test("the evidence page separates conformance from advantage claims", async ({ p
     supportedAdvantageCount: null,
   });
   await page.goto("/#evidence");
-  await expect(page.getByRole("heading", { name: "Evidence register" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Historical receipts and proof" })).toBeVisible();
   const comparisonSection = page.getByRole("region", { name: "Agent Advantage evidence" });
   await expect(comparisonSection.getByText("Founder comparison published", { exact: true })).toBeVisible();
   const taskComparisons = comparisonSection.getByRole("list", { name: "Founder Agent Advantage task comparisons" });
