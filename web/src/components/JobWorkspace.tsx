@@ -844,7 +844,7 @@ function ReceiptView({
         <span><ShieldCheck size={14} /> {response.receipt.mode.replaceAll("_", " ")}</span>
         <div>
           {shadowWindow && <a href={shadowWindow.receiptUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Separate shadow evidence</a>}
-          {marketplaceTrace?.receipt && <a href={marketplaceTrace.receipt.publicUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Reload durable receipt</a>}
+          {marketplaceTrace?.receipt && <a href={`#jobs/receipt/${marketplaceTrace.receipt.receiptId}`}><ExternalLink size={14} /> Reload durable receipt</a>}
           {response.receipt.path && <a href={response.receipt.path} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Public receipt</a>}
           <button type="button" onClick={downloadReceipt}><Download size={14} /> Download</button>
         </div>
@@ -1673,7 +1673,7 @@ export function JobWorkspace({
               <span>
                 <strong>{marketplaceTrace.job.status.replaceAll("_", " ")}</strong>
                 {" · Hire "}{shortHash(marketplaceTrace.hire.hireId, 14)}
-                {marketplaceTrace.receipt && <>{" · "}<a href={marketplaceTrace.receipt.publicUrl} target="_blank" rel="noreferrer">Public receipt <ExternalLink size={11} /></a></>}
+                {marketplaceTrace.receipt && <>{" · "}<a href={`#jobs/receipt/${marketplaceTrace.receipt.receiptId}`}>Readable receipt <ExternalLink size={11} /></a>{" · "}<a href={marketplaceTrace.receipt.publicUrl} target="_blank" rel="noreferrer">Receipt JSON <ExternalLink size={11} /></a></>}
               </span>
             </div>
           )}

@@ -720,12 +720,15 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
     },
   });
 
-  const receiptLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" });
-  await expect(receiptLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
-  const [receiptPage] = await Promise.all([page.waitForEvent("popup"), receiptLink.click()]);
-  await expect(receiptPage.locator("body")).toContainText(mockedHire.account);
-  await receiptPage.reload();
-  await expect(receiptPage.locator("body")).toContainText(mockedHire.hireId);
+  const receiptLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Readable receipt" });
+  await expect(receiptLink).toHaveAttribute("href", `#jobs/receipt/${mockedHire.receiptId}`);
+  await receiptLink.click();
+  await expect(page).toHaveURL(new RegExp(`#jobs/receipt/${mockedHire.receiptId}$`));
+  await expect(page.locator(".job-result").getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".job-result").getByText("No complete Venus collateral-and-debt position was available for rescue analysis.", { exact: true })).toBeVisible();
+  const jsonLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Receipt JSON" });
+  await expect(jsonLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
@@ -1637,7 +1640,7 @@ test("restores a server-backed recent job on the same device without caching its
   await expect(panel.getByText("NONE · Durable receipt ready", { exact: true })).toBeVisible();
   await expect(panel.getByText("This browser stores job references only.", { exact: false })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Open result" })).toBeVisible();
-  await expect(panel.getByRole("link", { name: "Open receipt" })).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Open receipt" })).toHaveAttribute("href", `#jobs/receipt/${routes.receiptId}`);
 
   const serialized = await page.evaluate(() => window.localStorage.getItem("positioncrew.recent-jobs.v1") ?? "");
   expect(serialized).not.toMatch(/request|response|account|collateral|wallet/i);

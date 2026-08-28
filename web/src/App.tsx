@@ -1,4 +1,8 @@
-import { rememberRecentJobOnDevice } from "./job-history";
+import {
+  rememberRecentJobOnDevice,
+  sessionJobFromFreshChain,
+  validatedFreshMarketplaceChain,
+} from "./job-history";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { PROVIDER_CATALOG } from "../../src/marketplace/catalog.js";
@@ -84,7 +88,12 @@ const HISTORICAL_HIRE_SLUG_BY_SERVICE: Partial<Record<ServiceId, FreshMarketplac
 
 function viewFromHash(): AppView {
   const value = window.location.hash.replace("#", "");
-  return value === "jobs" || value === "evidence" ? value : "marketplace";
+  if (value === "evidence") return "evidence";
+  return value === "jobs" || value.startsWith("jobs/receipt/") ? "jobs" : "marketplace";
+}
+
+function receiptIdFromHash(): string | null {
+  return window.location.hash.match(/^#jobs\/receipt\/([0-9a-f-]{36})$/i)?.[1] ?? null;
 }
 
 async function jsonResponse<T>(response: Response): Promise<T> {
@@ -123,10 +132,12 @@ export default function App() {
   const [activeJob, setActiveJob] = useState<SessionJob | null>(null);
   const [marketplaceTrace, setMarketplaceTrace] = useState<FreshMarketplaceChain | null>(null);
   const [loading, setLoading] = useState(false);
+  const [receiptLoading, setReceiptLoading] = useState(false);
   const [registryError, setRegistryError] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
   const registryLoadController = useRef<AbortController | null>(null);
   const jobRunController = useRef<AbortController | null>(null);
+  const receiptLoadController = useRef<AbortController | null>(null);
   const jobRunId = useRef(0);
   const previousView = useRef(view);
   const unresolvedFreshHire = useRef<{
@@ -252,16 +263,22 @@ export default function App() {
 
   useEffect(() => {
     void loadRegistry();
+    void loadPublicReceiptFromHash();
     function onHashChange() {
       const nextView = viewFromHash();
-      if (nextView !== "jobs") cancelJobRun();
+      if (nextView !== "jobs") {
+        cancelJobRun();
+        cancelPublicReceiptLoad();
+      }
       setView(nextView);
+      void loadPublicReceiptFromHash();
     }
     window.addEventListener("hashchange", onHashChange);
     return () => {
       window.removeEventListener("hashchange", onHashChange);
       registryLoadController.current?.abort();
       jobRunController.current?.abort();
+      receiptLoadController.current?.abort();
       jobRunId.current += 1;
     };
   }, []);
@@ -352,8 +369,62 @@ export default function App() {
     setLoading(false);
   }
 
+  function cancelPublicReceiptLoad() {
+    receiptLoadController.current?.abort();
+    receiptLoadController.current = null;
+    setReceiptLoading(false);
+  }
+
+  async function loadPublicReceiptFromHash() {
+    const receiptId = receiptIdFromHash();
+    if (!receiptId) {
+      cancelPublicReceiptLoad();
+      return;
+    }
+
+    receiptLoadController.current?.abort();
+    const controller = new AbortController();
+    receiptLoadController.current = controller;
+    setReceiptLoading(true);
+    setJobError(null);
+    try {
+      const response = await fetchWithTimeout(
+        `/api/benchmark-receipts/${encodeURIComponent(receiptId)}`,
+        { cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal },
+        JOB_REQUEST_TIMEOUT_MS,
+      );
+      const chain = await validatedFreshMarketplaceChain(await jsonResponse<unknown>(response));
+      if (!chain || chain.receipt?.receiptId !== receiptId) {
+        throw new Error("Receipt failed PositionCrew chain validation");
+      }
+      const sessionJob = sessionJobFromFreshChain(chain);
+      if (!sessionJob) throw new Error("Receipt does not contain a completed provider result");
+      if (controller.signal.aborted) return;
+      setSelectedService(sessionJob.response.result.request.service);
+      setActiveJob(sessionJob);
+      setMarketplaceTrace(chain);
+      setSessionJobs((jobs) => [
+        sessionJob,
+        ...jobs.filter((job) => job.marketplaceTrace?.receipt?.receiptId !== receiptId),
+      ].slice(0, 20));
+    } catch (receiptError) {
+      if (controller.signal.aborted) return;
+      setActiveJob(null);
+      setMarketplaceTrace(null);
+      setJobError(receiptError instanceof Error ? receiptError.message : "Receipt unavailable");
+    } finally {
+      if (receiptLoadController.current === controller) {
+        receiptLoadController.current = null;
+        setReceiptLoading(false);
+      }
+    }
+  }
+
   function navigate(next: AppView) {
-    if (next !== "jobs") cancelJobRun();
+    if (next !== "jobs") {
+      cancelJobRun();
+      cancelPublicReceiptLoad();
+    }
     if (window.location.hash !== `#${next}`) window.location.hash = next;
     setView(next);
   }
@@ -568,12 +639,12 @@ export default function App() {
           fixture={fixture}
           activeJob={activeJob}
           marketplaceTrace={marketplaceTrace}
-          loading={loading}
+          loading={loading || receiptLoading}
           jobError={jobError}
           onRun={runJob}
           onSelectJob={selectSessionJob}
           onSelectService={(service) => {
-            if (loading) return;
+            if (loading || receiptLoading) return;
             setSelectedService(service);
             setActiveJob(null);
             setMarketplaceTrace(null);
@@ -608,7 +679,7 @@ export default function App() {
         onRetryStatus={() => void loadRegistry()}
       />
     );
-  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, jobError, providers, matrix, selectedService, telemetry, telemetryLoadState, matrixLoadState, catalogLoadState, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, founderAdvantageAtAGlance, founderAdvantageAtAGlanceLoadState, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord, forwardShadowLedger]);
+  }, [view, provider, fixture, activeJob, marketplaceTrace, sessionJobs, loading, receiptLoading, jobError, providers, matrix, selectedService, telemetry, telemetryLoadState, matrixLoadState, catalogLoadState, externalComparisons, benchmarks, captureManifest, marketplaceProvenance, commerceLedger, aacpReadiness, advantagePublication, founderAdvantagePublication, founderAdvantageAtAGlance, founderAdvantageAtAGlanceLoadState, advantagePublicationLoadState, founderAdvantagePublicationLoadState, productionTrackRecord, forwardShadowLedger]);
 
   const apiState = catalogLoadState === "UNAVAILABLE" || matrixLoadState === "UNAVAILABLE"
     ? "unavailable"
