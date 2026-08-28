@@ -791,7 +791,7 @@ function SummaryResult({
           </dl>
         </section>
         <section>
-          <h3>{meaning.tone === "action" ? "Execution guards" : "Evidence and invalidation"}</h3>
+          <h3>{meaning.tone === "action" ? "Execution guards" : meaning.tone === "refused" ? "Provider reasons" : "Evidence and invalidation"}</h3>
           <ul className="guard-list">
             {conditions.map((condition) => <li key={condition}><Check size={14} /><span>{condition}</span></li>)}
           </ul>

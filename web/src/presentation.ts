@@ -68,19 +68,15 @@ export function resultMeaning(deliverable: ProviderDeliverable): {
     };
   }
 
-  const actionable = deliverable.service === "LENDING_RESCUE"
-    ? Boolean(deliverable.recommendation)
-    : deliverable.service === "LP_REBALANCE"
-      ? Boolean(deliverable.proposedRange)
-      : deliverable.service === "YIELD_OPTIMIZATION"
-        ? Boolean(deliverable.selectedOpportunityId)
-        : Boolean(deliverable.orders?.length);
+  const actionable = deliverable.status === "ACTIONABLE";
 
   if (actionable) {
     const title = deliverable.service === "LENDING_RESCUE"
       ? "Review the rescue plan before execution."
       : deliverable.service === "LP_REBALANCE"
-        ? "Review the proposed LP rebalance."
+        ? deliverable.decision === "EXIT"
+          ? "Review the proposed LP exit."
+          : "Review the proposed LP rebalance."
         : deliverable.service === "YIELD_OPTIMIZATION"
           ? "Review the selected yield allocation."
           : "Review the bounded order ladder.";
@@ -174,6 +170,7 @@ export function actionDetails(deliverable: ProviderDeliverable): Array<{ label: 
 export function conditionsFor(deliverable: ProviderDeliverable): string[] {
   if (deliverable.service === "LENDING_RESCUE") {
     return [
+      ...(deliverable.refusalReasons ?? []),
       ...(deliverable.recommendation?.preconditions ?? []),
       ...(deliverable.invalidationConditions ?? []),
     ].slice(0, 5);
