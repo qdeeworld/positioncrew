@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   annualizedRatePct,
   annualizedYieldBps,
+  firstSuccessfulRpcTransport,
   isRetryableRpcFailure,
   pancakeActiveLiquidityUsd,
   poolPriceFromSqrtPriceX96,
   realizedVolatilityBpsFromTickCumulatives,
   rpcFallbacks,
+  RpcTransportError,
   v3PositionTokenAmounts,
   venusLiquidityTotalsFixed,
   venusUsdValueFixed,
@@ -96,6 +98,42 @@ describe("BSC telemetry math", () => {
     ]);
     expect(new Set(rpcFallbacks(publicBnbRpc)).size).toBe(3);
     expect(rpcFallbacks("https://example.invalid")).toEqual(["https://example.invalid"]);
+  });
+
+  it("uses the first valid hedged RPC response without waiting for a stalled provider", async () => {
+    const stalled = new Promise<string>(() => undefined);
+    const selected = await firstSuccessfulRpcTransport(
+      ["https://slow.example", "https://fast.example"],
+      async (candidate) => candidate.includes("slow") ? stalled : "fast",
+    );
+    expect(selected).toBe("fast");
+  });
+
+  it("prefers any valid hedged response and otherwise preserves deterministic RPC failures", async () => {
+    await expect(firstSuccessfulRpcTransport(
+      ["https://one.example", "https://two.example"],
+      async (candidate) => {
+        throw new RpcTransportError(`${candidate} unavailable`);
+      },
+    )).rejects.toThrow("one.example");
+
+    const validAfterDeterministicFailure = await firstSuccessfulRpcTransport(
+      ["https://deterministic.example", "https://valid.example"],
+      async (candidate) => {
+        if (candidate.includes("deterministic")) throw new Error("execution reverted: policy failed");
+        await Promise.resolve();
+        return "valid";
+      },
+    );
+    expect(validAfterDeterministicFailure).toBe("valid");
+
+    await expect(firstSuccessfulRpcTransport(
+      ["https://transport.example", "https://deterministic.example"],
+      async (candidate) => {
+        if (candidate.includes("transport")) throw new RpcTransportError("provider unavailable");
+        throw new Error("execution reverted: policy failed");
+      },
+    )).rejects.toThrow("execution reverted: policy failed");
   });
 
   it("normalizes Venus oracle values into 18-decimal USD across token decimals", () => {
