@@ -109,7 +109,7 @@ describe("BSC telemetry math", () => {
     expect(selected).toBe("fast");
   });
 
-  it("aggregates transport failures but never masks deterministic RPC failures", async () => {
+  it("prefers any valid hedged response and otherwise preserves deterministic RPC failures", async () => {
     await expect(firstSuccessfulRpcTransport(
       ["https://one.example", "https://two.example"],
       async (candidate) => {
@@ -117,10 +117,20 @@ describe("BSC telemetry math", () => {
       },
     )).rejects.toThrow("one.example");
 
-    await expect(firstSuccessfulRpcTransport(
-      ["https://slow.example", "https://deterministic.example"],
+    const validAfterDeterministicFailure = await firstSuccessfulRpcTransport(
+      ["https://deterministic.example", "https://valid.example"],
       async (candidate) => {
-        if (candidate.includes("slow")) return new Promise<string>(() => undefined);
+        if (candidate.includes("deterministic")) throw new Error("execution reverted: policy failed");
+        await Promise.resolve();
+        return "valid";
+      },
+    );
+    expect(validAfterDeterministicFailure).toBe("valid");
+
+    await expect(firstSuccessfulRpcTransport(
+      ["https://transport.example", "https://deterministic.example"],
+      async (candidate) => {
+        if (candidate.includes("transport")) throw new RpcTransportError("provider unavailable");
         throw new Error("execution reverted: policy failed");
       },
     )).rejects.toThrow("execution reverted: policy failed");

@@ -142,6 +142,7 @@ export function firstSuccessfulRpcTransport<T>(
     let pending = candidates.length;
     let settled = false;
     const failures: string[] = [];
+    let deterministicError: unknown;
     for (const candidate of candidates) {
       void operation(candidate).then((value) => {
         if (settled) return;
@@ -149,16 +150,17 @@ export function firstSuccessfulRpcTransport<T>(
         resolve(value);
       }).catch((error: unknown) => {
         if (settled) return;
-        if (!(error instanceof RpcTransportError)) {
-          settled = true;
-          reject(error);
-          return;
+        if (error instanceof RpcTransportError) {
+          failures.push(`${new URL(candidate).host}: ${error.message}`);
+        } else if (deterministicError === undefined) {
+          deterministicError = error;
         }
-        failures.push(`${new URL(candidate).host}: ${error.message}`);
         pending -= 1;
         if (pending === 0) {
           settled = true;
-          reject(new RpcTransportError(`BSC RPC providers unavailable (${failures.join("; ")})`));
+          reject(deterministicError ?? new RpcTransportError(
+            `BSC RPC providers unavailable (${failures.join("; ")})`,
+          ));
         }
       });
     }
