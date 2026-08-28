@@ -449,7 +449,7 @@ export async function validatedFreshMarketplaceChain(
   if (!isRecentJobReference(reference) || !(await isFreshMarketplaceChainForReference(value, reference))) {
     return null;
   }
-  return value as FreshMarketplaceChain;
+  return value as unknown as FreshMarketplaceChain;
 }
 
 export function sessionJobFromFreshChain(chain: FreshMarketplaceChain): SessionJob | null {
