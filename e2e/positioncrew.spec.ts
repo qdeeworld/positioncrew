@@ -649,7 +649,8 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   );
   const recentJobs = page.getByTestId("recent-jobs-device");
   await expect(recentJobs.getByText("1 saved job", { exact: true })).toBeVisible();
-  await expect(recentJobs.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(recentJobs.getByText("Action ready", { exact: true })).toBeVisible();
+  await expect(recentJobs.getByText("Repay 152 USDT · Durable receipt ready", { exact: true })).toBeVisible();
   const advantageStatus = page.getByRole("region", { name: "Founder Agent Advantage comparison status" });
   await expect(advantageStatus.getByText("Founder comparison published", { exact: true })).toBeVisible();
   await expect(advantageStatus).toContainText("Bounded lending-position rescue: exact canonical output match");
@@ -1632,7 +1633,8 @@ test("restores a server-backed recent job on the same device without caching its
 
   const panel = page.getByTestId("recent-jobs-device");
   await expect(panel.getByRole("heading", { name: "Recent jobs on this device" })).toBeVisible();
-  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Refused", { exact: true })).toBeVisible();
+  await expect(panel.getByText("NONE · Durable receipt ready", { exact: true })).toBeVisible();
   await expect(panel.getByText("This browser stores job references only.", { exact: false })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Open result" })).toBeVisible();
   await expect(panel.getByRole("link", { name: "Open receipt" })).toBeVisible();
@@ -1642,7 +1644,7 @@ test("restores a server-backed recent job on the same device without caching its
   expect(serialized).toContain(routes.hireId);
 
   await page.reload();
-  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Refused", { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "Open result" }).click();
   await expect(page).toHaveURL(/#jobs/);
 
@@ -1664,7 +1666,7 @@ test("reclaims a stale running job through the existing hire instead of creating
   const panel = page.getByTestId("recent-jobs-device");
   await expect(panel.getByText("Running", { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "Recover run" }).click();
-  await expect(panel.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Refused", { exact: true })).toBeVisible();
   expect(routes.runCount).toBe(1);
 });
 
