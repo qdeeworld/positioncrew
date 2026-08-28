@@ -727,7 +727,7 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   await expect(page.locator(".job-result").getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
   await page.reload();
   await expect(page.locator(".job-result").getByText("No complete Venus collateral-and-debt position was available for rescue analysis.", { exact: true })).toBeVisible();
-  const jsonLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Receipt JSON" });
+  const jsonLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" });
   await expect(jsonLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
