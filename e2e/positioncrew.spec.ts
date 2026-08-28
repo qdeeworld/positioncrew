@@ -732,6 +732,24 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
+test("a shared readable receipt can recover from a transient load failure", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page, { safeRefusal: true });
+  await page.route(`**/api/benchmark-receipts/${mockedHire.receiptId}`, async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "temporary receipt outage" }),
+    });
+  }, { times: 1 });
+
+  await page.goto(`/#jobs/receipt/${mockedHire.receiptId}`);
+  const receiptAlert = page.getByRole("alert").filter({ hasText: "Readable receipt unavailable" });
+  await expect(receiptAlert).toContainText("503 Service Unavailable");
+  await receiptAlert.getByRole("button", { name: "Retry receipt" }).click();
+  await expect(page.locator(".job-result").getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
+  await expect(receiptAlert).toHaveCount(0);
+});
+
 test("an operator can preflight a provider packet without external activation", async ({ page, request }) => {
   const templatesResponse = await request.get("/api/provider-contract-preflight");
   expect(templatesResponse.status()).toBe(200);

@@ -133,6 +133,7 @@ export default function App() {
   const [marketplaceTrace, setMarketplaceTrace] = useState<FreshMarketplaceChain | null>(null);
   const [loading, setLoading] = useState(false);
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
   const [registryError, setRegistryError] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
   const registryLoadController = useRef<AbortController | null>(null);
@@ -373,6 +374,7 @@ export default function App() {
     receiptLoadController.current?.abort();
     receiptLoadController.current = null;
     setReceiptLoading(false);
+    setReceiptError(null);
   }
 
   async function loadPublicReceiptFromHash() {
@@ -382,10 +384,12 @@ export default function App() {
       return;
     }
 
+    cancelJobRun();
     receiptLoadController.current?.abort();
     const controller = new AbortController();
     receiptLoadController.current = controller;
     setReceiptLoading(true);
+    setReceiptError(null);
     setJobError(null);
     try {
       const response = await fetchWithTimeout(
@@ -411,7 +415,7 @@ export default function App() {
       if (controller.signal.aborted) return;
       setActiveJob(null);
       setMarketplaceTrace(null);
-      setJobError(receiptError instanceof Error ? receiptError.message : "Receipt unavailable");
+      setReceiptError(receiptError instanceof Error ? receiptError.message : "Receipt unavailable");
     } finally {
       if (receiptLoadController.current === controller) {
         receiptLoadController.current = null;
@@ -701,6 +705,15 @@ export default function App() {
           <AlertTriangle size={16} aria-hidden="true" />
           <span>{registryError}</span>
           <button type="button" onClick={loadRegistry}><RefreshCw size={14} aria-hidden="true" /> Retry registry</button>
+        </div>
+      )}
+      {receiptError && receiptIdFromHash() && (
+        <div className="global-error" role="alert">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>Readable receipt unavailable: {receiptError}</span>
+          <button type="button" onClick={() => void loadPublicReceiptFromHash()}>
+            <RefreshCw size={14} aria-hidden="true" /> Retry receipt
+          </button>
         </div>
       )}
       <div id="main-content" tabIndex={-1}>{content}</div>
