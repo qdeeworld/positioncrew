@@ -11,6 +11,11 @@ export interface TaskConfig {
   description: string;
   currentSource: string;
   currentAction: string;
+  decisionContract: {
+    input: string;
+    output: string;
+    refusal: string;
+  };
   icon: LucideIcon;
   inputs: Array<{ label: string; value: string; emphasis?: boolean }>;
 }
@@ -25,6 +30,11 @@ export const TASKS: TaskConfig[] = [
     description: "Find the smallest allowed action that restores a stressed lending position.",
     currentSource: "Block-pinned Venus position",
     currentAction: "Load current position, check eligibility, and hire",
+    decisionContract: {
+      input: "A BSC address with a Venus Classic lending position and your action limits.",
+      output: "The smallest allowed rescue action, projected health factors, expiry, and execution guards.",
+      refusal: "No complete position, stale or unsafe evidence, or no rescue needed within your limits.",
+    },
     icon: Activity,
     inputs: [
       { label: "Protocol", value: "Venus" },
@@ -44,6 +54,11 @@ export const TASKS: TaskConfig[] = [
     description: "Move an out-of-range position only when net benefit clears hard costs.",
     currentSource: "Block-pinned PancakeSwap V3 position",
     currentAction: "Load current LP and hire",
+    decisionContract: {
+      input: "A PancakeSwap V3 position plus your cost, range, slippage, and capital limits.",
+      output: "A keep-or-rebalance decision with target ticks, expected costs, net benefit, and expiry.",
+      refusal: "The position is unavailable, the range remains valid, or benefit does not clear costs.",
+    },
     icon: RefreshCw,
     inputs: [
       { label: "Current tick", value: "150", emphasis: true },
@@ -63,6 +78,11 @@ export const TASKS: TaskConfig[] = [
     description: "Choose an allowlisted destination after costs, liquidity, lockup, and risk checks.",
     currentSource: "Block-pinned Venus markets",
     currentAction: "Load current markets and hire",
+    decisionContract: {
+      input: "Capital, holding period, risk ceiling, minimum liquidity, and allowlisted assets.",
+      output: "A ranked allocation or HOLD decision with yield, liquidity, cost, and risk evidence.",
+      refusal: "No destination satisfies every return, liquidity, lockup, and risk constraint.",
+    },
     icon: ChartNoAxesCombined,
     inputs: [
       { label: "Capital", value: "$1,000" },
@@ -82,6 +102,11 @@ export const TASKS: TaskConfig[] = [
     description: "Construct orders only inside inventory, loss, liquidity, and volatility limits.",
     currentSource: "Block-pinned PancakeSwap market",
     currentAction: "Load current market and hire",
+    decisionContract: {
+      input: "A supported market plus capital, range, order-count, inventory, and loss limits.",
+      output: "A bounded order ladder or NONE decision with maximum loss, invalidation rules, and expiry.",
+      refusal: "Market evidence is stale or the proposed grid breaches liquidity, volatility, or loss limits.",
+    },
     icon: Grid3X3,
     inputs: [
       { label: "Pair", value: "WBNB / USDT" },

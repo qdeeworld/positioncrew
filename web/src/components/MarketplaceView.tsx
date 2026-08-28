@@ -134,9 +134,9 @@ export function MarketplaceView({
       <div className="page-shell market-registry-shell">
         <div className="market-section-heading">
           <div>
-            <span className="page-kicker">Verified operator registry</span>
-            <h2>One provider. One bounded deliverable.</h2>
-            <p>Compare price, conformance, and availability before opening the job workspace.</p>
+            <span className="page-kicker">Choose a capital job</span>
+            <h2>Know what you will get before you hire.</h2>
+            <p>Select a live task, inspect its safety boundary, then open the current block-pinned workspace.</p>
           </div>
           <div className="registry-summary" aria-label="Registry status">
             <span><strong>{providers.length || "-"}</strong> providers</span>
@@ -229,6 +229,23 @@ export function MarketplaceView({
                   <span className={`availability-label ${matrixStatus(selectedResult).className}`}><i /> {matrixStatus(selectedResult).label}</span>
                 </div>
                 <p className="provider-summary">{selected.summary}</p>
+                {selectedTask ? (
+                  <section className="provider-decision-contract" aria-label={`${selectedTask.shortTitle} hiring contract`}>
+                    <h3>Before you hire</h3>
+                    <article>
+                      <span className="decision-contract-icon"><Database size={14} aria-hidden="true" /></span>
+                      <div><strong>You provide</strong><p>{selectedTask.decisionContract.input}</p></div>
+                    </article>
+                    <article>
+                      <span className="decision-contract-icon result"><CheckCircle2 size={14} aria-hidden="true" /></span>
+                      <div><strong>You receive</strong><p>{selectedTask.decisionContract.output}</p></div>
+                    </article>
+                    <article className="refusal">
+                      <span className="decision-contract-icon refusal"><ShieldCheck size={14} aria-hidden="true" /></span>
+                      <div><strong>Safe refusal</strong><p>{selectedTask.decisionContract.refusal}</p></div>
+                    </article>
+                  </section>
+                ) : null}
                 <dl className="provider-facts">
                   <div><dt><Server size={14} /> Endpoint</dt><dd><code>{selected.method} {selected.endpoint}</code></dd></div>
                   <div><dt><Radio size={14} /> Health</dt><dd><code>GET {selected.healthEndpoint}</code></dd></div>

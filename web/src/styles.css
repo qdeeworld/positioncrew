@@ -462,6 +462,15 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .provider-detail-meta strong { display: flex; flex-direction: column; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
 .provider-detail-meta small { margin-top: 3px; color: var(--muted); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 10px; font-weight: 500; }
 .provider-summary { margin: 15px 0; color: var(--ink-soft); font-size: 12px; line-height: 1.55; }
+.provider-decision-contract { display: grid; gap: 7px; margin: 0 0 16px; }
+.provider-decision-contract h3 { margin: 0 0 2px; color: var(--ink); font-size: 11px; letter-spacing: 0.02em; text-transform: uppercase; }
+.provider-decision-contract article { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 9px; padding: 10px; border: 1px solid #dde5df; border-radius: 6px; background: #fff; }
+.provider-decision-contract article.refusal { border-color: #eadcae; background: #fffaf0; }
+.decision-contract-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; color: #315d91; background: #edf4fb; }
+.decision-contract-icon.result { color: var(--green-dark); background: #e9f5ed; }
+.decision-contract-icon.refusal { color: #82651a; background: #fff0bd; }
+.provider-decision-contract strong { display: block; color: var(--ink); font-size: 10px; text-transform: uppercase; }
+.provider-decision-contract p { margin: 3px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.45; }
 .provider-facts { margin: 0; border-top: 1px solid var(--line); }
 .provider-facts > div { padding: 10px 0; border-bottom: 1px solid #e3e8e4; }
 .provider-facts dt { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; }
