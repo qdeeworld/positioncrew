@@ -1520,8 +1520,19 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   color: #176843;
 }
 
+.recent-job-state-action-ready {
+  background: rgba(36, 128, 87, 0.12);
+  color: #176843;
+}
+
+.recent-job-state-hold {
+  background: rgba(18, 105, 126, 0.12);
+  color: #12697e;
+}
+
 .recent-job-state-failed,
-.recent-job-state-unavailable {
+.recent-job-state-unavailable,
+.recent-job-state-refused {
   background: rgba(177, 66, 44, 0.11);
   color: #963b29;
 }

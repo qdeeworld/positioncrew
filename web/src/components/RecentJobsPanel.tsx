@@ -12,6 +12,7 @@ import {
   type RecentJobHistoryRead,
   type RecentJobReference,
 } from "../job-history";
+import { resultHeadline, resultMeaning } from "../presentation";
 import type { FreshMarketplaceChain, ServiceId, SessionJob } from "../types";
 
 const SERVICE_NAMES: Record<ServiceId, string> = {
@@ -90,8 +91,17 @@ function stateCopy(item: RecentJobItem): { label: string; detail: string } {
       return { label: "Running", detail: "Provider is evaluating." };
     case "FAILED":
       return { label: "Failed", detail: `Run failed: ${item.chain.job.error?.message ?? "No server detail was provided."}` };
-    case "COMPLETED":
-      return { label: "Completed", detail: "Result and receipt are ready." };
+    case "COMPLETED": {
+      const deliverable = item.chain.receipt?.response.result.deliverable;
+      if (!deliverable) {
+        return { label: "Completed", detail: "Result completed; receipt data is still unavailable." };
+      }
+      const meaning = resultMeaning(deliverable);
+      return {
+        label: meaning.tone === "action" ? "Action ready" : meaning.tone === "hold" ? "Hold" : "Refused",
+        detail: meaning.title,
+      };
+    }
     default:
       return { label: "Unavailable", detail: "Server status unavailable; this device reference was retained." };
   }
@@ -339,27 +349,29 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
             {items.map((item) => {
               const copy = stateCopy(item);
               const chain = item.chain;
-              const completed = item.phase === "READY" && chain?.job.state === "COMPLETED" && chain.receipt;
+              const receipt = item.phase === "READY" && chain?.job.state === "COMPLETED" ? chain.receipt : null;
+              const deliverable = receipt?.response.result.deliverable ?? null;
               return (
                 <tr key={item.reference.hireId}>
                   <td data-label="Saved">{formatTime(chain?.hire.createdAt ?? item.reference.rememberedAt)}</td>
                   <td data-label="Service"><strong>{SERVICE_NAMES[item.reference.service]}</strong></td>
                   <td data-label="Status">
-                    <span className={`recent-job-state recent-job-state-${copy.label.toLowerCase()}`} role="status" aria-live="polite">{copy.label}</span>
+                    <span className={`recent-job-state recent-job-state-${copy.label.toLowerCase().replaceAll(" ", "-")}`} role="status" aria-live="polite">{copy.label}</span>
                   </td>
                   <td data-label="What happens next">
                     <span>{copy.detail}</span>
+                    {deliverable && <small>{resultHeadline(deliverable)} · Durable receipt ready</small>}
                     {item.phase === "UNAVAILABLE" && item.error && <small>{item.error}</small>}
                   </td>
                   <td data-label="Actions">
                     <div className="recent-job-actions">
-                      {completed && (
+                      {receipt && (
                         <>
                           <button type="button" onClick={() => void openResult(item)} disabled={item.busy}>
                             {item.busy ? <LoaderCircle className="spin" size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
                             Open result
                           </button>
-                          <a href={chain.receipt?.publicUrl}>
+                          <a href={receipt.publicUrl}>
                             <ExternalLink size={16} aria-hidden="true" /> Open receipt
                           </a>
                         </>
