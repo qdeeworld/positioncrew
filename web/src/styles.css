@@ -468,6 +468,7 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .provider-decision-contract article.refusal { border-color: #eadcae; background: #fffaf0; }
 .decision-contract-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; color: #315d91; background: #edf4fb; }
 .decision-contract-icon.result { color: var(--green-dark); background: #e9f5ed; }
+.decision-contract-icon.no-action { color: #4c5967; background: #edf0f3; }
 .decision-contract-icon.refusal { color: #82651a; background: #fff0bd; }
 .provider-decision-contract strong { display: block; color: var(--ink); font-size: 10px; text-transform: uppercase; }
 .provider-decision-contract p { margin: 3px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.45; }

@@ -240,9 +240,13 @@ export function MarketplaceView({
                       <span className="decision-contract-icon result"><CheckCircle2 size={14} aria-hidden="true" /></span>
                       <div><strong>You receive</strong><p>{selectedTask.decisionContract.output}</p></div>
                     </article>
+                    <article>
+                      <span className="decision-contract-icon no-action"><ShieldCheck size={14} aria-hidden="true" /></span>
+                      <div><strong>Keep / no action</strong><p>{selectedTask.decisionContract.noAction}</p></div>
+                    </article>
                     <article className="refusal">
                       <span className="decision-contract-icon refusal"><ShieldCheck size={14} aria-hidden="true" /></span>
-                      <div><strong>Safe refusal</strong><p>{selectedTask.decisionContract.refusal}</p></div>
+                      <div><strong>Receipted refusal</strong><p>{selectedTask.decisionContract.refusal}</p></div>
                     </article>
                   </section>
                 ) : null}

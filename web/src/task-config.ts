@@ -14,6 +14,7 @@ export interface TaskConfig {
   decisionContract: {
     input: string;
     output: string;
+    noAction: string;
     refusal: string;
   };
   icon: LucideIcon;
@@ -31,9 +32,10 @@ export const TASKS: TaskConfig[] = [
     currentSource: "Block-pinned Venus position",
     currentAction: "Load current position, check eligibility, and hire",
     decisionContract: {
-      input: "A BSC address with a Venus Classic lending position and your action limits.",
+      input: "A BSC address. PositionCrew loads its current Venus Classic position and applies the displayed fixed safety policy.",
       output: "The smallest allowed rescue action, projected health factors, expiry, and execution guards.",
-      refusal: "No complete position, stale or unsafe evidence, or no rescue needed within your limits.",
+      noAction: "A position already above target returns NONE with the reason and the evaluated health factors.",
+      refusal: "No complete position, stale evidence, or unsafe oracle data produces a receipted refusal.",
     },
     icon: Activity,
     inputs: [
@@ -55,9 +57,10 @@ export const TASKS: TaskConfig[] = [
     currentSource: "Block-pinned PancakeSwap V3 position",
     currentAction: "Load current LP and hire",
     decisionContract: {
-      input: "A PancakeSwap V3 position plus your cost, range, slippage, and capital limits.",
+      input: "A PancakeSwap V3 position plus editable benefit, cost, horizon, and gas assumptions.",
       output: "A keep-or-rebalance decision with target ticks, expected costs, net benefit, and expiry.",
-      refusal: "The position is unavailable, the range remains valid, or benefit does not clear costs.",
+      noAction: "A valid range or insufficient net benefit returns HOLD with the reason and evaluated economics.",
+      refusal: "An unavailable position, stale evidence, or invalid request produces a receipted refusal.",
     },
     icon: RefreshCw,
     inputs: [
@@ -79,9 +82,10 @@ export const TASKS: TaskConfig[] = [
     currentSource: "Block-pinned Venus markets",
     currentAction: "Load current markets and hire",
     decisionContract: {
-      input: "Capital, holding period, risk ceiling, minimum liquidity, and allowlisted assets.",
-      output: "A ranked allocation or HOLD decision with yield, liquidity, cost, and risk evidence.",
-      refusal: "No destination satisfies every return, liquidity, lockup, and risk constraint.",
+      input: "Capital, holding period, risk ceiling, minimum liquidity, and maximum lockup for the loaded Venus markets.",
+      output: "The single best eligible allocation with yield, liquidity, cost, and risk evidence.",
+      noAction: "When no market clears every constraint, the provider returns HOLD and explains why.",
+      refusal: "Stale market evidence or an invalid request produces a receipted refusal.",
     },
     icon: ChartNoAxesCombined,
     inputs: [
@@ -103,9 +107,10 @@ export const TASKS: TaskConfig[] = [
     currentSource: "Block-pinned PancakeSwap market",
     currentAction: "Load current market and hire",
     decisionContract: {
-      input: "A supported market plus capital, range, order-count, inventory, and loss limits.",
+      input: "A current supported market plus the capital, range, order-count, inventory, and loss limits shown in the workspace.",
       output: "A bounded order ladder or NONE decision with maximum loss, invalidation rules, and expiry.",
-      refusal: "Market evidence is stale or the proposed grid breaches liquidity, volatility, or loss limits.",
+      noAction: "A grid that breaches policy returns NO_GRID with the failed constraints and no orders.",
+      refusal: "Stale or unsafe market evidence, or an invalid request, produces a receipted refusal.",
     },
     icon: Grid3X3,
     inputs: [
