@@ -60,7 +60,7 @@ export const TASKS: TaskConfig[] = [
       input: "A PancakeSwap V3 position plus editable benefit, cost, horizon, and gas assumptions.",
       output: "A keep-or-rebalance decision with target ticks, expected costs, net benefit, and expiry.",
       noAction: "A valid range or insufficient net benefit returns HOLD with the reason and evaluated economics.",
-      refusal: "An unavailable position, stale evidence, or invalid request produces a receipted refusal.",
+      refusal: "An unavailable or invalid position blocks hiring; stale or unsafe evidence on a created job returns a receipted refusal.",
     },
     icon: RefreshCw,
     inputs: [
@@ -82,10 +82,10 @@ export const TASKS: TaskConfig[] = [
     currentSource: "Block-pinned Venus markets",
     currentAction: "Load current markets and hire",
     decisionContract: {
-      input: "Capital, holding period, risk ceiling, minimum liquidity, and maximum lockup for the loaded Venus markets.",
+      input: "Capital, holding period, risk ceiling, minimum liquidity, and minimum benefit for the loaded Venus markets.",
       output: "The single best eligible allocation with yield, liquidity, cost, and risk evidence.",
       noAction: "When no market clears every constraint, the provider returns HOLD and explains why.",
-      refusal: "Stale market evidence or an invalid request produces a receipted refusal.",
+      refusal: "An invalid request blocks hiring; stale or unsafe market evidence on a created job returns a receipted refusal.",
     },
     icon: ChartNoAxesCombined,
     inputs: [
@@ -109,8 +109,8 @@ export const TASKS: TaskConfig[] = [
     decisionContract: {
       input: "A current supported market plus the capital, range, order-count, inventory, and loss limits shown in the workspace.",
       output: "A bounded order ladder or NONE decision with maximum loss, invalidation rules, and expiry.",
-      noAction: "A grid that breaches policy returns NO_GRID with the failed constraints and no orders.",
-      refusal: "Stale or unsafe market evidence, or an invalid request, produces a receipted refusal.",
+      noAction: "A grid that breaches policy returns NO_GRID, no orders, and a bounded rejection summary.",
+      refusal: "An invalid request blocks hiring; stale or unsafe market evidence on a created job returns a receipted refusal.",
     },
     icon: Grid3X3,
     inputs: [

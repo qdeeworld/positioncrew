@@ -246,7 +246,7 @@ export function MarketplaceView({
                     </article>
                     <article className="refusal">
                       <span className="decision-contract-icon refusal"><ShieldCheck size={14} aria-hidden="true" /></span>
-                      <div><strong>Receipted refusal</strong><p>{selectedTask.decisionContract.refusal}</p></div>
+                      <div><strong>Failure boundary</strong><p>{selectedTask.decisionContract.refusal}</p></div>
                     </article>
                   </section>
                 ) : null}
