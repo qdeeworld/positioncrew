@@ -30,6 +30,7 @@ export interface ProviderDeliverable {
   summary: string;
   expiresAt: string;
   invalidationConditions?: string[];
+  refusalReasons?: string[];
   limitations?: string[];
   recommendation?: LendingAction | null;
   alternatives?: LendingAction[];

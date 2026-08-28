@@ -55,6 +55,52 @@ export function resultHeadline(deliverable: ProviderDeliverable): string {
     : deliverable.decision.replaceAll("_", " ");
 }
 
+export function resultMeaning(deliverable: ProviderDeliverable): {
+  tone: "action" | "hold" | "refused";
+  title: string;
+  body: string;
+} {
+  if (deliverable.status.startsWith("REFUSED") || deliverable.status === "REJECTED") {
+    return {
+      tone: "refused",
+      title: "This job did not produce a usable decision.",
+      body: "Read the provider reason below. Correct the input or reload current evidence before creating another job.",
+    };
+  }
+
+  const actionable = deliverable.status === "ACTIONABLE";
+
+  if (actionable) {
+    const title = deliverable.service === "LENDING_RESCUE"
+      ? "Review the rescue plan before execution."
+      : deliverable.service === "LP_REBALANCE"
+        ? deliverable.decision === "EXIT"
+          ? "Review the proposed LP exit."
+          : "Review the proposed LP rebalance."
+        : deliverable.service === "YIELD_OPTIMIZATION"
+          ? "Review the selected yield allocation."
+          : "Review the bounded order ladder.";
+    return {
+      tone: "action",
+      title,
+      body: "This is an unsigned provider result. Check its values, guards, and expiry, then revalidate current protocol state before acting.",
+    };
+  }
+
+  const title = deliverable.service === "LENDING_RESCUE"
+    ? "No rescue is needed from this snapshot."
+    : deliverable.service === "LP_REBALANCE"
+      ? "Keep the current LP position unchanged."
+      : deliverable.service === "YIELD_OPTIMIZATION"
+        ? "Keep the current allocation unchanged."
+        : "Do not place this grid.";
+  return {
+    tone: "hold",
+    title,
+    body: "This is a completed provider decision, not a failed job. The evaluated snapshot did not justify an action within the request constraints.",
+  };
+}
+
 export function metricsFor(deliverable: ProviderDeliverable) {
   if (deliverable.service === "LENDING_RESCUE") {
     return [
@@ -124,6 +170,7 @@ export function actionDetails(deliverable: ProviderDeliverable): Array<{ label: 
 export function conditionsFor(deliverable: ProviderDeliverable): string[] {
   if (deliverable.service === "LENDING_RESCUE") {
     return [
+      ...(deliverable.refusalReasons ?? []),
       ...(deliverable.recommendation?.preconditions ?? []),
       ...(deliverable.invalidationConditions ?? []),
     ].slice(0, 5);

@@ -719,6 +719,13 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .decision-header h2 { margin: 9px 0 0; font-size: 26px; line-height: 1.1; }
 .decision-header p { max-width: 600px; margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .expires-label { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.result-meaning { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; margin-top: 15px; padding: 12px; border: 1px solid #cfe1d7; border-radius: 6px; color: var(--green-dark); background: #f1f8f4; }
+.result-meaning.hold { border-color: #d9dfe3; color: #4c5967; background: #f4f6f7; }
+.result-meaning.refused { border-color: #ead19c; color: #865107; background: var(--amber-soft); }
+.result-meaning > svg { margin-top: 2px; }
+.result-meaning span { display: block; font-size: 9px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.result-meaning strong { display: block; margin-top: 3px; color: var(--ink); font-size: 13px; }
+.result-meaning p { margin: 4px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
 .result-boundary { display: flex; align-items: flex-start; gap: 7px; margin-top: 13px; padding: 9px 10px; border-left: 3px solid #315d91; color: #315d91; background: #f1f7fd; font-size: 10px; line-height: 1.45; }
 .result-boundary.locked { border-left-color: var(--yellow-dark); color: #665326; background: #fff9e8; }
 .result-boundary svg { flex: 0 0 14px; }

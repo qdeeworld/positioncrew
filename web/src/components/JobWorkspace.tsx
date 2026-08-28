@@ -26,6 +26,7 @@ import {
   formatTimestamp,
   metricsFor,
   resultHeadline,
+  resultMeaning,
   serviceLabel,
   shortHash,
   statusTone,
@@ -721,6 +722,8 @@ function SummaryResult({
   founderAdvantagePublicationLoadState: PublicationLoadState;
 }) {
   const deliverable = response.result.deliverable;
+  const meaning = resultMeaning(deliverable);
+  const MeaningIcon = meaning.tone === "refused" ? AlertTriangle : meaning.tone === "action" ? CheckCircle2 : ShieldCheck;
   const metrics = metricsFor(deliverable);
   const details = actionDetails(deliverable);
   const conditions = conditionsFor(deliverable);
@@ -744,13 +747,21 @@ function SummaryResult({
       <div className="decision-header">
         <div>
           <span className={`state-label ${statusTone(deliverable.status)}`}>
-            <CheckCircle2 size={13} /> {deliverable.status.replaceAll("_", " ")}
+            <MeaningIcon size={13} /> {deliverable.status.replaceAll("_", " ")}
           </span>
           <h2>{resultHeadline(deliverable)}</h2>
           <p>{deliverable.summary}</p>
         </div>
         <span className="expires-label"><Clock3 size={13} /> Expires {formatTimestamp(deliverable.expiresAt)} UTC</span>
       </div>
+      <section className={`result-meaning ${meaning.tone}`} aria-label="What this result means">
+        <MeaningIcon size={18} aria-hidden="true" />
+        <div>
+          <span>What this means</span>
+          <strong>{meaning.title}</strong>
+          <p>{meaning.body}</p>
+        </div>
+      </section>
       <div className={`result-boundary ${response.evidenceMode === "FROZEN_BSC_TEST_FIXTURE" ? "locked" : "interactive"}`}>
         {response.evidenceMode === "FROZEN_BSC_TEST_FIXTURE" ? <ShieldCheck size={14} /> : <AlertTriangle size={14} />}
         <span>{response.evidenceMode === "FROZEN_BSC_TEST_FIXTURE"
@@ -774,13 +785,13 @@ function SummaryResult({
       </div>
       <div className="decision-detail-grid">
         <section>
-          <h3>Action specification</h3>
+          <h3>{meaning.tone === "action" ? "Action specification" : "Decision record"}</h3>
           <dl className="spec-list">
             {details.map((detail) => <div key={detail.label}><dt>{detail.label}</dt><dd>{detail.value}</dd></div>)}
           </dl>
         </section>
         <section>
-          <h3>Execution guards</h3>
+          <h3>{meaning.tone === "action" ? "Execution guards" : meaning.tone === "refused" ? "Provider reasons" : "Evidence and invalidation"}</h3>
           <ul className="guard-list">
             {conditions.map((condition) => <li key={condition}><Check size={14} /><span>{condition}</span></li>)}
           </ul>
