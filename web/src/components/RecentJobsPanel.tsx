@@ -349,8 +349,8 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
             {items.map((item) => {
               const copy = stateCopy(item);
               const chain = item.chain;
-              const completed = item.phase === "READY" && chain?.job.state === "COMPLETED" && chain.receipt;
-              const deliverable = completed ? chain.receipt.response.result.deliverable : null;
+              const receipt = item.phase === "READY" && chain?.job.state === "COMPLETED" ? chain.receipt : null;
+              const deliverable = receipt?.response.result.deliverable ?? null;
               return (
                 <tr key={item.reference.hireId}>
                   <td data-label="Saved">{formatTime(chain?.hire.createdAt ?? item.reference.rememberedAt)}</td>
@@ -365,13 +365,13 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
                   </td>
                   <td data-label="Actions">
                     <div className="recent-job-actions">
-                      {completed && (
+                      {receipt && (
                         <>
                           <button type="button" onClick={() => void openResult(item)} disabled={item.busy}>
                             {item.busy ? <LoaderCircle className="spin" size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
                             Open result
                           </button>
-                          <a href={chain.receipt?.publicUrl}>
+                          <a href={receipt.publicUrl}>
                             <ExternalLink size={16} aria-hidden="true" /> Open receipt
                           </a>
                         </>
