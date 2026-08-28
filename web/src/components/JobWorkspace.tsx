@@ -1519,7 +1519,7 @@ export function JobWorkspace({
           <h1>Get a bounded answer with evidence you can inspect.</h1>
           <p>{service === "LENDING_RESCUE"
             ? "Load one current Venus position, let PositionCrew check exact-contract eligibility, and receive a persisted rescue plan or explicit refusal."
-            : "Choose a specialist, load current evidence or a clearly labelled replay, and receive either a clear action or a provable refusal with a durable receipt."}</p>
+            : "Choose a specialist, load current BSC evidence, and receive either a clear action or a provable refusal with a durable receipt. Historical examples remain separate."}</p>
         </div>
         <label className="provider-select">
           <span>Job</span>
@@ -1535,12 +1535,12 @@ export function JobWorkspace({
             <div><span className="section-kicker">Request</span><h2 id="composer-title">{service === "LENDING_RESCUE" ? "Lending provider eligibility" : provider?.name ?? task.title}</h2></div>
             <div className="composer-mode-actions">
               {service === "LENDING_RESCUE" ? (
-                <a className="historical-evidence-link" href="#evidence">Historical replay in Evidence <ArrowRight size={12} aria-hidden="true" /></a>
+                <a className="historical-evidence-link" href="#evidence">Past benchmark receipts · not a current check <ArrowRight size={12} aria-hidden="true" /></a>
               ) : (
                 <div className="input-mode-switch" role="group" aria-label="Request evidence mode">
                   <button type="button" aria-pressed={inputMode === "interactive"} onClick={() => selectInputMode("interactive")} disabled={loading}>Current BSC</button>
                   {service !== "YIELD_OPTIMIZATION" && (
-                    <button type="button" aria-pressed={inputMode === "locked"} onClick={() => selectInputMode("locked")} disabled={loading}>Evidence replay</button>
+                    <button type="button" aria-pressed={inputMode === "locked"} onClick={() => selectInputMode("locked")} disabled={loading}>Historical example</button>
                   )}
                 </div>
               )}
