@@ -434,6 +434,24 @@ export async function isFreshMarketplaceChainForReference(
   return true;
 }
 
+export async function validatedFreshMarketplaceChain(
+  value: unknown,
+): Promise<FreshMarketplaceChain | null> {
+  if (!isRecord(value) || !isRecord(value.hire)) {
+    return null;
+  }
+
+  const reference = {
+    hireId: value.hire.hireId,
+    service: value.hire.service,
+    rememberedAt: value.hire.createdAt,
+  };
+  if (!isRecentJobReference(reference) || !(await isFreshMarketplaceChainForReference(value, reference))) {
+    return null;
+  }
+  return value as unknown as FreshMarketplaceChain;
+}
+
 export function sessionJobFromFreshChain(chain: FreshMarketplaceChain): SessionJob | null {
   if (chain.job.state !== "COMPLETED" || !chain.receipt) {
     return null;

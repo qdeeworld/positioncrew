@@ -720,13 +720,34 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
     },
   });
 
-  const receiptLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" });
-  await expect(receiptLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
-  const [receiptPage] = await Promise.all([page.waitForEvent("popup"), receiptLink.click()]);
-  await expect(receiptPage.locator("body")).toContainText(mockedHire.account);
-  await receiptPage.reload();
-  await expect(receiptPage.locator("body")).toContainText(mockedHire.hireId);
+  const receiptLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Readable receipt" });
+  await expect(receiptLink).toHaveAttribute("href", `#jobs/receipt/${mockedHire.receiptId}`);
+  await receiptLink.click();
+  await expect(page).toHaveURL(new RegExp(`#jobs/receipt/${mockedHire.receiptId}$`));
+  await expect(page.locator(".job-result").getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".job-result").getByText("No complete Venus collateral-and-debt position was available for rescue analysis.", { exact: true })).toBeVisible();
+  const jsonLink = page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" });
+  await expect(jsonLink).toHaveAttribute("href", `/api/benchmark-receipts/${mockedHire.receiptId}`);
   expect(mockedHire.receiptLoadCount).toBe(2);
+});
+
+test("a shared readable receipt can recover from a transient load failure", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page, { safeRefusal: true });
+  await page.route(`**/api/benchmark-receipts/${mockedHire.receiptId}`, async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "temporary receipt outage" }),
+    });
+  }, { times: 1 });
+
+  await page.goto(`/#jobs/receipt/${mockedHire.receiptId}`);
+  const receiptAlert = page.getByRole("alert").filter({ hasText: "Readable receipt unavailable" });
+  await expect(receiptAlert).toContainText("503 Service Unavailable");
+  await receiptAlert.getByRole("button", { name: "Retry receipt" }).click();
+  await expect(page.locator(".job-result").getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
+  await expect(receiptAlert).toHaveCount(0);
 });
 
 test("an operator can preflight a provider packet without external activation", async ({ page, request }) => {
@@ -1637,7 +1658,7 @@ test("restores a server-backed recent job on the same device without caching its
   await expect(panel.getByText("NONE · Durable receipt ready", { exact: true })).toBeVisible();
   await expect(panel.getByText("This browser stores job references only.", { exact: false })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Open result" })).toBeVisible();
-  await expect(panel.getByRole("link", { name: "Open receipt" })).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Open receipt" })).toHaveAttribute("href", `#jobs/receipt/${routes.receiptId}`);
 
   const serialized = await page.evaluate(() => window.localStorage.getItem("positioncrew.recent-jobs.v1") ?? "");
   expect(serialized).not.toMatch(/request|response|account|collateral|wallet/i);

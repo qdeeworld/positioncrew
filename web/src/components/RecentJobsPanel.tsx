@@ -371,7 +371,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
                             {item.busy ? <LoaderCircle className="spin" size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
                             Open result
                           </button>
-                          <a href={receipt.publicUrl}>
+                          <a href={`#jobs/receipt/${receipt.receiptId}`}>
                             <ExternalLink size={16} aria-hidden="true" /> Open receipt
                           </a>
                         </>
