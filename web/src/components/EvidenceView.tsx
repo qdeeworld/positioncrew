@@ -219,9 +219,10 @@ export function EvidenceView({
     <main className="page-shell evidence-page">
       <div className="page-title-row">
         <div>
-          <span className="page-kicker">Verification</span>
-          <h1>Evidence register</h1>
-          <p>Conformance receipts and Agent Advantage evidence are reported as separate claims.</p>
+          <span className="page-kicker">Past results and verification</span>
+          <h1>Historical receipts and proof</h1>
+          <p>This page contains completed past runs and technical verification. It does not check a current position.</p>
+          <a className="historical-evidence-link" href="#jobs">Check a current position now</a>
         </div>
         <div className="evidence-summary">
           <span><Radio size={16} /><strong>{telemetry ? `#${Number(telemetry.mainnet.blockNumber).toLocaleString("en-US")}` : "-"}</strong> live BSC block</span>
