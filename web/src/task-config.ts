@@ -108,7 +108,7 @@ export const TASKS: TaskConfig[] = [
     currentAction: "Load current market and hire",
     decisionContract: {
       input: "A current supported market plus the capital, range, order-count, inventory, and loss limits shown in the workspace.",
-      output: "A bounded order ladder or NONE decision with maximum loss, invalidation rules, and expiry.",
+      output: "A bounded order ladder or NO_GRID decision with maximum loss, invalidation rules, and expiry.",
       noAction: "A grid that breaches policy returns NO_GRID, no orders, and a bounded rejection summary.",
       refusal: "An invalid request blocks hiring; stale or unsafe market evidence on a created job returns a receipted refusal.",
     },
