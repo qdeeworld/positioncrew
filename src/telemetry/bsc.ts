@@ -124,11 +124,45 @@ interface RpcResult {
   error?: { code: number; message: string; data?: unknown };
 }
 
-class RpcTransportError extends Error {
+export class RpcTransportError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RpcTransportError";
   }
+}
+
+export function firstSuccessfulRpcTransport<T>(
+  candidates: readonly string[],
+  operation: (candidate: string) => Promise<T>,
+): Promise<T> {
+  if (candidates.length === 0) {
+    return Promise.reject(new RpcTransportError("No BSC RPC providers are configured"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    let pending = candidates.length;
+    let settled = false;
+    const failures: string[] = [];
+    for (const candidate of candidates) {
+      void operation(candidate).then((value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      }).catch((error: unknown) => {
+        if (settled) return;
+        if (!(error instanceof RpcTransportError)) {
+          settled = true;
+          reject(error);
+          return;
+        }
+        failures.push(`${new URL(candidate).host}: ${error.message}`);
+        pending -= 1;
+        if (pending === 0) {
+          settled = true;
+          reject(new RpcTransportError(`BSC RPC providers unavailable (${failures.join("; ")})`));
+        }
+      });
+    }
+  });
 }
 
 interface RpcBlock {
@@ -220,13 +254,14 @@ async function rpcBatch(rpcUrl: string, calls: readonly RpcCall[]): Promise<unkn
   const failures: string[] = [];
   const candidates = rpcFallbacks(rpcUrl);
   for (let attempt = 1; attempt <= RPC_TRANSPORT_ATTEMPTS; attempt += 1) {
-    for (const candidate of candidates) {
-      try {
-        return await rpcBatchOnce(candidate, calls);
-      } catch (error) {
-        if (!(error instanceof RpcTransportError)) throw error;
-        failures.push(`attempt ${attempt} ${new URL(candidate).host}: ${error.message}`);
-      }
+    try {
+      return await firstSuccessfulRpcTransport(
+        candidates,
+        async (candidate) => rpcBatchOnce(candidate, calls),
+      );
+    } catch (error) {
+      if (!(error instanceof RpcTransportError)) throw error;
+      failures.push(`attempt ${attempt}: ${error.message}`);
     }
     if (attempt < RPC_TRANSPORT_ATTEMPTS) await wait(RPC_RETRY_DELAY_MS);
   }
@@ -263,13 +298,14 @@ async function rpcRequest(rpcUrl: string, call: RpcCall): Promise<unknown> {
   const failures: string[] = [];
   const candidates = rpcFallbacks(rpcUrl);
   for (let attempt = 1; attempt <= RPC_TRANSPORT_ATTEMPTS; attempt += 1) {
-    for (const candidate of candidates) {
-      try {
-        return await rpcRequestOnce(candidate, call);
-      } catch (error) {
-        if (!(error instanceof RpcTransportError)) throw error;
-        failures.push(`attempt ${attempt} ${new URL(candidate).host}: ${error.message}`);
-      }
+    try {
+      return await firstSuccessfulRpcTransport(
+        candidates,
+        async (candidate) => rpcRequestOnce(candidate, call),
+      );
+    } catch (error) {
+      if (!(error instanceof RpcTransportError)) throw error;
+      failures.push(`attempt ${attempt}: ${error.message}`);
     }
     if (attempt < RPC_TRANSPORT_ATTEMPTS) await wait(RPC_RETRY_DELAY_MS);
   }
