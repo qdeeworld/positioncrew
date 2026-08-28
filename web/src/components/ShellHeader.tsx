@@ -5,7 +5,7 @@ export type AppView = "marketplace" | "jobs" | "evidence";
 const views: Array<{ id: AppView; label: string; icon: typeof Store }> = [
   { id: "marketplace", label: "Marketplace", icon: Store },
   { id: "jobs", label: "Jobs", icon: Network },
-  { id: "evidence", label: "Past results", icon: FileCheck2 },
+  { id: "evidence", label: "Proof & history", icon: FileCheck2 },
 ];
 
 export function ShellHeader({

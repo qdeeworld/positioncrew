@@ -222,7 +222,7 @@ export function EvidenceView({
           <span className="page-kicker">Past results and verification</span>
           <h1>Historical receipts and proof</h1>
           <p>This page contains completed past runs and technical verification. It does not check a current position.</p>
-          <a className="historical-evidence-link" href="#jobs">Check a current position now</a>
+          <a className="historical-evidence-link" href="#jobs">Start a current check</a>
         </div>
         <div className="evidence-summary">
           <span><Radio size={16} /><strong>{telemetry ? `#${Number(telemetry.mainnet.blockNumber).toLocaleString("en-US")}` : "-"}</strong> live BSC block</span>
