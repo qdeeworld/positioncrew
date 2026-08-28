@@ -445,6 +445,7 @@ export default function App() {
     mode: JobRequestMode,
     observation?: CurrentMarketplaceObservation,
   ) {
+    if (receiptIdFromHash()) navigate("jobs");
     jobRunController.current?.abort();
     const controller = new AbortController();
     const runId = ++jobRunId.current;
@@ -649,6 +650,7 @@ export default function App() {
           onSelectJob={selectSessionJob}
           onSelectService={(service) => {
             if (loading || receiptLoading) return;
+            if (receiptIdFromHash()) navigate("jobs");
             setSelectedService(service);
             setActiveJob(null);
             setMarketplaceTrace(null);
