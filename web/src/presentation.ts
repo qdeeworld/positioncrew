@@ -448,7 +448,7 @@ function gridDecisionPlan(deliverable: ProviderDeliverable): CapitalDecisionPlan
         { label: "Worst-case loss", value: money(deliverable.worstCaseLossUsd) },
       ],
       basis: actionable
-        ? `${money(deliverable.maximumInventoryUsd)} maximum inventory · ${money(deliverable.estimatedFeesUsd)} fees · ${money(deliverable.estimatedSlippageUsd)} slippage`
+        ? `${money(deliverable.maximumInventoryUsd)} maximum inventory across ${deliverable.orders?.length ?? 0} bounded orders`
         : deliverable.summary,
       trigger: firstUseful(deliverable.cancellationConditions ?? [], "Reload when price, volatility, liquidity or available capital changes."),
       nextStepLabel: actionable ? "Before placing orders" : "When to check again",
