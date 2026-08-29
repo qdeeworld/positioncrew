@@ -644,6 +644,9 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await page.getByRole("button", { name: "Check eligibility and hire" }).click();
 
   await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Action required" })).toBeVisible();
+  await expect(page.getByText("Crossed now", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/Repay 152 USDT to target a projected/)).toBeVisible();
   await expect(page.locator(".result-boundary")).toContainText(
     "Block-pinned Venus input. The provider output is unsigned and must be revalidated against current protocol state before execution.",
   );
@@ -709,6 +712,7 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   const durableResult = page.locator(".job-result");
   await expect(durableResult.getByRole("heading", { name: "NONE", exact: true })).toBeVisible();
   await expect(durableResult.getByText("No complete Venus collateral-and-debt position was available for rescue analysis.", { exact: true })).toBeVisible();
+  await expect(durableResult.getByText("Rescue threshold plan")).toHaveCount(0);
   expect(mockedHire.createBodies).toHaveLength(1);
   expect(mockedHire.createBodies[0]).toMatchObject({
     schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
