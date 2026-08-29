@@ -273,7 +273,7 @@ export function lendingThresholdPlan(
       state: "DECISION_UNAVAILABLE",
       tone: "refused",
       title: "Decision unavailable",
-      body: deliverable.summary,
+      body: "Read the provider reason below. Correct the input or reload current evidence before creating another job.",
       details: null,
     };
   }

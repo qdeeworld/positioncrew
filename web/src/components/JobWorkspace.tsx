@@ -729,6 +729,8 @@ function SummaryResult({
   const details = actionDetails(deliverable);
   const conditions = conditionsFor(deliverable);
   const thresholdPlan = lendingThresholdPlan(deliverable, response.result.request);
+  const showCurrentLendingThresholds = deliverable.service === "LENDING_RESCUE"
+    && response.evidenceMode !== "FROZEN_BSC_TEST_FIXTURE";
   const sources = Array.isArray(response.result.request.sources)
     ? response.result.request.sources
     : [];
@@ -760,11 +762,11 @@ function SummaryResult({
         <MeaningIcon size={18} aria-hidden="true" />
         <div>
           <span>What this means</span>
-          <strong>{deliverable.service === "LENDING_RESCUE" ? thresholdPlan.title : meaning.title}</strong>
-          <p>{deliverable.service === "LENDING_RESCUE" ? thresholdPlan.body : meaning.body}</p>
+          <strong>{showCurrentLendingThresholds ? thresholdPlan.title : meaning.title}</strong>
+          <p>{showCurrentLendingThresholds ? thresholdPlan.body : meaning.body}</p>
         </div>
       </section>
-      {deliverable.service === "LENDING_RESCUE" && thresholdPlan.details ? (
+      {showCurrentLendingThresholds && thresholdPlan.details ? (
         <section className={`lending-threshold-plan tone-${thresholdPlan.tone}`} aria-labelledby="lending-threshold-title">
           <div className="threshold-plan-heading">
             <div>
@@ -775,7 +777,7 @@ function SummaryResult({
           </div>
           <p>{thresholdPlan.body}</p>
           <div className="threshold-metrics">
-            <div><span>Buffer above target now</span><strong>{thresholdPlan.details.currentBuffer}</strong></div>
+            <div><span>Difference from target now</span><strong>{thresholdPlan.details.currentBuffer}</strong></div>
             <div><span>{thresholdPlan.details.stressScenario} buffer</span><strong>{thresholdPlan.details.stressedBuffer}</strong></div>
             <div><span>Uniform collateral decline to target</span><strong>{thresholdPlan.details.targetTrigger}</strong></div>
             <div><span>Uniform collateral decline to liquidation</span><strong>{thresholdPlan.details.liquidationTrigger}</strong></div>
