@@ -323,3 +323,164 @@ export function lendingThresholdPlan(
     },
   };
 }
+
+export interface CapitalDecisionPlan {
+  tone: "hold" | "action" | "refused";
+  state: string;
+  title: string;
+  body: string;
+  details: null | {
+    metrics: Array<{ label: string; value: string }>;
+    basis: string;
+    trigger: string;
+    nextStepLabel: string;
+    nextStep: string;
+    caveat: string;
+  };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function money(value: unknown): string {
+  const number = finiteNumber(value);
+  return number === null ? "Not available" : usd(number);
+}
+
+function firstUseful(values: Array<string | undefined>, fallback: string): string {
+  return values.find((value) => value && value.trim().length > 0) ?? fallback;
+}
+
+function lpDecisionPlan(deliverable: ProviderDeliverable, request: LendingRequest): CapitalDecisionPlan {
+  const position = record(request.position);
+  const market = record(request.marketState);
+  const currentTick = finiteNumber(market.currentTick);
+  const lowerTick = finiteNumber(position.lowerTick);
+  const upperTick = finiteNumber(position.upperTick);
+  const inRange = currentTick !== null && lowerTick !== null && upperTick !== null
+    ? currentTick >= lowerTick && currentTick < upperTick
+    : null;
+  const nearestEdge = inRange && currentTick !== null && lowerTick !== null && upperTick !== null
+    ? Math.min(currentTick - lowerTick, upperTick - currentTick)
+    : null;
+  const actionable = deliverable.status === "ACTIONABLE";
+  const proposed = deliverable.proposedRange;
+  return {
+    tone: actionable ? "action" : "hold",
+    state: actionable ? "REBALANCE READY" : "KEEP RANGE",
+    title: actionable ? `${deliverable.decision.toLowerCase()} the LP range` : "Keep the current LP range",
+    body: actionable
+      ? "The proposed range clears the configured benefit, cost and inventory limits. Review the steps before acting."
+      : "The current range remains acceptable, or a proposed change did not clear its economic and inventory limits.",
+    details: {
+      metrics: [
+        { label: "Current tick", value: currentTick === null ? "Not available" : currentTick.toLocaleString("en-US") },
+        { label: "Current range", value: lowerTick === null || upperTick === null ? "Not available" : `${lowerTick.toLocaleString("en-US")} to ${upperTick.toLocaleString("en-US")}` },
+        { label: actionable ? "Proposed range" : "Nearest range edge", value: actionable && proposed ? `${proposed.lowerTick.toLocaleString("en-US")} to ${proposed.upperTick.toLocaleString("en-US")}` : inRange === false ? "Outside range" : nearestEdge === null ? "Not available" : `${nearestEdge.toLocaleString("en-US")} ticks` },
+        { label: actionable ? "Projected net benefit" : "Projected change benefit", value: money(deliverable.expectedNetBenefitUsd) },
+      ],
+      basis: actionable
+        ? `${money(deliverable.estimatedRebalanceCostUsd)} estimated cost · ${deliverable.breakEvenHours ?? "unknown"} hours to break even`
+        : deliverable.summary,
+      trigger: firstUseful(deliverable.invalidationConditions ?? [], "Reload when range position, volatility, fees or execution costs change."),
+      nextStepLabel: actionable ? "Proposed steps" : "When to check again",
+      nextStep: actionable
+        ? (deliverable.actionSteps ?? []).join(" ")
+        : "Reload the position when it approaches a range edge or when volatility, fees or execution costs change.",
+      caveat: firstUseful(deliverable.limitations ?? [], "Fee and position estimates must be refreshed before execution."),
+    },
+  };
+}
+
+function yieldDecisionPlan(deliverable: ProviderDeliverable): CapitalDecisionPlan {
+  const actionable = deliverable.status === "ACTIONABLE";
+  const currentApy = deliverable.currentWeightedApyBps ?? 0;
+  const selectedApy = deliverable.grossApyBps;
+  const uplift = selectedApy == null ? null : (selectedApy - currentApy) / 100;
+  return {
+    tone: actionable ? "action" : "hold",
+    state: actionable ? "MOVE READY" : "KEEP ALLOCATION",
+    title: actionable ? (deliverable.decision === "SUPPLY" ? "Supply the bounded allocation" : "Move the bounded allocation") : "Keep the current allocation",
+    body: actionable
+      ? "The selected market clears the configured liquidity, risk, cost and net-benefit limits. Returns remain variable."
+      : "No available market currently improves the allocation enough after liquidity, risk and migration costs.",
+    details: {
+      metrics: [
+        { label: "Current weighted APY", value: `${(currentApy / 100).toFixed(2)}%` },
+        { label: "Selected APY", value: selectedApy == null ? "No eligible move" : `${(selectedApy / 100).toFixed(2)}%` },
+        { label: "APY improvement", value: uplift === null ? "Not available" : `+${uplift.toFixed(2)} points` },
+        { label: "Projected net benefit", value: money(deliverable.netBenefitUsd) },
+      ],
+      basis: actionable
+        ? `${money(deliverable.allocationUsd)} allocation · ${money(deliverable.migrationCostUsd)} migration cost · ${deliverable.breakEvenDays ?? "unknown"} days to break even`
+        : deliverable.summary,
+      trigger: firstUseful(deliverable.invalidationConditions ?? [], "Reload when APY, liquidity, risk, lockup or route costs change."),
+      nextStepLabel: actionable ? "Proposed steps" : "When to check again",
+      nextStep: actionable
+        ? (deliverable.actionSteps ?? []).join(" ")
+        : "Reload rates when APY, liquidity, lockup, protocol risk or route costs change.",
+      caveat: firstUseful(deliverable.risks ?? [], "Quoted APY is variable and is not a guaranteed return."),
+    },
+  };
+}
+
+function gridDecisionPlan(deliverable: ProviderDeliverable): CapitalDecisionPlan {
+  const actionable = deliverable.status === "ACTIONABLE";
+  const prices = (deliverable.orders ?? []).map((order) => finiteNumber(order.price)).filter((value): value is number => value !== null);
+  const buys = (deliverable.orders ?? []).filter((order) => order.side === "BUY").length;
+  const sells = (deliverable.orders ?? []).filter((order) => order.side === "SELL").length;
+  const range = prices.length > 0
+    ? `${Math.min(...prices).toLocaleString("en-US", { maximumFractionDigits: 8 })} to ${Math.max(...prices).toLocaleString("en-US", { maximumFractionDigits: 8 })}`
+    : "No grid emitted";
+  return {
+    tone: actionable ? "action" : "hold",
+    state: actionable ? "GRID READY" : "NO GRID",
+    title: actionable ? "Review the bounded grid" : "Do not place this grid",
+    body: actionable
+      ? "The order ladder clears the configured range, liquidity, volatility, profit, loss and inventory limits. Fills are not guaranteed."
+      : "The requested grid failed at least one market, profit, inventory or maximum-loss limit, so no orders were emitted.",
+    details: {
+      metrics: [
+        { label: "Order range", value: range },
+        { label: "Order sides", value: actionable ? `${buys} buy · ${sells} sell` : "No orders" },
+        { label: "Projected net profit", value: money(deliverable.expectedNetProfitUsd) },
+        { label: "Worst-case loss", value: money(deliverable.worstCaseLossUsd) },
+      ],
+      basis: actionable
+        ? `${money(deliverable.maximumInventoryUsd)} maximum inventory across ${deliverable.orders?.length ?? 0} bounded orders`
+        : deliverable.summary,
+      trigger: firstUseful(deliverable.cancellationConditions ?? [], "Reload when price, volatility, liquidity or available capital changes."),
+      nextStepLabel: actionable ? "Before placing orders" : "When to check again",
+      nextStep: actionable
+        ? "Re-quote every order, confirm the frozen capital and loss limits, and cancel the whole grid if any listed condition is crossed."
+        : "Adjust the requested range or reload after liquidity, volatility, expected profit, inventory or loss conditions change.",
+      caveat: firstUseful(deliverable.limitations ?? [], "Projected fills and profit are not guaranteed."),
+    },
+  };
+}
+
+export function capitalDecisionPlan(
+  deliverable: ProviderDeliverable,
+  request: LendingRequest,
+): CapitalDecisionPlan {
+  if (deliverable.status.startsWith("REFUSED") || deliverable.status === "REJECTED") {
+    return {
+      tone: "refused",
+      state: "DECISION UNAVAILABLE",
+      title: "Decision unavailable",
+      body: "Read the provider reason below. Refresh the evidence or constraints before creating another job.",
+      details: null,
+    };
+  }
+  if (deliverable.service === "LP_REBALANCE") return lpDecisionPlan(deliverable, request);
+  if (deliverable.service === "YIELD_OPTIMIZATION") return yieldDecisionPlan(deliverable);
+  if (deliverable.service === "BOUNDED_GRID") return gridDecisionPlan(deliverable);
+  return {
+    tone: "refused",
+    state: "DECISION UNAVAILABLE",
+    title: "Decision unavailable",
+    body: "This category uses a different decision explanation.",
+    details: null,
+  };
+}

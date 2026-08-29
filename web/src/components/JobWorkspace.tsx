@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   actionDetails,
+  capitalDecisionPlan,
   conditionsFor,
   formatTimestamp,
   metricsFor,
@@ -729,8 +730,12 @@ function SummaryResult({
   const details = actionDetails(deliverable);
   const conditions = conditionsFor(deliverable);
   const thresholdPlan = lendingThresholdPlan(deliverable, response.result.request);
+  const categoryPlan = capitalDecisionPlan(deliverable, response.result.request);
   const showCurrentLendingThresholds = deliverable.service === "LENDING_RESCUE"
     && response.evidenceMode !== "FROZEN_BSC_TEST_FIXTURE";
+  const showCurrentCategoryPlan = deliverable.service !== "LENDING_RESCUE"
+    && response.evidenceMode === "CURRENT_BLOCK_PINNED"
+    && categoryPlan.details !== null;
   const sources = Array.isArray(response.result.request.sources)
     ? response.result.request.sources
     : [];
@@ -762,8 +767,8 @@ function SummaryResult({
         <MeaningIcon size={18} aria-hidden="true" />
         <div>
           <span>What this means</span>
-          <strong>{showCurrentLendingThresholds ? thresholdPlan.title : meaning.title}</strong>
-          <p>{showCurrentLendingThresholds ? thresholdPlan.body : meaning.body}</p>
+          <strong>{showCurrentLendingThresholds ? thresholdPlan.title : showCurrentCategoryPlan ? categoryPlan.title : meaning.title}</strong>
+          <p>{showCurrentLendingThresholds ? thresholdPlan.body : showCurrentCategoryPlan ? categoryPlan.body : meaning.body}</p>
         </div>
       </section>
       {showCurrentLendingThresholds && thresholdPlan.details ? (
@@ -791,6 +796,32 @@ function SummaryResult({
             <strong>{thresholdPlan.details.nextStep}</strong>
           </div>
           <p className="threshold-caveat">{thresholdPlan.details.caveat}</p>
+        </section>
+      ) : null}
+      {showCurrentCategoryPlan && categoryPlan.details ? (
+        <section className={`capital-decision-plan tone-${categoryPlan.tone}`} aria-labelledby="capital-decision-title">
+          <div className="capital-plan-heading">
+            <div>
+              <span className="eyebrow">Decision plan</span>
+              <h3 id="capital-decision-title">{categoryPlan.title}</h3>
+            </div>
+            <span className="capital-plan-state">{categoryPlan.state}</span>
+          </div>
+          <p>{categoryPlan.body}</p>
+          <div className="capital-plan-metrics">
+            {categoryPlan.details.metrics.map((metric) => (
+              <div key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong></div>
+            ))}
+          </div>
+          <div className="capital-plan-context">
+            <div><span>Why this decision</span><strong>{categoryPlan.details.basis}</strong></div>
+            <div><span>Decision changes when</span><strong>{categoryPlan.details.trigger}</strong></div>
+          </div>
+          <div className="capital-plan-next-step">
+            <span>{categoryPlan.details.nextStepLabel}</span>
+            <strong>{categoryPlan.details.nextStep}</strong>
+          </div>
+          <p className="capital-plan-caveat">{categoryPlan.details.caveat}</p>
         </section>
       ) : null}
       <div className={`result-boundary ${response.evidenceMode === "FROZEN_BSC_TEST_FIXTURE" ? "locked" : "interactive"}`}>
