@@ -1,4 +1,4 @@
-import type { ProviderDeliverable, ServiceId } from "./types";
+import type { FixtureJobResponse, ProviderDeliverable, ServiceId } from "./types";
 
 export function shortHash(value: string | undefined, lead = 12): string {
   if (!value) return "Pending";
@@ -179,4 +179,147 @@ export function conditionsFor(deliverable: ProviderDeliverable): string[] {
     return deliverable.cancellationConditions?.slice(0, 5) ?? [];
   }
   return deliverable.invalidationConditions?.slice(0, 5) ?? [];
+}
+
+export interface LendingThresholdPlan {
+  state: "SAFE_NOW" | "WATCH" | "ACTION_REQUIRED" | "DECISION_UNAVAILABLE";
+  tone: "safe" | "watch" | "action" | "refused";
+  title: string;
+  body: string;
+  details: null | {
+    currentBuffer: string;
+    stressedBuffer: string;
+    targetTrigger: string;
+    liquidationTrigger: string;
+    stressScenario: string;
+    collateralDriver: string;
+    debtDriver: string;
+    nextStep: string;
+    caveat: string;
+  };
+}
+
+type LendingRequest = FixtureJobResponse["result"]["request"];
+
+function finiteNumber(value: unknown): number | null {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  return Number.isFinite(number) ? number : null;
+}
+
+function healthBuffer(value: number | null, target: number | null): string {
+  if (value === null || target === null) return "Not available";
+  const buffer = value - target;
+  return `${buffer >= 0 ? "+" : ""}${buffer.toFixed(4)} HF`;
+}
+
+function uniformDropTrigger(healthFactor: number | null, threshold: number): string {
+  if (healthFactor === null) return "Not available";
+  if (healthFactor <= threshold) return "Crossed now";
+  return `~${((1 - threshold / healthFactor) * 100).toFixed(1)}%`;
+}
+
+function usd(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function largestPositionDriver(request: LendingRequest, side: "collateral" | "debt"): string {
+  const position = request.position as Record<string, unknown> | undefined;
+  const entries = Array.isArray(position?.[side]) ? position[side] as Array<Record<string, unknown>> : [];
+  const ranked = entries.flatMap((entry) => {
+    if (side === "collateral" && (entry.enabled === false || entry.collateralEnabled === false)) return [];
+    const amount = finiteNumber(entry.amount);
+    const price = finiteNumber(entry.priceUsd);
+    if (amount === null || price === null) return [];
+    const threshold = side === "collateral"
+      ? (finiteNumber(entry.liquidationThresholdBps) ?? 10_000) / 10_000
+      : 1;
+    return [{
+      symbol: String(entry.symbol ?? entry.asset ?? "Unknown asset"),
+      value: amount * price * threshold,
+    }];
+  }).sort((a, b) => b.value - a.value)[0];
+  if (!ranked) return `No ${side} driver available`;
+  return `${ranked.symbol} · ${usd(ranked.value)}${side === "collateral" ? " liquidation-weighted" : " owed"}`;
+}
+
+function recommendationText(deliverable: ProviderDeliverable): string {
+  const action = deliverable.recommendation;
+  if (!action) return "No executable recommendation was produced.";
+  const actionLabel = action.kind === "REPAY_DEBT" ? "Repay" : "Add";
+  const projected = finiteNumber(action.projectedHealthFactor);
+  return `${actionLabel} ${action.amount} ${action.asset.symbol}${projected === null ? "" : ` to target a projected ${projected.toFixed(4)} health factor`}. Revalidate the snapshot before any wallet action.`;
+}
+
+export function lendingThresholdPlan(
+  deliverable: ProviderDeliverable,
+  request: LendingRequest,
+): LendingThresholdPlan {
+  if (deliverable.service !== "LENDING_RESCUE") {
+    return {
+      state: "DECISION_UNAVAILABLE",
+      tone: "refused",
+      title: "Decision unavailable",
+      body: "Threshold guidance is available only for Lending Rescue results.",
+      details: null,
+    };
+  }
+
+  if (deliverable.status.startsWith("REFUSED") || deliverable.status === "REJECTED") {
+    return {
+      state: "DECISION_UNAVAILABLE",
+      tone: "refused",
+      title: "Decision unavailable",
+      body: "Read the provider reason below. Correct the input or reload current evidence before creating another job.",
+      details: null,
+    };
+  }
+
+  const current = finiteNumber(deliverable.position?.currentHealthFactor);
+  const stressed = finiteNumber(deliverable.position?.stressedHealthFactor);
+  const target = finiteNumber(deliverable.position?.targetHealthFactor);
+  const stressDrop = finiteNumber(request.stressPriceDropBps);
+  const actionable = deliverable.status === "ACTIONABLE" && deliverable.decision !== "NONE";
+  const watch = !actionable && target !== null && stressed !== null && stressed < target;
+  const state = actionable ? "ACTION_REQUIRED" : watch ? "WATCH" : "SAFE_NOW";
+  const title = actionable ? "Action required" : watch ? "Watch closely" : current === null ? "No debt to rescue" : "Safe now";
+  const body = actionable
+    ? "The persisted snapshot is below the requested safety target. PositionCrew produced a bounded recommendation from the allowed actions."
+    : watch
+      ? "The position meets the target now, but the configured stress scenario falls below it. No action is recommended from the current snapshot."
+      : current === null
+        ? "No complete collateral-and-debt position was available, so there is no rescue threshold to calculate."
+        : "The current and configured stressed health factors remain above the requested target. No rescue is needed from this snapshot.";
+
+  if (current === null || target === null) {
+    return { state, tone: actionable ? "action" : watch ? "watch" : "safe", title, body, details: null };
+  }
+
+  const allowedActions = Array.isArray(request.allowedActions)
+    ? request.allowedActions.map(String).map((action) => action === "REPAY_DEBT" ? "repay debt" : action === "ADD_COLLATERAL" ? "add collateral" : action.toLowerCase()).join(" or ")
+    : "an allowed rescue action";
+  const maxAction = finiteNumber(request.maxActionUsd);
+
+  return {
+    state,
+    tone: actionable ? "action" : watch ? "watch" : "safe",
+    title,
+    body,
+    details: {
+      currentBuffer: healthBuffer(current, target),
+      stressedBuffer: healthBuffer(stressed, target),
+      targetTrigger: uniformDropTrigger(current, target),
+      liquidationTrigger: uniformDropTrigger(current, 1),
+      stressScenario: stressDrop === null ? "Configured stress" : `${(stressDrop / 100).toFixed(1)}% collateral stress`,
+      collateralDriver: largestPositionDriver(request, "collateral"),
+      debtDriver: largestPositionDriver(request, "debt"),
+      nextStep: actionable
+        ? recommendationText(deliverable)
+        : `If the target is crossed, reload the current position and rerun eligibility. The provider will evaluate ${allowedActions}${maxAction === null ? "" : ` within the ${usd(maxAction)} action cap`}; this Hold does not invent an amount in advance.`,
+      caveat: "Scenario estimate only: all enabled collateral prices are assumed to fall together while debt and protocol thresholds remain unchanged. It is not a guaranteed market price or liquidation forecast.",
+    },
+  };
 }

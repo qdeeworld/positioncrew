@@ -25,6 +25,7 @@ import {
   conditionsFor,
   formatTimestamp,
   metricsFor,
+  lendingThresholdPlan,
   resultHeadline,
   resultMeaning,
   serviceLabel,
@@ -727,6 +728,9 @@ function SummaryResult({
   const metrics = metricsFor(deliverable);
   const details = actionDetails(deliverable);
   const conditions = conditionsFor(deliverable);
+  const thresholdPlan = lendingThresholdPlan(deliverable, response.result.request);
+  const showCurrentLendingThresholds = deliverable.service === "LENDING_RESCUE"
+    && response.evidenceMode !== "FROZEN_BSC_TEST_FIXTURE";
   const sources = Array.isArray(response.result.request.sources)
     ? response.result.request.sources
     : [];
@@ -758,10 +762,37 @@ function SummaryResult({
         <MeaningIcon size={18} aria-hidden="true" />
         <div>
           <span>What this means</span>
-          <strong>{meaning.title}</strong>
-          <p>{meaning.body}</p>
+          <strong>{showCurrentLendingThresholds ? thresholdPlan.title : meaning.title}</strong>
+          <p>{showCurrentLendingThresholds ? thresholdPlan.body : meaning.body}</p>
         </div>
       </section>
+      {showCurrentLendingThresholds && thresholdPlan.details ? (
+        <section className={`lending-threshold-plan tone-${thresholdPlan.tone}`} aria-labelledby="lending-threshold-title">
+          <div className="threshold-plan-heading">
+            <div>
+              <span className="eyebrow">Rescue threshold plan</span>
+              <h3 id="lending-threshold-title">{thresholdPlan.title}</h3>
+            </div>
+            <span className="threshold-state">{thresholdPlan.state.replaceAll("_", " ")}</span>
+          </div>
+          <p>{thresholdPlan.body}</p>
+          <div className="threshold-metrics">
+            <div><span>Difference from target now</span><strong>{thresholdPlan.details.currentBuffer}</strong></div>
+            <div><span>{thresholdPlan.details.stressScenario} buffer</span><strong>{thresholdPlan.details.stressedBuffer}</strong></div>
+            <div><span>Uniform collateral decline to target</span><strong>{thresholdPlan.details.targetTrigger}</strong></div>
+            <div><span>Uniform collateral decline to liquidation</span><strong>{thresholdPlan.details.liquidationTrigger}</strong></div>
+          </div>
+          <div className="threshold-drivers">
+            <div><span>Primary collateral driver</span><strong>{thresholdPlan.details.collateralDriver}</strong></div>
+            <div><span>Primary debt driver</span><strong>{thresholdPlan.details.debtDriver}</strong></div>
+          </div>
+          <div className="threshold-next-step">
+            <span>{thresholdPlan.state === "ACTION_REQUIRED" ? "Bounded recommendation" : "If conditions change"}</span>
+            <strong>{thresholdPlan.details.nextStep}</strong>
+          </div>
+          <p className="threshold-caveat">{thresholdPlan.details.caveat}</p>
+        </section>
+      ) : null}
       <div className={`result-boundary ${response.evidenceMode === "FROZEN_BSC_TEST_FIXTURE" ? "locked" : "interactive"}`}>
         {response.evidenceMode === "FROZEN_BSC_TEST_FIXTURE" ? <ShieldCheck size={14} /> : <AlertTriangle size={14} />}
         <span>{response.evidenceMode === "FROZEN_BSC_TEST_FIXTURE"

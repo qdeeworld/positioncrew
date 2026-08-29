@@ -27,6 +27,25 @@
   --blue-soft: #eaf1fb;
 }
 
+/* Lending Rescue turns a provider decision into user-readable monitoring thresholds. */
+.lending-threshold-plan { display: grid; gap: 18px; padding: 22px; border: 1px solid var(--line); border-left: 4px solid #27825b; background: linear-gradient(135deg, rgba(39, 130, 91, .08), rgba(255, 255, 255, .72)); }
+.lending-threshold-plan.tone-watch { border-left-color: #b56b11; background: linear-gradient(135deg, rgba(181, 107, 17, .1), rgba(255, 255, 255, .72)); }
+.lending-threshold-plan.tone-action { border-left-color: #bd382f; background: linear-gradient(135deg, rgba(189, 56, 47, .1), rgba(255, 255, 255, .72)); }
+.threshold-plan-heading, .threshold-metrics, .threshold-drivers { display: grid; gap: 12px; }
+.threshold-plan-heading { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.threshold-plan-heading h3, .lending-threshold-plan p { margin: 0; }
+.threshold-state { padding: 7px 10px; border: 1px solid currentColor; font-size: .72rem; font-weight: 800; letter-spacing: .08em; }
+.threshold-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.threshold-drivers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.threshold-metrics > div, .threshold-drivers > div, .threshold-next-step { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--line); background: rgba(255, 255, 255, .64); }
+.threshold-metrics span, .threshold-drivers span, .threshold-next-step span, .threshold-caveat { color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.threshold-next-step strong { line-height: 1.55; }
+.threshold-caveat { padding-top: 12px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) {
+  .threshold-plan-heading, .threshold-metrics, .threshold-drivers { grid-template-columns: 1fr; }
+  .threshold-state { justify-self: start; }
+}
+
 * { box-sizing: border-box; }
 html { min-width: 320px; min-height: 100%; }
 body { min-width: 320px; min-height: 100vh; margin: 0; background: #eff2ee; }
