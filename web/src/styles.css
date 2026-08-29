@@ -27,6 +27,24 @@
   --blue-soft: #eaf1fb;
 }
 
+/* Current LP, Yield and Grid decisions use the same user-first explanation hierarchy. */
+.capital-decision-plan { display: grid; gap: 18px; padding: 22px; border: 1px solid var(--line); border-left: 4px solid #27825b; background: linear-gradient(135deg, rgba(39, 130, 91, .08), rgba(255, 255, 255, .72)); }
+.capital-decision-plan.tone-hold { border-left-color: #4c7060; background: linear-gradient(135deg, rgba(76, 112, 96, .08), rgba(255, 255, 255, .72)); }
+.capital-plan-heading, .capital-plan-metrics, .capital-plan-context { display: grid; gap: 12px; }
+.capital-plan-heading { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.capital-plan-heading h3, .capital-decision-plan p { margin: 0; }
+.capital-plan-state { padding: 7px 10px; border: 1px solid currentColor; font-size: .72rem; font-weight: 800; letter-spacing: .08em; }
+.capital-plan-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.capital-plan-context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.capital-plan-metrics > div, .capital-plan-context > div, .capital-plan-next-step { display: grid; gap: 6px; min-width: 0; padding: 14px; border: 1px solid var(--line); background: rgba(255, 255, 255, .64); }
+.capital-plan-metrics span, .capital-plan-context span, .capital-plan-next-step span, .capital-plan-caveat { color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.capital-plan-metrics strong, .capital-plan-context strong, .capital-plan-next-step strong { overflow-wrap: anywhere; line-height: 1.55; }
+.capital-plan-caveat { padding-top: 12px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) {
+  .capital-plan-heading, .capital-plan-metrics, .capital-plan-context { grid-template-columns: 1fr; }
+  .capital-plan-state { justify-self: start; }
+}
+
 /* Lending Rescue turns a provider decision into user-readable monitoring thresholds. */
 .lending-threshold-plan { display: grid; gap: 18px; padding: 22px; border: 1px solid var(--line); border-left: 4px solid #27825b; background: linear-gradient(135deg, rgba(39, 130, 91, .08), rgba(255, 255, 255, .72)); }
 .lending-threshold-plan.tone-watch { border-left-color: #b56b11; background: linear-gradient(135deg, rgba(181, 107, 17, .1), rgba(255, 255, 255, .72)); }
