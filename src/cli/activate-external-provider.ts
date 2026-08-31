@@ -125,6 +125,10 @@ async function loadPrivateKey(path: string): Promise<Hex> {
 const broadcast = process.argv.includes("--broadcast");
 const confirmation = argument("confirmation-token");
 const resumeJobId = argument("resume-job-id") ? BigInt(argument("resume-job-id")!) : null;
+const resumeCheckpointArgument = argument("resume-checkpoint");
+if (resumeJobId !== null && !resumeCheckpointArgument) {
+  throw new Error("--resume-job-id requires --resume-checkpoint=<original activation checkpoint>");
+}
 const accountToInspect = getAddress(argument("account") ?? DEFAULT_ACCOUNT);
 const rpcUrl = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org";
 const payment = brainOnBnbPaymentContract();
@@ -221,6 +225,10 @@ const outputPath = resolve(
   argument("output") ??
     `positioncrew-external-activation-${resumeJobId?.toString() ?? crypto.randomUUID()}.json`,
 );
+const resumeCheckpointPath = resumeCheckpointArgument ? resolve(resumeCheckpointArgument) : null;
+if (resumeCheckpointPath === outputPath) {
+  throw new Error("Resume checkpoint and new output checkpoint must use different paths");
+}
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${json({
   schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
@@ -231,20 +239,68 @@ await writeFile(outputPath, `${json({
   boundary: "The output path is writable and the dry-run passed. No transaction represented by this checkpoint has been broadcast.",
 })}\n`, { mode: 0o600, flag: "wx" });
 
-const now = new Date();
-const frozenJob = HealthFactorLiveMatchJobSchema.parse({
-  schemaVersion: "positioncrew.live-match.health-factor-job.v1",
-  jobId: `pc-live-match-${crypto.randomUUID()}`,
-  category: "HEALTH_FACTOR_MONITORING",
-  chainId: 56,
-  protocol: "Venus Classic",
-  account: accountToInspect,
-  requestedAt: now.toISOString(),
-  deadline: new Date(now.getTime() + 15 * 60_000).toISOString(),
-  requiredOutputs: ["CURRENT_HEALTH_FACTOR", "LIQUIDATION_DISTANCE", "COLLATERAL_STRESS_TABLE", "PROTOCOL_CROSS_CHECK", "BLOCK_ATTRIBUTION"],
-  maximumPrice: { amountAtomic: PAYMENT_BUDGET.toString(), token: paymentToken, chainId: 56 },
-});
-const quote = await requestBrainHealthFactorQuote(frozenJob);
+let frozenJob;
+let quote;
+if (resumeJobId !== null && resumeCheckpointPath) {
+  const checkpoint = JSON.parse(await readFile(resumeCheckpointPath, "utf8")) as Record<string, unknown>;
+  if (String(checkpoint.commerceJobId) !== resumeJobId.toString()) {
+    throw new Error("Resume checkpoint does not bind the requested ERC-8183 job ID");
+  }
+  const checkpointQuote = typeof checkpoint.reaffirmationQuote === "object" && checkpoint.reaffirmationQuote !== null
+    ? checkpoint.reaffirmationQuote as Record<string, unknown>
+    : null;
+  if (!checkpointQuote) throw new Error("Resume checkpoint has no immutable accepted quote");
+  frozenJob = HealthFactorLiveMatchJobSchema.parse(checkpoint.frozenJob ?? checkpointQuote.frozenJob);
+  if (frozenJob.account.toLowerCase() !== accountToInspect.toLowerCase()) {
+    throw new Error("Resume checkpoint account does not match --account");
+  }
+  if (
+    frozenJob.maximumPrice.amountAtomic !== PAYMENT_BUDGET.toString() ||
+    frozenJob.maximumPrice.token.toLowerCase() !== paymentToken.toLowerCase()
+  ) {
+    throw new Error("Resume checkpoint payment boundary does not match the frozen activation budget and token");
+  }
+  if (Date.parse(frozenJob.deadline) <= Date.now()) {
+    throw new Error("Resume checkpoint frozen request is past its delivery deadline");
+  }
+  if (checkpointQuote.frozenJobHash !== canonicalHash(frozenJob)) {
+    throw new Error("Resume checkpoint quote does not bind its frozen request");
+  }
+  const acceptedQuote = typeof checkpointQuote.quote === "object" && checkpointQuote.quote !== null
+    ? checkpointQuote.quote as Record<string, unknown>
+    : null;
+  if (
+    !acceptedQuote ||
+    acceptedQuote.service !== "health_factor" ||
+    typeof acceptedQuote.price !== "string" ||
+    !/^\d+$/.test(acceptedQuote.price) ||
+    BigInt(acceptedQuote.price) > PAYMENT_BUDGET ||
+    typeof acceptedQuote.provider !== "string" ||
+    acceptedQuote.provider.toLowerCase() !== payment.provider.toLowerCase() ||
+    typeof acceptedQuote.verifying_contract !== "string" ||
+    acceptedQuote.verifying_contract.toLowerCase() !== payment.kernel.toLowerCase() ||
+    typeof acceptedQuote.payment_token !== "string" ||
+    acceptedQuote.payment_token.toLowerCase() !== paymentToken.toLowerCase()
+  ) {
+    throw new Error("Resume checkpoint accepted quote is invalid or exceeds the frozen budget");
+  }
+  quote = checkpointQuote as unknown as Awaited<ReturnType<typeof requestBrainHealthFactorQuote>>;
+} else {
+  const now = new Date();
+  frozenJob = HealthFactorLiveMatchJobSchema.parse({
+    schemaVersion: "positioncrew.live-match.health-factor-job.v1",
+    jobId: `pc-live-match-${crypto.randomUUID()}`,
+    category: "HEALTH_FACTOR_MONITORING",
+    chainId: 56,
+    protocol: "Venus Classic",
+    account: accountToInspect,
+    requestedAt: now.toISOString(),
+    deadline: new Date(now.getTime() + 15 * 60_000).toISOString(),
+    requiredOutputs: ["CURRENT_HEALTH_FACTOR", "LIQUIDATION_DISTANCE", "COLLATERAL_STRESS_TABLE", "PROTOCOL_CROSS_CHECK", "BLOCK_ATTRIBUTION"],
+    maximumPrice: { amountAtomic: PAYMENT_BUDGET.toString(), token: paymentToken, chainId: 56 },
+  });
+  quote = await requestBrainHealthFactorQuote(frozenJob);
+}
 const sdkWallet = new EVMWalletProvider({ password: randomBytes(32).toString("hex"), privateKey, persist: false });
 const client = await ERC8183Client.create({ walletProvider: sdkWallet, network: "bsc-mainnet" });
 if (client.address !== EXPECTED_WALLET) throw new Error("SDK wallet identity changed after preflight");

@@ -118,6 +118,9 @@ class FakeD1 implements D1Database {
     if (normalized.includes("SELECT create_count FROM fresh_marketplace_rate_limits")) {
       return { create_count: this.rateLimitCount };
     }
+    if (normalized.includes("FROM fresh_marketplace_hires WHERE idempotency_key = ?")) {
+      return this.hire?.idempotency_key === bindings[0] ? { ...this.hire } : null;
+    }
     if (!this.hire || !this.job) return null;
     if (
       normalized.includes("WHERE r.receipt_id = ?") &&
@@ -176,6 +179,20 @@ class FakeD1 implements D1Database {
         evidence_hash: bindings[13],
         hire_created_at: bindings[14],
       };
+    } else if (normalized.startsWith("UPDATE fresh_marketplace_hires SET provider_hash")) {
+      if (
+        !this.hire ||
+        this.hire.hire_id !== bindings[3] ||
+        this.hire.idempotency_key !== bindings[4] ||
+        this.hire.provider_hash !== null ||
+        this.hire.evidence_json !== null ||
+        this.hire.evidence_hash !== null
+      ) {
+        return { success: true, meta: { changes: 0 } };
+      }
+      this.hire.provider_hash = bindings[0];
+      this.hire.evidence_json = bindings[1];
+      this.hire.evidence_hash = bindings[2];
     } else if (normalized.startsWith("INSERT INTO fresh_marketplace_jobs")) {
       const directValues = normalized.includes("VALUES (?, ?, 'CREATED', ?)");
       const hireId = bindings[directValues ? 1 : 2];
@@ -321,6 +338,12 @@ class RateLimitD1 implements D1Database {
       const bucket = this.buckets.get(String(bindings[0]));
       return bucket ? { create_count: bucket.createCount } : null;
     }
+    if (normalized.includes("FROM fresh_marketplace_hires WHERE idempotency_key = ?")) {
+      const hire = [...this.hires.values()].find(
+        (candidate) => candidate.idempotency_key === bindings[0],
+      );
+      return hire ? { ...hire } : null;
+    }
     let hire: Record<string, unknown> | undefined;
     if (normalized.includes("WHERE h.idempotency_key = ?")) {
       hire = [...this.hires.values()].find(
@@ -404,6 +427,23 @@ class RateLimitD1 implements D1Database {
         evidence_hash: bindings[13],
         hire_created_at: bindings[14],
       });
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (normalized.startsWith("UPDATE fresh_marketplace_hires SET provider_hash")) {
+      const hire = this.hires.get(String(bindings[3]));
+      if (
+        !hire ||
+        hire.idempotency_key !== bindings[4] ||
+        hire.provider_hash !== null ||
+        hire.evidence_json !== null ||
+        hire.evidence_hash !== null
+      ) {
+        return { success: true, meta: { changes: 0 } };
+      }
+      hire.provider_hash = bindings[0];
+      hire.evidence_json = bindings[1];
+      hire.evidence_hash = bindings[2];
       return { success: true, meta: { changes: 1 } };
     }
 
@@ -988,9 +1028,19 @@ describe("fresh marketplace hire contract", () => {
       evidenceMode: input.evidenceMode,
       service: input.service,
       rateLimitKey: input.rateLimitKey,
+      hireId: input.hireId,
+      jobId: input.jobId,
+      requestJson: input.requestJson,
     };
 
-    await expect(store.admitHireCreation(admissionInput)).resolves.toBeNull();
+    await expect(store.admitHireCreation(admissionInput)).resolves.toMatchObject({
+      replayed: false,
+      chain: null,
+    });
+    await expect(store.admitHireCreation(admissionInput)).resolves.toEqual({
+      replayed: true,
+      chain: null,
+    });
     await store.createHire({ ...input, rateLimitAdmitted: true });
     await expect(store.admitHireCreation(admissionInput)).resolves.toMatchObject({
       replayed: true,
@@ -1014,7 +1064,10 @@ describe("fresh marketplace hire contract", () => {
         evidenceMode: input.evidenceMode,
         service: input.service,
         rateLimitKey: input.rateLimitKey,
-      })).resolves.toBeNull();
+        hireId: input.hireId,
+        jobId: input.jobId,
+        requestJson: input.requestJson,
+      })).resolves.toMatchObject({ replayed: false });
     }
 
     const denied = await rateLimitHireInput(
@@ -1030,6 +1083,9 @@ describe("fresh marketplace hire contract", () => {
       evidenceMode: denied.evidenceMode,
       service: denied.service,
       rateLimitKey: denied.rateLimitKey,
+      hireId: denied.hireId,
+      jobId: denied.jobId,
+      requestJson: denied.requestJson,
     })).rejects.toBeInstanceOf(FreshMarketplaceCapacityExceeded);
   });
 

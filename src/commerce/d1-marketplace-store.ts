@@ -64,6 +64,19 @@ interface JoinedRow extends Record<string, unknown> {
   receipt_created_at: string | null;
 }
 
+interface AdmissionRow extends Record<string, unknown> {
+  hire_id: string;
+  idempotency_key: string;
+  provider_slug: string;
+  provider_id: string;
+  benchmark_slug: string;
+  service: string;
+  evidence_mode: string;
+  request_hash: string;
+  provider_hash: string | null;
+  evidence_json: string | null;
+}
+
 export interface CreateFreshMarketplaceHire {
   request: FreshMarketplaceHireRequest;
   providerId: string;
@@ -341,11 +354,11 @@ export class FreshMarketplaceStore {
 
   async admitHireCreation(
     input: Pick<CreateFreshMarketplaceHire,
-      "request" | "providerId" | "createdAt" | "requestHash" | "providerHash" | "evidenceMode" | "service" | "rateLimitKey"
+      "request" | "providerId" | "hireId" | "jobId" | "createdAt" | "requestJson" | "requestHash" | "providerHash" | "evidenceMode" | "service" | "rateLimitKey"
     >,
-  ): Promise<{ chain: FreshMarketplaceChain; replayed: true } | null> {
-    const existing = await this.getByIdempotencyKey(input.request.idempotencyKey);
-    if (existing) return this.matchAdmissionReplay(existing, input);
+  ): Promise<{ chain: FreshMarketplaceChain | null; replayed: boolean }> {
+    const existing = await this.getAdmissionByIdempotencyKey(input.request.idempotencyKey);
+    if (existing) return this.replayAdmission(existing, input);
     const createdAtMilliseconds = Date.parse(input.createdAt);
     if (!Number.isFinite(createdAtMilliseconds)) {
       throw new Error("D1 hire admission requires a valid ISO timestamp");
@@ -353,76 +366,99 @@ export class FreshMarketplaceStore {
     const createWindowExpiresAt = new Date(
       createdAtMilliseconds + FRESH_MARKETPLACE_CREATE_WINDOW_MILLISECONDS,
     ).toISOString();
-    const results = await this.db.batch([
-      this.db.prepare(
-        "DELETE FROM fresh_marketplace_rate_limits WHERE window_expires_at <= ?",
-      ).bind(input.createdAt),
-      this.db.prepare([
-        "INSERT INTO fresh_marketplace_rate_limits",
-        "(key_hash, window_started_at, window_expires_at, create_count) VALUES (?, ?, ?, 1)",
-        "ON CONFLICT(key_hash) DO UPDATE SET",
-        "create_count = fresh_marketplace_rate_limits.create_count + 1",
-      ].join(" ")).bind(input.rateLimitKey, input.createdAt, createWindowExpiresAt),
-    ]);
-    const failed = results.find((result) => !result.success);
-    if (failed) throw new Error(failed.error ?? "D1 hire admission failed");
-    const window = await this.db.prepare(
-      "SELECT create_count FROM fresh_marketplace_rate_limits WHERE key_hash = ?",
-    ).bind(input.rateLimitKey).first<{ create_count: number }>();
-    if (!window || window.create_count > FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW) {
-      throw new FreshMarketplaceCapacityExceeded();
+    try {
+      const results = await this.db.batch([
+        this.db.prepare(
+          "DELETE FROM fresh_marketplace_rate_limits WHERE window_expires_at <= ?",
+        ).bind(input.createdAt),
+        this.db.prepare([
+          "INSERT INTO fresh_marketplace_rate_limits",
+          "(key_hash, window_started_at, window_expires_at, create_count) VALUES (?, ?, ?, 1)",
+          "ON CONFLICT(key_hash) DO UPDATE SET",
+          "create_count = fresh_marketplace_rate_limits.create_count + 1",
+        ].join(" ")).bind(input.rateLimitKey, input.createdAt, createWindowExpiresAt),
+        this.db.prepare([
+          "INSERT INTO fresh_marketplace_hires",
+          "(hire_id, idempotency_key, provider_slug, provider_id, benchmark_slug, service,",
+          "evidence_mode, direct_cost_usd, wallet_required, request_json, request_hash,",
+          "provider_hash, evidence_json, evidence_hash, created_at)",
+          "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?",
+          "WHERE (SELECT create_count FROM fresh_marketplace_rate_limits WHERE key_hash = ?) <= ?",
+        ].join(" ")).bind(
+          input.hireId,
+          input.request.idempotencyKey,
+          input.request.providerSlug,
+          input.providerId,
+          input.request.benchmarkSlug,
+          input.service,
+          input.evidenceMode,
+          "0.00",
+          0,
+          input.requestJson,
+          input.requestHash,
+          null,
+          null,
+          null,
+          input.createdAt,
+          input.rateLimitKey,
+          FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW,
+        ),
+        this.db.prepare([
+          "INSERT INTO fresh_marketplace_jobs (job_id, hire_id, state, created_at)",
+          "SELECT ?, h.hire_id, 'CREATED', ? FROM fresh_marketplace_hires h WHERE h.hire_id = ?",
+        ].join(" ")).bind(input.jobId, input.createdAt, input.hireId),
+      ]);
+      const failed = results.find((result) => !result.success);
+      if (failed) throw new Error(failed.error ?? "D1 hire admission failed");
+      if (results[2]?.meta.changes !== 1) throw new FreshMarketplaceCapacityExceeded();
+      if (results[3]?.meta.changes !== 1) throw new Error("D1 admission job did not follow its hire reservation");
+    } catch (error) {
+      const raced = await this.getAdmissionByIdempotencyKey(input.request.idempotencyKey);
+      if (raced) return this.replayAdmission(raced, input);
+      throw error;
     }
-    return null;
+    return { chain: null, replayed: false };
   }
 
   async createHire(input: CreateFreshMarketplaceHire): Promise<{
     chain: FreshMarketplaceChain;
     replayed: boolean;
   }> {
-    const existing = await this.getByIdempotencyKey(input.request.idempotencyKey);
-    if (existing) return this.matchReplay(existing, input);
-    if (input.rateLimitAdmitted) {
-      try {
-        const results = await this.db.batch([
-          this.db.prepare([
-            "INSERT INTO fresh_marketplace_hires",
-            "(hire_id, idempotency_key, provider_slug, provider_id, benchmark_slug, service,",
-            "evidence_mode, direct_cost_usd, wallet_required, request_json, request_hash,",
-            "provider_hash, evidence_json, evidence_hash, created_at)",
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          ].join(" ")).bind(
-            input.hireId,
-            input.request.idempotencyKey,
-            input.request.providerSlug,
-            input.providerId,
-            input.request.benchmarkSlug,
-            input.service,
-            input.evidenceMode,
-            "0.00",
-            0,
-            input.requestJson,
-            input.requestHash,
-            input.providerHash,
-            input.evidenceJson,
-            input.evidenceHash,
-            input.createdAt,
-          ),
-          this.db.prepare(
-            "INSERT INTO fresh_marketplace_jobs (job_id, hire_id, state, created_at) VALUES (?, ?, 'CREATED', ?)",
-          ).bind(input.jobId, input.hireId, input.createdAt),
-        ]);
-        const failed = results.find((result) => !result.success);
-        if (failed) throw new Error(failed.error ?? "D1 admitted hire creation failed");
-        if (results[0]?.meta.changes !== 1) throw new Error("D1 admitted hire was not created");
-        if (results[1]?.meta.changes !== 1) throw new Error("D1 admitted job did not follow its hire");
-      } catch (error) {
-        const raced = await this.getByIdempotencyKey(input.request.idempotencyKey);
-        if (raced) return this.matchReplay(raced, input);
-        throw error;
+    const reservation = await this.getAdmissionByIdempotencyKey(input.request.idempotencyKey);
+    if (reservation) {
+      this.matchAdmissionRow(reservation, input);
+      if (
+        input.rateLimitAdmitted &&
+        reservation.hire_id === input.hireId &&
+        reservation.provider_hash === null &&
+        reservation.evidence_json === null
+      ) {
+        const finalized = await this.db.prepare([
+          "UPDATE fresh_marketplace_hires SET provider_hash = ?, evidence_json = ?, evidence_hash = ?",
+          "WHERE hire_id = ? AND idempotency_key = ?",
+          "AND provider_hash IS NULL AND evidence_json IS NULL AND evidence_hash IS NULL",
+        ].join(" ")).bind(
+          input.providerHash,
+          input.evidenceJson,
+          input.evidenceHash,
+          input.hireId,
+          input.request.idempotencyKey,
+        ).run();
+        if (!finalized.success) throw new Error(finalized.error ?? "D1 admitted hire finalization failed");
+        const chain = await this.getHire(input.hireId);
+        if (!chain) throw new Error("Finalized admitted hire could not be read back");
+        if (finalized.meta.changes !== 1) return this.matchReplay(chain, input);
+        return { chain, replayed: false };
       }
-      const chain = await this.getHire(input.hireId);
-      if (!chain) throw new Error("Persisted admitted hire could not be read back");
-      return { chain, replayed: false };
+      if (reservation.evidence_json === null) {
+        throw new Error("D1 hire admission is still in progress for this idempotency key");
+      }
+      const existing = await this.getByIdempotencyKey(input.request.idempotencyKey);
+      if (!existing) throw new Error("Completed D1 hire admission could not be read back");
+      return this.matchReplay(existing, input);
+    }
+    if (input.rateLimitAdmitted) {
+      throw new Error("D1 admitted hire reservation is missing before evidence finalization");
     }
     const createdAtMilliseconds = Date.parse(input.createdAt);
     if (!Number.isFinite(createdAtMilliseconds)) {
@@ -602,6 +638,14 @@ export class FreshMarketplaceStore {
     return row ? await rowToChain(row) : null;
   }
 
+  private async getAdmissionByIdempotencyKey(idempotencyKey: string): Promise<AdmissionRow | null> {
+    return this.db.prepare([
+      "SELECT hire_id, idempotency_key, provider_slug, provider_id, benchmark_slug, service,",
+      "evidence_mode, request_hash, provider_hash, evidence_json",
+      "FROM fresh_marketplace_hires WHERE idempotency_key = ?",
+    ].join(" ")).bind(idempotencyKey).first<AdmissionRow>();
+  }
+
   private matchReplay(
     existing: FreshMarketplaceChain,
     input: CreateFreshMarketplaceHire,
@@ -650,23 +694,35 @@ export class FreshMarketplaceStore {
     return { chain: existing, replayed: true };
   }
 
-  private matchAdmissionReplay(
-    existing: FreshMarketplaceChain,
+  private matchAdmissionRow(
+    existing: AdmissionRow,
     input: Pick<CreateFreshMarketplaceHire,
       "request" | "providerId" | "requestHash" | "providerHash" | "evidenceMode" | "service"
     >,
-  ): { chain: FreshMarketplaceChain; replayed: true } {
+  ): void {
     if (
-      existing.hire.providerSlug !== input.request.providerSlug ||
-      existing.hire.benchmarkSlug !== input.request.benchmarkSlug ||
-      existing.hire.evidenceMode !== input.evidenceMode ||
-      existing.hire.requestHash !== input.requestHash ||
-      existing.hire.providerId !== input.providerId ||
-      existing.hire.service !== input.service ||
-      existing.hire.providerHash !== input.providerHash
+      existing.provider_slug !== input.request.providerSlug ||
+      existing.benchmark_slug !== input.request.benchmarkSlug ||
+      existing.evidence_mode !== input.evidenceMode ||
+      existing.request_hash !== input.requestHash ||
+      existing.provider_id !== input.providerId ||
+      existing.service !== input.service ||
+      (existing.provider_hash !== null && existing.provider_hash !== input.providerHash)
     ) {
       throw new FreshMarketplaceIdempotencyConflict();
     }
-    return { chain: existing, replayed: true };
+  }
+
+  private async replayAdmission(
+    existing: AdmissionRow,
+    input: Pick<CreateFreshMarketplaceHire,
+      "request" | "providerId" | "requestHash" | "providerHash" | "evidenceMode" | "service"
+    >,
+  ): Promise<{ chain: FreshMarketplaceChain | null; replayed: true }> {
+    this.matchAdmissionRow(existing, input);
+    if (existing.evidence_json === null) return { chain: null, replayed: true };
+    const chain = await this.getByIdempotencyKey(input.request.idempotencyKey);
+    if (!chain) throw new Error("Completed D1 hire admission could not be read back");
+    return { chain, replayed: true };
   }
 }

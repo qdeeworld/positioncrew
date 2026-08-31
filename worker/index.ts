@@ -1343,17 +1343,27 @@ async function createFreshMarketplaceHire(
   const providerHash = await sha256Commitment(providerBinding);
   const rateLimitKey = await freshMarketplaceRateLimitKey(request);
   const store = freshStore(env);
+  const hireId = crypto.randomUUID();
+  const jobId = crypto.randomUUID();
   const admission = await store.admitHireCreation({
     request: parsed,
     providerId: provider.providerId,
+    hireId,
+    jobId,
     createdAt,
+    requestJson,
     requestHash,
     providerHash,
     evidenceMode,
     service: task.service,
     rateLimitKey,
   });
-  if (admission) return json(admission.chain, 200);
+  if (admission.replayed) {
+    if (admission.chain) return json(admission.chain, 200);
+    return apiError(409, "HIRE_ADMISSION_IN_PROGRESS", [
+      "This idempotency key already has a provider audition in progress. Retry after the original request completes.",
+    ]);
+  }
   const providerAudition =
     parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
       parsed.benchmarkSlug === "lending-rescue"
@@ -1551,8 +1561,8 @@ async function createFreshMarketplaceHire(
   const result = await store.createHire({
     request: parsed,
     providerId: provider.providerId,
-    hireId: crypto.randomUUID(),
-    jobId: crypto.randomUUID(),
+    hireId,
+    jobId,
     createdAt,
     requestJson,
     requestHash,
