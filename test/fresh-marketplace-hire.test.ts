@@ -12,6 +12,7 @@ import {
 import { FixtureJobResponseSchema } from "../src/api/fixture-response-schema.js";
 import {
   type CreateFreshMarketplaceHire,
+  FRESH_MARKETPLACE_ADMISSION_LEASE_MILLISECONDS,
   FRESH_MARKETPLACE_CREATE_WINDOW_MILLISECONDS,
   FRESH_MARKETPLACE_JOB_LEASE_MILLISECONDS,
   FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW,
@@ -193,6 +194,31 @@ class FakeD1 implements D1Database {
       this.hire.provider_hash = bindings[0];
       this.hire.evidence_json = bindings[1];
       this.hire.evidence_hash = bindings[2];
+    } else if (normalized.startsWith("UPDATE fresh_marketplace_hires SET created_at")) {
+      if (
+        !this.hire ||
+        this.hire.hire_id !== bindings[1] ||
+        this.hire.idempotency_key !== bindings[2] ||
+        this.hire.hire_created_at !== bindings[3] ||
+        this.hire.provider_hash !== null ||
+        this.hire.evidence_json !== null ||
+        this.hire.evidence_hash !== null
+      ) {
+        return { success: true, meta: { changes: 0 } };
+      }
+      this.hire.hire_created_at = bindings[0];
+    } else if (normalized.startsWith("UPDATE fresh_marketplace_jobs SET created_at")) {
+      if (
+        !this.hire ||
+        !this.job ||
+        this.job.job_id !== bindings[1] ||
+        this.hire.hire_id !== bindings[2] ||
+        this.job.job_state !== "CREATED" ||
+        this.job.job_started_at !== null
+      ) {
+        return { success: true, meta: { changes: 0 } };
+      }
+      this.job.job_created_at = bindings[0];
     } else if (normalized.startsWith("INSERT INTO fresh_marketplace_jobs")) {
       const directValues = normalized.includes("VALUES (?, ?, 'CREATED', ?)");
       const hireId = bindings[directValues ? 1 : 2];
@@ -444,6 +470,36 @@ class RateLimitD1 implements D1Database {
       hire.provider_hash = bindings[0];
       hire.evidence_json = bindings[1];
       hire.evidence_hash = bindings[2];
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (normalized.startsWith("UPDATE fresh_marketplace_hires SET created_at")) {
+      const hire = this.hires.get(String(bindings[1]));
+      if (
+        !hire ||
+        hire.idempotency_key !== bindings[2] ||
+        hire.hire_created_at !== bindings[3] ||
+        hire.provider_hash !== null ||
+        hire.evidence_json !== null ||
+        hire.evidence_hash !== null
+      ) {
+        return { success: true, meta: { changes: 0 } };
+      }
+      hire.hire_created_at = bindings[0];
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (normalized.startsWith("UPDATE fresh_marketplace_jobs SET created_at")) {
+      const job = this.jobs.get(String(bindings[2]));
+      if (
+        !job ||
+        job.job_id !== bindings[1] ||
+        job.job_state !== "CREATED" ||
+        job.job_started_at !== null
+      ) {
+        return { success: true, meta: { changes: 0 } };
+      }
+      job.job_created_at = bindings[0];
       return { success: true, meta: { changes: 1 } };
     }
 
@@ -1036,15 +1092,55 @@ describe("fresh marketplace hire contract", () => {
     await expect(store.admitHireCreation(admissionInput)).resolves.toMatchObject({
       replayed: false,
       chain: null,
+      hireId: input.hireId,
+      jobId: input.jobId,
     });
     await expect(store.admitHireCreation(admissionInput)).resolves.toEqual({
       replayed: true,
       chain: null,
+      hireId: input.hireId,
+      jobId: input.jobId,
     });
     await store.createHire({ ...input, rateLimitAdmitted: true });
     await expect(store.admitHireCreation(admissionInput)).resolves.toMatchObject({
       replayed: true,
       chain: { hire: { hireId: input.hireId } },
+    });
+    expect(database.getBucket(HASH_A)?.createCount).toBe(1);
+  });
+
+  it("takes over an abandoned admission after its bounded lease without another quota slot", async () => {
+    const database = new RateLimitD1();
+    const store = new FreshMarketplaceStore(database);
+    const input = await rateLimitHireInput(0, NOW);
+    const admissionInput = {
+      request: input.request,
+      providerId: input.providerId,
+      hireId: input.hireId,
+      jobId: input.jobId,
+      createdAt: input.createdAt,
+      requestJson: input.requestJson,
+      requestHash: input.requestHash,
+      providerHash: input.providerHash,
+      evidenceMode: input.evidenceMode,
+      service: input.service,
+      rateLimitKey: input.rateLimitKey,
+    };
+    await store.admitHireCreation(admissionInput);
+    const recoveredAt = new Date(
+      Date.parse(NOW) + FRESH_MARKETPLACE_ADMISSION_LEASE_MILLISECONDS,
+    ).toISOString();
+
+    await expect(store.admitHireCreation({
+      ...admissionInput,
+      hireId: indexedUuid("1", 9),
+      jobId: indexedUuid("2", 9),
+      createdAt: recoveredAt,
+    })).resolves.toEqual({
+      chain: null,
+      replayed: false,
+      hireId: input.hireId,
+      jobId: input.jobId,
     });
     expect(database.getBucket(HASH_A)?.createCount).toBe(1);
   });

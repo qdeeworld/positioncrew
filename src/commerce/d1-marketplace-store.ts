@@ -29,6 +29,7 @@ export interface D1Database {
 }
 
 export const FRESH_MARKETPLACE_JOB_LEASE_MILLISECONDS = 5 * 60 * 1_000;
+export const FRESH_MARKETPLACE_ADMISSION_LEASE_MILLISECONDS = 60 * 1_000;
 export const FRESH_MARKETPLACE_CREATE_WINDOW_MILLISECONDS = 60 * 1_000;
 export const FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW = 30;
 
@@ -75,6 +76,8 @@ interface AdmissionRow extends Record<string, unknown> {
   request_hash: string;
   provider_hash: string | null;
   evidence_json: string | null;
+  hire_created_at: string;
+  job_id: string;
 }
 
 export interface CreateFreshMarketplaceHire {
@@ -356,7 +359,12 @@ export class FreshMarketplaceStore {
     input: Pick<CreateFreshMarketplaceHire,
       "request" | "providerId" | "hireId" | "jobId" | "createdAt" | "requestJson" | "requestHash" | "providerHash" | "evidenceMode" | "service" | "rateLimitKey"
     >,
-  ): Promise<{ chain: FreshMarketplaceChain | null; replayed: boolean }> {
+  ): Promise<{
+    chain: FreshMarketplaceChain | null;
+    replayed: boolean;
+    hireId: string;
+    jobId: string;
+  }> {
     const existing = await this.getAdmissionByIdempotencyKey(input.request.idempotencyKey);
     if (existing) return this.replayAdmission(existing, input);
     const createdAtMilliseconds = Date.parse(input.createdAt);
@@ -417,7 +425,7 @@ export class FreshMarketplaceStore {
       if (raced) return this.replayAdmission(raced, input);
       throw error;
     }
-    return { chain: null, replayed: false };
+    return { chain: null, replayed: false, hireId: input.hireId, jobId: input.jobId };
   }
 
   async createHire(input: CreateFreshMarketplaceHire): Promise<{
@@ -640,9 +648,11 @@ export class FreshMarketplaceStore {
 
   private async getAdmissionByIdempotencyKey(idempotencyKey: string): Promise<AdmissionRow | null> {
     return this.db.prepare([
-      "SELECT hire_id, idempotency_key, provider_slug, provider_id, benchmark_slug, service,",
-      "evidence_mode, request_hash, provider_hash, evidence_json",
-      "FROM fresh_marketplace_hires WHERE idempotency_key = ?",
+      "SELECT h.hire_id, h.idempotency_key, h.provider_slug, h.provider_id, h.benchmark_slug,",
+      "h.service, h.evidence_mode, h.request_hash, h.provider_hash, h.evidence_json,",
+      "h.created_at AS hire_created_at, j.job_id",
+      "FROM fresh_marketplace_hires h JOIN fresh_marketplace_jobs j ON j.hire_id = h.hire_id",
+      "WHERE h.idempotency_key = ?",
     ].join(" ")).bind(idempotencyKey).first<AdmissionRow>();
   }
 
@@ -716,13 +726,62 @@ export class FreshMarketplaceStore {
   private async replayAdmission(
     existing: AdmissionRow,
     input: Pick<CreateFreshMarketplaceHire,
-      "request" | "providerId" | "requestHash" | "providerHash" | "evidenceMode" | "service"
+      "request" | "providerId" | "createdAt" | "requestHash" | "providerHash" | "evidenceMode" | "service"
     >,
-  ): Promise<{ chain: FreshMarketplaceChain | null; replayed: true }> {
+  ): Promise<{
+    chain: FreshMarketplaceChain | null;
+    replayed: boolean;
+    hireId: string;
+    jobId: string;
+  }> {
     this.matchAdmissionRow(existing, input);
-    if (existing.evidence_json === null) return { chain: null, replayed: true };
+    if (existing.evidence_json === null) {
+      const admissionAge = Date.parse(input.createdAt) - Date.parse(existing.hire_created_at);
+      if (
+        Number.isFinite(admissionAge) &&
+        admissionAge >= FRESH_MARKETPLACE_ADMISSION_LEASE_MILLISECONDS
+      ) {
+        const takeover = await this.db.prepare([
+          "UPDATE fresh_marketplace_hires SET created_at = ?",
+          "WHERE hire_id = ? AND idempotency_key = ? AND created_at = ?",
+          "AND provider_hash IS NULL AND evidence_json IS NULL AND evidence_hash IS NULL",
+        ].join(" ")).bind(
+          input.createdAt,
+          existing.hire_id,
+          input.request.idempotencyKey,
+          existing.hire_created_at,
+        ).run();
+        if (!takeover.success) throw new Error(takeover.error ?? "D1 hire admission takeover failed");
+        if (takeover.meta.changes === 1) {
+          const jobTakeover = await this.db.prepare([
+            "UPDATE fresh_marketplace_jobs SET created_at = ?",
+            "WHERE job_id = ? AND hire_id = ? AND state = 'CREATED' AND started_at IS NULL",
+          ].join(" ")).bind(input.createdAt, existing.job_id, existing.hire_id).run();
+          if (!jobTakeover.success || jobTakeover.meta.changes !== 1) {
+            throw new Error(jobTakeover.error ?? "D1 admission job takeover failed");
+          }
+          return {
+            chain: null,
+            replayed: false,
+            hireId: existing.hire_id,
+            jobId: existing.job_id,
+          };
+        }
+      }
+      return {
+        chain: null,
+        replayed: true,
+        hireId: existing.hire_id,
+        jobId: existing.job_id,
+      };
+    }
     const chain = await this.getByIdempotencyKey(input.request.idempotencyKey);
     if (!chain) throw new Error("Completed D1 hire admission could not be read back");
-    return { chain, replayed: true };
+    return {
+      chain,
+      replayed: true,
+      hireId: existing.hire_id,
+      jobId: existing.job_id,
+    };
   }
 }
