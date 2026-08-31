@@ -39,12 +39,24 @@
     "verify:all": "tsx src/cli/verify-all-providers.ts",
     "verify:production": "node scripts/verify-production.mjs",
     "shadow-grid:collect": "node scripts/collect-bounded-grid-shadow-ledger.mjs",
+    "spike:external-provider": "tsx src/cli/spike-external-provider-adapter.ts",
+    "spike:heyanon-venus": "tsx src/cli/spike-heyanon-venus.ts",
+    "spike:heyanon-beefy": "tsx src/cli/spike-heyanon-beefy.ts",
+    "spike:heyanon-v3-position": "tsx src/cli/spike-heyanon-v3-position.ts",
+    "spike:heyanon-v3-lp-job": "tsx src/cli/spike-heyanon-v3-lp-job.ts",
+    "spike:validate-external-provider": "tsx src/cli/validate-external-provider-delivery.ts",
+    "activate:external-provider": "tsx src/cli/activate-external-provider.ts",
+    "provider:export-kit": "tsx src/cli/provider-conformance.ts export",
+    "provider:check": "tsx src/cli/provider-conformance.ts check",
+    "provider:verify-result": "tsx src/cli/provider-conformance.ts verify-result",
+    "provider:verify-bundle": "tsx src/cli/provider-conformance.ts verify-bundle",
     "build:termix-renewer": "esbuild src/cli/renew-termix-runtime-token.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/runtime/renew-termix-runtime-token.mjs"
   },
   "engines": {
     "node": "22.x"
   },
   "dependencies": {
+    "@bnbagent/sdk": "0.5.5",
     "@noble/hashes": "^1.8.0",
     "drizzle-orm": "0.45.2",
     "ethers": "6.17.0",

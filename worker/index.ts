@@ -74,6 +74,26 @@ import {
   isNoEligibleLendingProviderError,
 } from "../src/marketplace/lending-provider-audition.js";
 import {
+  AIKI_PANCAKE_REBALANCER,
+  auditionAiKiPancakeRebalancer,
+} from "../src/marketplace/aiki-pancake-rebalancer-adapter.js";
+import {
+  AIKI_VENUS_GUARDIAN,
+  auditionAiKiVenusGuardian,
+} from "../src/marketplace/aiki-venus-guardian-adapter.js";
+import {
+  AIKI_PANCAKE_GRID,
+  auditionAiKiPancakeGrid,
+} from "../src/marketplace/aiki-pancake-grid-adapter.js";
+import {
+  AIKI_VENUS_YIELD,
+  auditionAiKiVenusYield,
+} from "../src/marketplace/aiki-venus-yield-adapter.js";
+import { createBoundedGridDeliverable } from "../src/providers/bounded-grid.js";
+import { createLendingRescueDeliverable } from "../src/providers/lending-rescue.js";
+import { createLpRebalanceDeliverable } from "../src/providers/lp-rebalance.js";
+import { createYieldOptimizationDeliverable } from "../src/providers/yield-optimization.js";
+import {
   parseProductionTrackRecordSnapshot,
   unavailableProductionTrackRecord,
   type ProductionMonitorEpoch,
@@ -1299,10 +1319,190 @@ async function createFreshMarketplaceHire(
   }
   const createdAt = new Date().toISOString();
   const currentBlockPinned = parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2";
+  const persistedRequest = currentBlockPinned
+    ? parsed.request
+    : {
+        schemaVersion: "positioncrew.fresh-marketplace-provider-request.v1",
+        benchmarkSlug: parsed.benchmarkSlug,
+        providerSlug: parsed.providerSlug,
+        providerId: provider.providerId,
+        requestSchema: task.requestSchema,
+        evidenceMode: "HISTORICAL_FIXTURE",
+        directCostUsd: "0.00",
+        walletRequired: false,
+      };
+  const evidenceMode = currentBlockPinned ? "CURRENT_BLOCK_PINNED" : "HISTORICAL_FIXTURE";
+  const providerBinding = {
+    providerSlug: parsed.providerSlug,
+    providerId: provider.providerId,
+    service: task.service,
+    requestSchema: task.requestSchema,
+  };
+  const requestJson = canonicalJson(persistedRequest);
+  const requestHash = await sha256Commitment(persistedRequest);
+  const providerHash = await sha256Commitment(providerBinding);
+  const rateLimitKey = await freshMarketplaceRateLimitKey(request);
+  const store = freshStore(env);
+  const proposedHireId = crypto.randomUUID();
+  const proposedJobId = crypto.randomUUID();
+  const admission = await store.admitHireCreation({
+    request: parsed,
+    providerId: provider.providerId,
+    hireId: proposedHireId,
+    jobId: proposedJobId,
+    createdAt,
+    requestJson,
+    requestHash,
+    providerHash,
+    evidenceMode,
+    service: task.service,
+    rateLimitKey,
+  });
+  if (admission.replayed) {
+    if (admission.chain) return json(admission.chain, 200);
+    return apiError(409, "HIRE_ADMISSION_IN_PROGRESS", [
+      "This idempotency key already has a provider audition in progress. Retry after the original request completes.",
+    ]);
+  }
+  const hireId = admission.hireId;
+  const jobId = admission.jobId;
   const providerAudition =
     parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
       parsed.benchmarkSlug === "lending-rescue"
       ? await createLendingProviderAudition(parsed.request, parsed.observation, new Date(createdAt))
+      : undefined;
+  const externalProviderComparison =
+    parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
+      parsed.benchmarkSlug === "lp-rebalance"
+      ? await (async () => {
+          const positionTokenId = /^pancake-position-([1-9]\d*)-/.exec(
+            parsed.request.requestId,
+          )?.[1];
+          if (!positionTokenId) return undefined;
+          const firstParty = createLpRebalanceDeliverable(parsed.request, new Date(createdAt));
+          const comparison = await auditionAiKiPancakeRebalancer(
+            parsed.request,
+            firstParty,
+            positionTokenId,
+            { now: new Date(createdAt) },
+          );
+          return {
+            schemaVersion: "positioncrew.external-lp-comparison-summary.v1" as const,
+            provider: {
+              name: AIKI_PANCAKE_REBALANCER.name,
+              erc8004TokenId: AIKI_PANCAKE_REBALANCER.tokenId,
+              endpoint: AIKI_PANCAKE_REBALANCER.endpoint,
+            },
+            evaluatedAt: comparison.evaluatedAt,
+            positionTokenId,
+            outcome: comparison.outcome,
+            attributableResult: comparison.attributableResult,
+            completedSamePositionAssessment: comparison.completedSamePositionAssessment,
+            persistedByProvider: comparison.persistedByProvider,
+            externalDecision: comparison.externalDecision,
+            firstPartyDecision: comparison.firstPartyDecision,
+            exactRequestAccepted: false as const,
+            eligibleForLiveMatch: false as const,
+            checks: comparison.checks,
+            boundary: comparison.boundary,
+          };
+        })()
+      : undefined;
+  const externalLendingComparison =
+    parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
+      parsed.benchmarkSlug === "lending-rescue"
+      ? await (async () => {
+          const firstParty = createLendingRescueDeliverable(parsed.request, new Date(createdAt));
+          const comparison = await auditionAiKiVenusGuardian(
+            parsed.request,
+            firstParty,
+            { now: new Date(createdAt) },
+          );
+          return {
+            schemaVersion: "positioncrew.external-lending-comparison-summary.v1" as const,
+            provider: {
+              name: AIKI_VENUS_GUARDIAN.name,
+              erc8004TokenId: AIKI_VENUS_GUARDIAN.tokenId,
+              endpoint: AIKI_VENUS_GUARDIAN.endpoint,
+            },
+            evaluatedAt: comparison.evaluatedAt,
+            account: parsed.request.account,
+            outcome: comparison.outcome,
+            attributableResult: comparison.attributableResult,
+            completedSamePositionAssessment: comparison.completedSamePositionAssessment,
+            persistedByProvider: comparison.persistedByProvider,
+            externalHealthFactor: comparison.externalHealthFactor,
+            firstPartyHealthFactor: comparison.firstPartyHealthFactor,
+            healthFactorDifferenceBps: comparison.healthFactorDifferenceBps,
+            externalRiskStatus: comparison.externalRiskStatus,
+            firstPartyDecision: comparison.firstPartyDecision,
+            exactRequestAccepted: false as const,
+            eligibleForRescueSelection: false as const,
+            eligibleForLiveMatch: false as const,
+            checks: comparison.checks,
+            boundary: comparison.boundary,
+          };
+        })()
+      : undefined;
+  const externalGridComparison =
+    parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
+      parsed.benchmarkSlug === "bounded-grid"
+      ? await (async () => {
+          const firstParty = createBoundedGridDeliverable(parsed.request, new Date(createdAt));
+          const comparison = await auditionAiKiPancakeGrid(parsed.request, firstParty, {
+            now: new Date(createdAt),
+          });
+          return {
+            schemaVersion: "positioncrew.external-grid-comparison-summary.v1" as const,
+            provider: AIKI_PANCAKE_GRID,
+            evaluatedAt: comparison.evaluatedAt,
+            pool: comparison.pool,
+            outcome: comparison.outcome,
+            positionCrewDecision: comparison.positionCrewDecision,
+            externalRecommendation: comparison.externalRecommendation,
+            externalState: comparison.externalState,
+            tickLower: comparison.tickLower,
+            tickUpper: comparison.tickUpper,
+            exactRangeAccepted: comparison.exactRangeAccepted,
+            attributable: comparison.attributable,
+            persisted: comparison.persisted,
+            exactRequestAccepted: false as const,
+            eligibleForGridSelection: false as const,
+            eligibleForLiveMatch: false as const,
+            checks: comparison.checks,
+            boundary: comparison.boundary,
+          };
+        })()
+      : undefined;
+  const externalYieldComparison =
+    parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
+      parsed.benchmarkSlug === "yield-optimization"
+      ? await (async () => {
+          const firstParty = createYieldOptimizationDeliverable(parsed.request, new Date(createdAt));
+          const comparison = await auditionAiKiVenusYield(parsed.request, firstParty, {
+            now: new Date(createdAt),
+          });
+          return {
+            schemaVersion: "positioncrew.external-yield-comparison-summary.v1" as const,
+            provider: AIKI_VENUS_YIELD,
+            evaluatedAt: comparison.evaluatedAt,
+            outcome: comparison.outcome,
+            marketCount: comparison.marketCount,
+            positionCrewSelectedMarket: comparison.positionCrewSelectedMarket,
+            externalRecommendedMarket: comparison.externalRecommendedMarket,
+            sameRateLeader: comparison.sameRateLeader,
+            positionCrewGrossApyBps: comparison.positionCrewGrossApyBps,
+            externalSimpleAnnualRateBps: comparison.externalSimpleAnnualRateBps,
+            rateDifferenceBps: comparison.rateDifferenceBps,
+            attributable: comparison.attributable,
+            persisted: comparison.persisted,
+            exactRequestAccepted: false as const,
+            eligibleForYieldSelection: false as const,
+            eligibleForLiveMatch: false as const,
+            checks: comparison.checks,
+            boundary: comparison.boundary,
+          };
+        })()
       : undefined;
   if (providerAudition) {
     if (parsed.schemaVersion !== "positioncrew.fresh-marketplace-hire-request.v2") {
@@ -1324,19 +1524,6 @@ async function createFreshMarketplaceHire(
       ]);
     }
   }
-  const persistedRequest = currentBlockPinned
-    ? parsed.request
-    : {
-        schemaVersion: "positioncrew.fresh-marketplace-provider-request.v1",
-        benchmarkSlug: parsed.benchmarkSlug,
-        providerSlug: parsed.providerSlug,
-        providerId: provider.providerId,
-        requestSchema: task.requestSchema,
-        evidenceMode: "HISTORICAL_FIXTURE",
-        directCostUsd: "0.00",
-        walletRequired: false,
-      };
-  const evidenceMode = currentBlockPinned ? "CURRENT_BLOCK_PINNED" : "HISTORICAL_FIXTURE";
   const evidence = currentBlockPinned
     ? CurrentBlockPinnedEvidenceSchema.parse({
         schemaVersion: "positioncrew.current-block-pinned-evidence.v1",
@@ -1354,6 +1541,18 @@ async function createFreshMarketplaceHire(
         ...(providerAudition
           ? { providerAudition }
           : {}),
+        ...(externalLendingComparison
+          ? { externalLendingComparison }
+          : {}),
+        ...(externalProviderComparison
+          ? { externalProviderComparison }
+          : {}),
+        ...(externalGridComparison
+          ? { externalGridComparison }
+          : {}),
+        ...(externalYieldComparison
+          ? { externalYieldComparison }
+          : {}),
       })
     : HistoricalFixtureEvidenceSchema.parse({
         schemaVersion: "positioncrew.historical-fixture-evidence.v1",
@@ -1361,27 +1560,22 @@ async function createFreshMarketplaceHire(
         benchmarkSlug: parsed.benchmarkSlug,
         requestSchema: task.requestSchema,
       });
-  const providerBinding = {
-    providerSlug: parsed.providerSlug,
-    providerId: provider.providerId,
-    service: task.service,
-    requestSchema: task.requestSchema,
-  };
-  const requestJson = canonicalJson(persistedRequest);
-  const result = await freshStore(env).createHire({
+  const result = await store.createHire({
     request: parsed,
     providerId: provider.providerId,
-    hireId: crypto.randomUUID(),
-    jobId: crypto.randomUUID(),
+    hireId,
+    jobId,
     createdAt,
     requestJson,
-    requestHash: await sha256Commitment(persistedRequest),
-    providerHash: await sha256Commitment(providerBinding),
+    requestHash,
+    providerHash,
     evidenceMode,
     evidenceJson: canonicalJson(evidence),
     evidenceHash: await sha256Commitment(evidence),
     service: task.service,
-    rateLimitKey: await freshMarketplaceRateLimitKey(request),
+    rateLimitKey,
+    rateLimitAdmitted: true,
+    admissionLeaseToken: admission.leaseToken,
   });
   return json(result.chain, result.replayed ? 200 : 201);
 }
