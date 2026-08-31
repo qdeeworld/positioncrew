@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "positioncrew.external-provider-audition.v1",
+  "recordedAt": "2026-08-30T05:44:17.359Z",
+  "chainId": 56,
+  "provider": {
+    "name": "Brain on BNB",
+    "address": "0x73809F69916FcF7Ddc5BB1315fBdf96A569a5963"
+  },
+  "commerce": {
+    "protocol": "ERC-8183",
+    "jobId": "56668",
+    "kernel": "0xEa4DAa3100A767e86FDed867729ae7446476EBA6",
+    "submissionTransaction": "0x92805ddc2a123a893093e261427f18b57ec223b7f278e364882fe21f89e8fd5c",
+    "deliverableUrl": "https://agent.brainonbnb.com/job/56668/result",
+    "deliverableHash": "0x529ee17d8a32d5bfc41ef10987c01b639cfbeffcbe7f927093e669226213d090",
+    "contentHashMatchesOnchain": true,
+    "escrowedAmount": "0.10 U"
+  },
+  "job": {
+    "service": "HEALTH_FACTOR_MONITORING",
+    "protocol": "Venus Classic",
+    "account": "0xe02702687b1653a782af57fbcc56d59b7e99a935",
+    "deadline": "2026-08-30T05:39:25.186Z"
+  },
+  "validation": {
+    "status": "DELIVERED_INCOMPATIBLE",
+    "passedChecks": 7,
+    "failedChecks": 2,
+    "checks": [
+      {
+        "code": "IDENTITY_AND_DELIVERY",
+        "status": "PASS",
+        "detail": "The provider accepted a funded BSC mainnet job and submitted a result before the deadline."
+      },
+      {
+        "code": "CONTENT_HASH",
+        "status": "PASS",
+        "detail": "The served result bytes reproduce the deliverable hash recorded onchain."
+      },
+      {
+        "code": "REQUIRED_POSITION_FIELDS",
+        "status": "PASS",
+        "detail": "The result included health factor, liquidation distance, and five collateral stress rows."
+      },
+      {
+        "code": "PROTOCOL_CROSS_CHECK",
+        "status": "FAIL",
+        "detail": "The provider reported a $35.26 difference from Venus getAccountLiquidity and marked its own cross-check as disagreeing."
+      },
+      {
+        "code": "BLOCK_ATTRIBUTION",
+        "status": "FAIL",
+        "detail": "The result did not identify the BSC block used for its calculation."
+      }
+    ],
+    "boundary": "The provider proved mainnet activation and attributable delivery, but it did not pass PositionCrew compatibility. No normalized result, eligibility, selection, or ranking was created."
+  }
+}

@@ -544,12 +544,329 @@ function LendingProviderAuditionPanel({
         })}
       </div>
 
+      {audition.externalProviderAudit ? (
+        <aside className="external-provider-audit" aria-labelledby="external-provider-audit-title">
+          <div className="external-provider-audit-heading">
+            <div>
+              <span className="section-kicker">Prior external provider audition</span>
+              <h4 id="external-provider-audit-title">
+                Delivery verified; job compatibility refused
+              </h4>
+              <p>
+                PositionCrew funded an independent health-factor job on BSC mainnet.
+                {` ${audition.externalProviderAudit.provider.name}`} returned an onchain-hash-matched
+                result before the deadline, but the result did not meet the contract required for
+                a PositionCrew Lending Rescue decision.
+              </p>
+            </div>
+            <strong className="external-provider-audit-status">
+              <AlertTriangle size={14} aria-hidden="true" /> Not eligible
+            </strong>
+          </div>
+
+          <div className="external-provider-audit-summary">
+            <span>
+              <b>{audition.externalProviderAudit.validation.passedChecks} checks passed</b>
+              Identity, delivery, hash, position fields, and deadline
+            </span>
+            <span>
+              <b>{audition.externalProviderAudit.validation.failedChecks} checks failed</b>
+              No BSC block number and a $35.26 Venus cross-check difference
+            </span>
+            <span>
+              <b>ERC-8183 job #{audition.externalProviderAudit.commerce.jobId}</b>
+              {audition.externalProviderAudit.commerce.escrowedAmount} recorded in the funded job;
+              settlement is not claimed
+            </span>
+          </div>
+
+          <div className="external-provider-audit-actions">
+            <a
+              href={`https://bscscan.com/tx/${audition.externalProviderAudit.commerce.submissionTransaction}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              View onchain submission <ExternalLink size={13} aria-hidden="true" />
+            </a>
+            <a
+              href={audition.externalProviderAudit.commerce.deliverableUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Inspect provider output <ExternalLink size={13} aria-hidden="true" />
+            </a>
+          </div>
+
+          <p className="external-provider-audit-boundary">
+            This was a separate frozen audition, not a test of your current request. PositionCrew
+            did not normalize, select, or rank the external provider.
+          </p>
+        </aside>
+      ) : null}
+
       <footer className="provider-audition-boundary">
         <ShieldCheck size={15} aria-hidden="true" />
         <span>
-          No payment, marketplace order, external-provider execution, settlement, signature, custody,
-          or protocol transaction occurred. Audition receipt <code>{shortHash(audition.auditionHash, 18)}</code>.
+          For this current hire, no payment, external-provider execution, settlement, signature,
+          custody, or protocol transaction occurred. Eligibility receipt <code>{shortHash(audition.auditionHash, 18)}</code>.
         </span>
+      </footer>
+    </section>
+  );
+}
+
+function LpExternalProviderComparisonPanel({
+  trace,
+}: {
+  trace: FreshMarketplaceChain | null;
+}) {
+  const evidence = trace?.hire.evidence;
+  const comparison = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
+    ? evidence.externalProviderComparison
+    : undefined;
+  if (!comparison) return null;
+  const comparable = comparison.outcome === "SEMANTICALLY_COMPARABLE";
+  const passedChecks = comparison.checks.filter((check) => check.status === "PASS").length;
+
+  return (
+    <section
+      className="provider-audition-panel"
+      aria-labelledby="lp-external-comparison-title"
+      data-testid="lp-external-provider-comparison"
+    >
+      <div className="provider-audition-heading">
+        <div>
+          <span className="section-kicker">Second-provider check</span>
+          <h3 id="lp-external-comparison-title">
+            {comparable ? "Same position, same decision" : "External comparison recorded"}
+          </h3>
+          <p>
+            PositionCrew asked an unrelated ERC-8004 provider to inspect the same PancakeSwap
+            position. The comparison is evidence of a second assessment, not a provider ranking.
+          </p>
+        </div>
+        <span className="provider-audition-selection">
+          {comparable
+            ? <CheckCircle2 size={15} aria-hidden="true" />
+            : <AlertTriangle size={15} aria-hidden="true" />}
+          {comparable ? "Semantic match" : comparison.outcome.toLowerCase().replaceAll("_", " ")}
+        </span>
+      </div>
+
+      <div className="provider-audition-grid">
+        <article className={`provider-audition-candidate ${comparable ? "selected" : "ineligible"}`}>
+          <div className="provider-audition-candidate-head">
+            <div>
+              <span>External provider</span>
+              <h4>{comparison.provider.name}</h4>
+            </div>
+            <strong>
+              {comparable ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}
+              {comparable ? "Assessment completed" : "Not comparable"}
+            </strong>
+          </div>
+
+          <div className="provider-audition-facts">
+            <div>
+              <span>Identity and position</span>
+              <b>ERC-8004 #{comparison.provider.erc8004TokenId} · NFT #{comparison.positionTokenId}</b>
+              <small>{comparison.persistedByProvider
+                ? "The provider marked its assessment persisted."
+                : "The provider did not confirm persistence."}</small>
+            </div>
+            <div>
+              <span>Decision</span>
+              <b>{comparison.externalDecision} externally · {comparison.firstPartyDecision} by PositionCrew</b>
+              <small>{comparison.exactRequestAccepted
+                ? "The external provider accepted the full PositionCrew request."
+                : "The external provider accepted the position NFT, not every PositionCrew constraint."}</small>
+            </div>
+          </div>
+
+          <ul className="provider-audition-checks">
+            {comparison.checks.map((check) => (
+              <li className={check.status.toLowerCase()} key={check.code}>
+                <span>{check.status}</span>
+                <p>{check.detail}</p>
+              </li>
+            ))}
+          </ul>
+        </article>
+      </div>
+
+      <footer className="provider-audition-boundary">
+        <ShieldCheck size={15} aria-hidden="true" />
+        <span>
+          {passedChecks} of {comparison.checks.length} checks passed. {comparison.boundary}
+        </span>
+      </footer>
+    </section>
+  );
+}
+
+function LendingExternalProviderComparisonPanel({
+  trace,
+}: {
+  trace: FreshMarketplaceChain | null;
+}) {
+  const evidence = trace?.hire.evidence;
+  const comparison = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
+    ? evidence.externalLendingComparison
+    : undefined;
+  if (!comparison) return null;
+  const comparable = comparison.outcome === "SEMANTICALLY_COMPARABLE";
+  const difference = comparison.healthFactorDifferenceBps === null
+    ? "not comparable"
+    : `${comparison.healthFactorDifferenceBps.toFixed(3)} bps apart`;
+
+  return (
+    <section
+      className="provider-audition-panel"
+      aria-labelledby="lending-external-comparison-title"
+      data-testid="lending-external-provider-comparison"
+    >
+      <div className="provider-audition-heading">
+        <div>
+          <span className="section-kicker">Independent risk check</span>
+          <h3 id="lending-external-comparison-title">
+            {comparable ? "Health factor cross-checked" : "External risk check recorded"}
+          </h3>
+          <p>
+            A separate ERC-8004 monitor assessed the same Venus account. PositionCrew still selects
+            the rescue provider because the monitor does not return a bounded rescue action.
+          </p>
+        </div>
+        <span className="provider-audition-selection">
+          {comparable
+            ? <CheckCircle2 size={15} aria-hidden="true" />
+            : <AlertTriangle size={15} aria-hidden="true" />}
+          {comparable ? "Diagnosis matched" : comparison.outcome.toLowerCase().replaceAll("_", " ")}
+        </span>
+      </div>
+
+      <div className="provider-audition-grid">
+        <article className={`provider-audition-candidate ${comparable ? "selected" : "ineligible"}`}>
+          <div className="provider-audition-candidate-head">
+            <div>
+              <span>External monitor · not selected</span>
+              <h4>{comparison.provider.name}</h4>
+            </div>
+            <strong>
+              {comparable ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}
+              {comparable ? "Assessment completed" : "Not comparable"}
+            </strong>
+          </div>
+
+          <div className="provider-audition-facts">
+            <div>
+              <span>Health factor</span>
+              <b>{comparison.externalHealthFactor ?? "Unavailable"} external · {comparison.firstPartyHealthFactor ?? "Unavailable"} PositionCrew</b>
+              <small>{difference}; external status {comparison.externalRiskStatus.replaceAll("_", " ").toLowerCase()}.</small>
+            </div>
+            <div>
+              <span>Rescue eligibility</span>
+              <b>Not eligible · PositionCrew decision {comparison.firstPartyDecision.replaceAll("_", " ")}</b>
+              <small>The monitor diagnoses risk but does not produce the required bounded rescue deliverable.</small>
+            </div>
+          </div>
+
+          <ul className="provider-audition-checks">
+            {comparison.checks.map((check) => (
+              <li className={check.status.toLowerCase()} key={check.code}>
+                <span>{check.status}</span>
+                <p>{check.detail}</p>
+              </li>
+            ))}
+          </ul>
+        </article>
+      </div>
+
+      <footer className="provider-audition-boundary">
+        <ShieldCheck size={15} aria-hidden="true" />
+        <span>{comparison.boundary}</span>
+      </footer>
+    </section>
+  );
+}
+
+function GridAndYieldExternalComparisonPanel({
+  trace,
+}: {
+  trace: FreshMarketplaceChain | null;
+}) {
+  const evidence = trace?.hire.evidence;
+  if (evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED") return null;
+  const grid = evidence.externalGridComparison;
+  const yieldComparison = evidence.externalYieldComparison;
+  if (!grid && !yieldComparison) return null;
+
+  const isGrid = Boolean(grid);
+  const provider = grid?.provider ?? yieldComparison!.provider;
+  const checks = grid?.checks ?? yieldComparison!.checks;
+  const boundary = grid?.boundary ?? yieldComparison!.boundary;
+  const partial = (grid?.outcome ?? yieldComparison!.outcome) === "PARTIAL_COMPATIBILITY";
+  const title = isGrid
+    ? (partial ? "Live range cross-checked" : "External range check recorded")
+    : (partial ? "Rate leader cross-checked" : "External rate check recorded");
+  const summary = isGrid
+    ? `${grid?.externalState ?? "Unavailable"} / ${grid?.externalRecommendation ?? "Unavailable"} externally · ${grid?.positionCrewDecision.replaceAll("_", " ")} by PositionCrew`
+    : `${yieldComparison?.externalSimpleAnnualRateBps ?? "-"} bps external · ${yieldComparison?.positionCrewGrossApyBps ?? "-"} bps PositionCrew`;
+  const detail = isGrid
+    ? "AiKi checked the exact PositionCrew-derived range on the same live pool. PositionCrew remains responsible for constructing bounded orders and loss controls."
+    : `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied a rate-only candidate; PositionCrew also evaluated liquidity, risk, costs, and horizon benefit.`;
+
+  return (
+    <section
+      className="provider-audition-panel"
+      aria-labelledby="external-crosscheck-title"
+      data-testid={isGrid ? "grid-external-provider-comparison" : "yield-external-provider-comparison"}
+    >
+      <div className="provider-audition-heading">
+        <div>
+          <span className="section-kicker">Second-provider check</span>
+          <h3 id="external-crosscheck-title">{title}</h3>
+          <p>{detail}</p>
+        </div>
+        <span className="provider-audition-selection">
+          {partial ? <CheckCircle2 size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}
+          {partial ? "Partial contract match" : "Not comparable"}
+        </span>
+      </div>
+
+      <div className="provider-audition-grid">
+        <article className={`provider-audition-candidate ${partial ? "selected" : "ineligible"}`}>
+          <div className="provider-audition-candidate-head">
+            <div>
+              <span>External cross-check · not selected</span>
+              <h4>{provider.name}</h4>
+            </div>
+            <strong>{partial ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}{partial ? "Result persisted" : "Unavailable"}</strong>
+          </div>
+          <div className="provider-audition-facts">
+            <div>
+              <span>Independent result</span>
+              <b>{summary}</b>
+              <small>ERC-8004 #{provider.erc8004TokenId}; no payment, authority grant, or transaction occurred.</small>
+            </div>
+            <div>
+              <span>Selection status</span>
+              <b>Cross-check only · not eligible</b>
+              <small>The provider does not accept the full PositionCrew job contract, so this is not a ranking or activation claim.</small>
+            </div>
+          </div>
+          <ul className="provider-audition-checks">
+            {checks.map((check) => (
+              <li className={check.status.toLowerCase()} key={check.code}>
+                <span>{check.status}</span>
+                <p>{check.detail}</p>
+              </li>
+            ))}
+          </ul>
+        </article>
+      </div>
+      <footer className="provider-audition-boundary">
+        <ShieldCheck size={15} aria-hidden="true" />
+        <span>{boundary}</span>
       </footer>
     </section>
   );
@@ -1725,6 +2042,9 @@ export function JobWorkspace({
             </div>
           )}
           <LendingProviderAuditionPanel trace={marketplaceTrace} />
+          <LendingExternalProviderComparisonPanel trace={marketplaceTrace} />
+          <LpExternalProviderComparisonPanel trace={marketplaceTrace} />
+          <GridAndYieldExternalComparisonPanel trace={marketplaceTrace} />
           {marketplaceTrace && (
             <div className="request-boundary" role="status" aria-live="polite">
               {marketplaceTrace.job.status === "COMPLETED"

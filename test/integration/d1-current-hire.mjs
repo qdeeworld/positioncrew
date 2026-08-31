@@ -199,6 +199,16 @@ async function runLifecycle(baseUrl) {
   assert.equal(created.body.hire.evidenceMode, "CURRENT_BLOCK_PINNED");
   assert.equal(created.body.job.state, "CREATED");
   assert.equal(created.body.receipt, null);
+  const externalLendingComparison = created.body.hire.evidence.externalLendingComparison;
+  assert.equal(
+    externalLendingComparison?.schemaVersion,
+    "positioncrew.external-lending-comparison-summary.v1",
+  );
+  assert.equal(externalLendingComparison?.provider?.erc8004TokenId, "315943");
+  assert.equal(externalLendingComparison?.account, currentRefusalHire().request.account);
+  assert.equal(externalLendingComparison?.eligibleForRescueSelection, false);
+  assert.equal(externalLendingComparison?.eligibleForLiveMatch, false);
+  assert.ok(Array.isArray(externalLendingComparison?.checks));
 
   const hireId = created.body.hire.hireId;
   assert.match(hireId, /^[0-9a-f-]{36}$/);
@@ -233,7 +243,7 @@ async function runLifecycle(baseUrl) {
     receipt.body.receipt.response.result.deliverable.status,
     "REFUSED_CONSTRAINTS",
   );
-  return { hireId, receiptPath: completed.receipt.publicUrl };
+  return { hireId, receiptPath: completed.receipt.publicUrl, externalLendingComparison };
 }
 
 const ADDITIONAL_CURRENT_HIRE_CASES = [
@@ -372,6 +382,48 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
   assert.ok(created.body?.hire?.evidenceHash);
   assert.equal(created.body?.job?.state, "CREATED");
   assert.equal(created.body?.receipt, null);
+  const externalProviderComparison = definition.service === "LP_REBALANCE"
+    ? created.body?.hire?.evidence?.externalProviderComparison
+    : undefined;
+  const externalGridComparison = definition.service === "BOUNDED_GRID"
+    ? created.body?.hire?.evidence?.externalGridComparison
+    : undefined;
+  const externalYieldComparison = definition.service === "YIELD_OPTIMIZATION"
+    ? created.body?.hire?.evidence?.externalYieldComparison
+    : undefined;
+  if (definition.service === "LP_REBALANCE") {
+    assert.equal(
+      externalProviderComparison?.schemaVersion,
+      "positioncrew.external-lp-comparison-summary.v1",
+    );
+    assert.equal(externalProviderComparison?.provider?.erc8004TokenId, "315944");
+    assert.equal(externalProviderComparison?.positionTokenId, "9000001");
+    assert.equal(externalProviderComparison?.exactRequestAccepted, false);
+    assert.equal(externalProviderComparison?.eligibleForLiveMatch, false);
+    assert.ok(Array.isArray(externalProviderComparison?.checks));
+  }
+  if (definition.service === "BOUNDED_GRID") {
+    assert.equal(
+      externalGridComparison?.schemaVersion,
+      "positioncrew.external-grid-comparison-summary.v1",
+    );
+    assert.equal(externalGridComparison?.provider?.erc8004TokenId, "315945");
+    assert.equal(externalGridComparison?.pool, request.venue);
+    assert.equal(externalGridComparison?.exactRequestAccepted, false);
+    assert.equal(externalGridComparison?.eligibleForLiveMatch, false);
+    assert.ok(Array.isArray(externalGridComparison?.checks));
+  }
+  if (definition.service === "YIELD_OPTIMIZATION") {
+    assert.equal(
+      externalYieldComparison?.schemaVersion,
+      "positioncrew.external-yield-comparison-summary.v1",
+    );
+    assert.equal(externalYieldComparison?.provider?.erc8004TokenId, "315946");
+    assert.equal(externalYieldComparison?.marketCount, request.opportunities.length);
+    assert.equal(externalYieldComparison?.exactRequestAccepted, false);
+    assert.equal(externalYieldComparison?.eligibleForLiveMatch, false);
+    assert.ok(Array.isArray(externalYieldComparison?.checks));
+  }
 
   const run = await requestJson(
     baseUrl,
@@ -411,6 +463,9 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
     providerHash: completed.hire.providerHash,
     evidenceHash: completed.hire.evidenceHash,
     receipt: completed.receipt,
+    externalProviderComparison,
+    externalGridComparison,
+    externalYieldComparison,
   };
 }
 
@@ -460,6 +515,10 @@ async function main() {
     );
     assert.equal(reloadedHire.response.status, 200);
     assert.equal(reloadedHire.body.job.state, "COMPLETED");
+    assert.deepEqual(
+      reloadedHire.body.hire.evidence.externalLendingComparison,
+      persisted.externalLendingComparison,
+    );
 
     const reloadedReceipt = await requestJson(baseUrl, persisted.receiptPath);
     assert.equal(reloadedReceipt.response.status, 200);
@@ -481,6 +540,24 @@ async function main() {
         reloadedCategoryHire.body.hire.evidenceHash,
         lifecycleResult.evidenceHash,
       );
+      if (lifecycleResult.service === "LP_REBALANCE") {
+        assert.deepEqual(
+          reloadedCategoryHire.body.hire.evidence.externalProviderComparison,
+          lifecycleResult.externalProviderComparison,
+        );
+      }
+      if (lifecycleResult.service === "BOUNDED_GRID") {
+        assert.deepEqual(
+          reloadedCategoryHire.body.hire.evidence.externalGridComparison,
+          lifecycleResult.externalGridComparison,
+        );
+      }
+      if (lifecycleResult.service === "YIELD_OPTIMIZATION") {
+        assert.deepEqual(
+          reloadedCategoryHire.body.hire.evidence.externalYieldComparison,
+          lifecycleResult.externalYieldComparison,
+        );
+      }
 
       const reloadedCategoryReceipt = await requestJson(
         baseUrl,

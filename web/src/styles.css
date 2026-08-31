@@ -1734,6 +1734,131 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   background: rgba(252, 235, 237, 0.35);
 }
 
+.external-provider-audit {
+  margin: 0 16px 16px;
+  padding: 16px;
+  border: 1px solid #d8c99c;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #fffdf5, #fffaf2);
+}
+
+.external-provider-audit-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.external-provider-audit-heading h4 {
+  margin: 5px 0 0;
+  font-size: 14px;
+}
+
+.external-provider-audit-heading p {
+  max-width: 720px;
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.external-provider-audit-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding-inline: 10px;
+  border: 1px solid #d7b66d;
+  border-radius: 999px;
+  color: #765412;
+  background: #fff4d9;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.external-provider-audit-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.external-provider-audit-summary span {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #e9dfc3;
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.external-provider-audit-summary b {
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.external-provider-audit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.external-provider-audit-actions a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid #c8b77e;
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.external-provider-audit-actions a:hover {
+  border-color: #8d7a3e;
+}
+
+.external-provider-audit-actions a:focus-visible {
+  outline: 3px solid rgba(124, 103, 39, 0.28);
+  outline-offset: 2px;
+}
+
+.external-provider-audit-boundary {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .external-provider-audit-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .external-provider-audit-status {
+    align-self: flex-start;
+  }
+
+  .external-provider-audit-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .external-provider-audit-actions a {
+    justify-content: center;
+    width: 100%;
+  }
+}
+
 .provider-audition-candidate-head {
   display: flex;
   align-items: flex-start;

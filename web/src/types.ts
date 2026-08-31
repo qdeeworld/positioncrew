@@ -534,6 +534,48 @@ export interface LendingProviderAuditionCandidate {
   checks: LendingProviderAuditionCheck[];
 }
 
+export interface ExternalProviderAuditionEvidence {
+  schemaVersion: "positioncrew.external-provider-audition.v1";
+  recordedAt: string;
+  chainId: 56;
+  provider: {
+    name: string;
+    address: string;
+  };
+  commerce: {
+    protocol: "ERC-8183";
+    jobId: string;
+    kernel: string;
+    submissionTransaction: string;
+    deliverableUrl: string;
+    deliverableHash: string;
+    contentHashMatchesOnchain: true;
+    escrowedAmount: "0.10 U";
+  };
+  job: {
+    service: "HEALTH_FACTOR_MONITORING";
+    protocol: "Venus Classic";
+    account: string;
+    deadline: string;
+  };
+  validation: {
+    status: "DELIVERED_INCOMPATIBLE";
+    passedChecks: number;
+    failedChecks: number;
+    checks: Array<{
+      code:
+        | "IDENTITY_AND_DELIVERY"
+        | "CONTENT_HASH"
+        | "REQUIRED_POSITION_FIELDS"
+        | "PROTOCOL_CROSS_CHECK"
+        | "BLOCK_ATTRIBUTION";
+      status: "PASS" | "FAIL";
+      detail: string;
+    }>;
+    boundary: string;
+  };
+}
+
 export interface LendingProviderAudition {
   schemaVersion: "positioncrew.lending-provider-audition.v1";
   policyVersion: "positioncrew.lending-provider-eligibility.v1";
@@ -542,6 +584,7 @@ export interface LendingProviderAudition {
   observation: CurrentMarketplaceObservation;
   evaluatedAt: string;
   candidates: LendingProviderAuditionCandidate[];
+  externalProviderAudit?: ExternalProviderAuditionEvidence;
   selection: {
     winnerCandidateId: string;
     winnerProviderId: string;
@@ -562,6 +605,90 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
   evaluatedAt: string;
   maxDataAgeSeconds: number;
   providerAudition?: LendingProviderAudition;
+  externalLendingComparison?: {
+    schemaVersion: "positioncrew.external-lending-comparison-summary.v1";
+    provider: { name: string; erc8004TokenId: string; endpoint: string };
+    evaluatedAt: string;
+    account: string;
+    outcome: "SEMANTICALLY_COMPARABLE" | "INCOMPATIBLE" | "UNAVAILABLE";
+    attributableResult: boolean;
+    completedSamePositionAssessment: boolean;
+    persistedByProvider: boolean;
+    externalHealthFactor: string | null;
+    firstPartyHealthFactor: string | null;
+    healthFactorDifferenceBps: number | null;
+    externalRiskStatus: string;
+    firstPartyDecision: string;
+    exactRequestAccepted: false;
+    eligibleForRescueSelection: false;
+    eligibleForLiveMatch: false;
+    checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
+    boundary: string;
+  };
+  externalProviderComparison?: {
+    schemaVersion: "positioncrew.external-lp-comparison-summary.v1";
+    provider: {
+      name: string;
+      erc8004TokenId: string;
+      endpoint: string;
+    };
+    evaluatedAt: string;
+    positionTokenId: string;
+    outcome: "SEMANTICALLY_COMPARABLE" | "INCOMPATIBLE" | "UNAVAILABLE";
+    attributableResult: boolean;
+    completedSamePositionAssessment: boolean;
+    persistedByProvider: boolean;
+    externalDecision: "HOLD" | "REBALANCE" | "UNKNOWN";
+    firstPartyDecision: string;
+    exactRequestAccepted: false;
+    eligibleForLiveMatch: false;
+    checks: Array<{
+      code: string;
+      status: "PASS" | "FAIL";
+      detail: string;
+    }>;
+    boundary: string;
+  };
+  externalGridComparison?: {
+    schemaVersion: "positioncrew.external-grid-comparison-summary.v1";
+    provider: { name: string; erc8004TokenId: string; endpoint: string };
+    evaluatedAt: string;
+    pool: string;
+    outcome: "PARTIAL_COMPATIBILITY" | "INCOMPATIBLE" | "UNAVAILABLE";
+    positionCrewDecision: string;
+    externalRecommendation: string | null;
+    externalState: string | null;
+    tickLower: number | null;
+    tickUpper: number | null;
+    exactRangeAccepted: boolean;
+    attributable: boolean;
+    persisted: boolean;
+    exactRequestAccepted: false;
+    eligibleForGridSelection: false;
+    eligibleForLiveMatch: false;
+    checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
+    boundary: string;
+  };
+  externalYieldComparison?: {
+    schemaVersion: "positioncrew.external-yield-comparison-summary.v1";
+    provider: { name: string; erc8004TokenId: string; endpoint: string };
+    evaluatedAt: string;
+    outcome: "PARTIAL_COMPATIBILITY" | "INCOMPATIBLE" | "UNAVAILABLE";
+    marketCount: number;
+    positionCrewSelectedMarket: string | null;
+    externalRecommendedMarket: string | null;
+    sameRateLeader: boolean;
+    positionCrewGrossApyBps: number | null;
+    externalSimpleAnnualRateBps: number | null;
+    rateDifferenceBps: number | null;
+    attributable: boolean;
+    persisted: boolean;
+    exactRequestAccepted: false;
+    eligibleForYieldSelection: false;
+    eligibleForLiveMatch: false;
+    checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
+    boundary: string;
+  };
 }
 
 export interface HistoricalFixtureMarketplaceEvidence {

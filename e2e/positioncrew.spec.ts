@@ -495,7 +495,43 @@ async function installCurrentLendingHireRoutes(
       commerce: { directCostUsd: "0.00", walletRequired: false, settlement: "NO_PAYMENT" },
       request: rescueRequest,
       requestHash: response.result.evaluation.requestHash,
-      evidence: observation,
+      evidence: {
+        schemaVersion: "positioncrew.current-block-pinned-evidence.v1",
+        evidenceClass: "CURRENT_BLOCK_PINNED",
+        chainId: 56,
+        source: observation,
+        freshnessAtCreation: "FRESH",
+        evaluatedAt: now.toISOString(),
+        maxDataAgeSeconds: rescueRequest.maxDataAgeSeconds,
+        externalLendingComparison: {
+          schemaVersion: "positioncrew.external-lending-comparison-summary.v1",
+          provider: {
+            name: "AiKi Venus Health Factor Guardian",
+            erc8004TokenId: "315943",
+            endpoint: "https://www.useaiki.xyz/v1/reference/venus/agent/315943",
+          },
+          evaluatedAt: now.toISOString(),
+          account,
+          outcome: "SEMANTICALLY_COMPARABLE",
+          attributableResult: true,
+          completedSamePositionAssessment: true,
+          persistedByProvider: true,
+          externalHealthFactor: options.safeRefusal ? null : "1.0435",
+          firstPartyHealthFactor: options.safeRefusal ? null : "1.04347826",
+          healthFactorDifferenceBps: options.safeRefusal ? null : 0.208,
+          externalRiskStatus: options.safeRefusal ? "NO_POSITION" : "AT_RISK",
+          firstPartyDecision: options.safeRefusal ? "NONE" : "REPAY_DEBT",
+          exactRequestAccepted: false,
+          eligibleForRescueSelection: false,
+          eligibleForLiveMatch: false,
+          checks: [
+            { code: "ACCOUNT", status: "PASS", detail: "Provider assessed the exact request account." },
+            { code: "HEALTH_FACTOR_ALIGNMENT", status: options.safeRefusal ? "FAIL" : "PASS", detail: options.safeRefusal ? "No health factor exists for this empty account." : "Health factors differ by 0.208 bps." },
+            { code: "RESCUE_OUTPUT_CONTRACT", status: "FAIL", detail: "Provider diagnoses risk but does not return a bounded rescue action." },
+          ],
+          boundary: "This proves a second health assessment, not provider selection, payment, rescue execution, or a transaction.",
+        },
+      },
       evidenceHash: `sha256:${"d".repeat(64)}`,
       providerHash: `sha256:${"f".repeat(64)}`,
       createdAt: now.toISOString(),
@@ -647,6 +683,11 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.getByRole("heading", { name: "Action required" })).toBeVisible();
   await expect(page.getByText("Crossed now", { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/Repay 152 USDT to target a projected/)).toBeVisible();
+  const externalComparison = page.getByTestId("lending-external-provider-comparison");
+  await expect(externalComparison.getByRole("heading", { name: "Health factor cross-checked" })).toBeVisible();
+  await expect(externalComparison.getByText("AiKi Venus Health Factor Guardian", { exact: true })).toBeVisible();
+  await expect(externalComparison).toContainText("1.0435 external · 1.04347826 PositionCrew");
+  await expect(externalComparison).toContainText("Not eligible · PositionCrew decision REPAY DEBT");
   await expect(page.locator(".result-boundary")).toContainText(
     "Block-pinned Venus input. The provider output is unsigned and must be revalidated against current protocol state before execution.",
   );
@@ -1062,6 +1103,27 @@ test("all three non-lending current hires return category-specific durable resul
     await page.getByRole("button", { name: "Hire and run current request" }).click();
     await expect(page.getByRole("heading", { name: candidate.output })).toBeVisible();
     await expect(page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" })).toBeVisible();
+    if (candidate.value === "LP_REBALANCE") {
+      const comparison = page.getByTestId("lp-external-provider-comparison");
+      await expect(comparison.getByRole("heading", { name: "Same position, same decision" })).toBeVisible();
+      await expect(comparison.getByText("AiKi PancakeSwap LP Rebalancer", { exact: true })).toBeVisible();
+      await expect(comparison.getByText("HOLD externally · HOLD by PositionCrew", { exact: true })).toBeVisible();
+      await expect(comparison).toContainText("accepted the position NFT, not every PositionCrew constraint");
+    }
+    if (candidate.value === "BOUNDED_GRID") {
+      const comparison = page.getByTestId("grid-external-provider-comparison");
+      await expect(comparison.getByRole("heading", { name: "Live range cross-checked" })).toBeVisible();
+      await expect(comparison.getByText("AiKi PancakeSwap Grid Trader", { exact: true })).toBeVisible();
+      await expect(comparison).toContainText("IN_GRID / WAIT externally · BUILD GRID by PositionCrew");
+      await expect(comparison).toContainText("Cross-check only · not eligible");
+    }
+    if (candidate.value === "YIELD_OPTIMIZATION") {
+      const comparison = page.getByTestId("yield-external-provider-comparison");
+      await expect(comparison.getByRole("heading", { name: "Rate leader cross-checked" })).toBeVisible();
+      await expect(comparison.getByText("AiKi Venus Yield Optimiser", { exact: true })).toBeVisible();
+      await expect(comparison).toContainText("263 bps external · 267 bps PositionCrew");
+      await expect(comparison).toContainText("Cross-check only · not eligible");
+    }
   }
   await expect(page.getByTestId("recent-jobs-device").getByText("3 saved jobs", { exact: true })).toBeVisible();
   expect(hires.every((hire) => hire.createBodies.length === 1)).toBe(true);
@@ -1567,6 +1629,92 @@ async function installCurrentCategoryHireRoutes(
           freshnessAtCreation: "FRESH",
           evaluatedAt: now.toISOString(),
           maxDataAgeSeconds: request.maxDataAgeSeconds,
+          ...(definition.service === "LP_REBALANCE" ? {
+            externalProviderComparison: {
+              schemaVersion: "positioncrew.external-lp-comparison-summary.v1",
+              provider: {
+                name: "AiKi PancakeSwap LP Rebalancer",
+                erc8004TokenId: "315944",
+                endpoint: "https://www.useaiki.xyz/v1/reference/pancake/rebalancer/agent/315944",
+              },
+              evaluatedAt: now.toISOString(),
+              positionTokenId: "7284554",
+              outcome: "SEMANTICALLY_COMPARABLE",
+              attributableResult: true,
+              completedSamePositionAssessment: true,
+              persistedByProvider: true,
+              externalDecision: "HOLD",
+              firstPartyDecision: "HOLD",
+              exactRequestAccepted: false,
+              eligibleForLiveMatch: false,
+              checks: [
+                { code: "EXACT_POSITION_STATE", status: "PASS", detail: "Ticks and raw liquidity exactly match the request." },
+                { code: "DECISION_ALIGNMENT", status: "PASS", detail: "Both providers return HOLD." },
+                { code: "EXACT_REQUEST_ACCEPTANCE", status: "FAIL", detail: "Provider accepts the position NFT, not every PositionCrew constraint." },
+              ],
+              boundary: "This proves a second assessment, not provider ranking, activation, payment, or execution.",
+            },
+          } : {}),
+          ...(definition.service === "BOUNDED_GRID" ? {
+            externalGridComparison: {
+              schemaVersion: "positioncrew.external-grid-comparison-summary.v1",
+              provider: {
+                name: "AiKi PancakeSwap Grid Trader",
+                erc8004TokenId: "315945",
+                endpoint: "https://www.useaiki.xyz/v1/reference/pancake/grid/agent/315945",
+              },
+              evaluatedAt: now.toISOString(),
+              pool: String(request.venue),
+              outcome: "PARTIAL_COMPATIBILITY",
+              positionCrewDecision: "BUILD_GRID",
+              externalRecommendation: "WAIT",
+              externalState: "IN_GRID",
+              tickLower: -65647,
+              tickUpper: -65248,
+              exactRangeAccepted: true,
+              attributable: true,
+              persisted: true,
+              exactRequestAccepted: false,
+              eligibleForGridSelection: false,
+              eligibleForLiveMatch: false,
+              checks: [
+                { code: "EXACT_POOL", status: "PASS", detail: "AiKi evaluated the exact PancakeSwap V3 pool." },
+                { code: "EXACT_RANGE", status: "PASS", detail: "AiKi accepted the exact PositionCrew-derived tick range." },
+                { code: "EXACT_JOB_CONTRACT", status: "FAIL", detail: "AiKi does not construct PositionCrew bounded orders." },
+              ],
+              boundary: "AiKi assessed the live pool and range but did not accept the bounded order and loss contract.",
+            },
+          } : {}),
+          ...(definition.service === "YIELD_OPTIMIZATION" ? {
+            externalYieldComparison: {
+              schemaVersion: "positioncrew.external-yield-comparison-summary.v1",
+              provider: {
+                name: "AiKi Venus Yield Optimiser",
+                erc8004TokenId: "315946",
+                endpoint: "https://www.useaiki.xyz/v1/reference/yield/agent/315946",
+              },
+              evaluatedAt: now.toISOString(),
+              outcome: "PARTIAL_COMPATIBILITY",
+              marketCount: Array.isArray(request.opportunities) ? request.opportunities.length : 0,
+              positionCrewSelectedMarket: "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
+              externalRecommendedMarket: "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
+              sameRateLeader: true,
+              positionCrewGrossApyBps: 267,
+              externalSimpleAnnualRateBps: 263,
+              rateDifferenceBps: 4,
+              attributable: true,
+              persisted: true,
+              exactRequestAccepted: false,
+              eligibleForYieldSelection: false,
+              eligibleForLiveMatch: false,
+              checks: [
+                { code: "EXACT_MARKET_SET", status: "PASS", detail: "AiKi evaluated the same frozen Venus market set." },
+                { code: "SAME_RATE_LEADER", status: "PASS", detail: "Both providers identified the same highest-rate market." },
+                { code: "EXACT_JOB_CONTRACT", status: "FAIL", detail: "AiKi does not accept the full PositionCrew optimisation contract." },
+              ],
+              boundary: "AiKi ranked rates but did not evaluate PositionCrew liquidity, risk, costs, or horizon constraints.",
+            },
+          } : {}),
         },
         evidenceHash: `sha256:${"d".repeat(64)}`,
         providerHash: `sha256:${"f".repeat(64)}`,

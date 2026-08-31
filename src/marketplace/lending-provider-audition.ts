@@ -1,5 +1,6 @@
 import { z } from "zod";
 import dedicatedLendingIdentityArtifact from "../../evidence/termix-dedicated-lending.mainnet.json" with { type: "json" };
+import externalProviderAuditionArtifact from "../../evidence/external-provider-audition.mainnet.json" with { type: "json" };
 import {
   AddressSchema,
   HashSchema,
@@ -56,6 +57,49 @@ const LendingAuditionObservationSchema = z.object({
   blockNumber: z.string().regex(/^[1-9]\d*$/),
   observedAt: TimestampSchema,
   explorerUrl: z.string().url(),
+}).strict();
+
+const ExternalProviderAuditionEvidenceSchema = z.object({
+  schemaVersion: z.literal("positioncrew.external-provider-audition.v1"),
+  recordedAt: TimestampSchema,
+  chainId: z.literal(56),
+  provider: z.object({
+    name: z.string().min(1),
+    address: AddressSchema,
+  }).strict(),
+  commerce: z.object({
+    protocol: z.literal("ERC-8183"),
+    jobId: z.string().regex(/^[1-9]\d*$/),
+    kernel: AddressSchema,
+    submissionTransaction: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+    deliverableUrl: z.string().url(),
+    deliverableHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+    contentHashMatchesOnchain: z.literal(true),
+    escrowedAmount: z.literal("0.10 U"),
+  }).strict(),
+  job: z.object({
+    service: z.literal("HEALTH_FACTOR_MONITORING"),
+    protocol: z.literal("Venus Classic"),
+    account: AddressSchema,
+    deadline: TimestampSchema,
+  }).strict(),
+  validation: z.object({
+    status: z.literal("DELIVERED_INCOMPATIBLE"),
+    passedChecks: z.number().int().positive(),
+    failedChecks: z.number().int().positive(),
+    checks: z.array(z.object({
+      code: z.enum([
+        "IDENTITY_AND_DELIVERY",
+        "CONTENT_HASH",
+        "REQUIRED_POSITION_FIELDS",
+        "PROTOCOL_CROSS_CHECK",
+        "BLOCK_ATTRIBUTION",
+      ]),
+      status: z.enum(["PASS", "FAIL"]),
+      detail: z.string().min(1).max(280),
+    }).strict()).length(5),
+    boundary: z.string().min(1).max(400),
+  }).strict(),
 }).strict();
 
 export const LendingProviderAuditionCheckSchema = z.object({
@@ -128,6 +172,7 @@ const LendingProviderAuditionBaseSchema = z.object({
   observation: LendingAuditionObservationSchema,
   evaluatedAt: TimestampSchema,
   candidates: z.array(LendingProviderAuditionCandidateSchema).length(2),
+  externalProviderAudit: ExternalProviderAuditionEvidenceSchema.optional(),
   selection: z.object({
     winnerCandidateId: z.string().min(1),
     winnerProviderId: z.string().min(1),
@@ -351,6 +396,9 @@ export async function createLendingProviderAudition(
     observation,
     evaluatedAt: evaluatedAt.toISOString(),
     candidates,
+    externalProviderAudit: ExternalProviderAuditionEvidenceSchema.parse(
+      externalProviderAuditionArtifact,
+    ),
     selection: {
       winnerCandidateId: winner.candidateId,
       winnerProviderId: winner.candidateId,
