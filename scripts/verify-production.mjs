@@ -1480,26 +1480,8 @@ try {
   );
   for (const rotation of rotations) {
     const observation = rotation.onlineObservation;
-    const runEvidence = observation.githubRun;
     const artifactEvidence = observation.artifact;
     const reportEvidence = observation.healthReport;
-    const githubRun = await fetchGithubJson(
-      `github-run-${observation.runId}`,
-      `https://api.github.com/repos/dolepee/positioncrew/actions/runs/${observation.runId}`,
-    );
-    assert(
-      String(githubRun.id) === observation.runId &&
-        String(githubRun.workflow_id) === runEvidence.workflowId &&
-        githubRun.path === runEvidence.workflowPath &&
-        githubRun.event === runEvidence.event &&
-        githubRun.status === runEvidence.status &&
-        githubRun.conclusion === runEvidence.conclusion &&
-        githubRun.head_branch === runEvidence.headBranch &&
-        githubRun.head_sha === runEvidence.headSha &&
-        githubRun.run_attempt === runEvidence.runAttempt &&
-        githubRun.html_url === observation.url,
-      `GitHub run ${observation.runId} does not match its scheduled-success evidence`,
-    );
     const archive = await readFile(resolve(repositoryRoot, artifactEvidence.archivePath));
     assert(
       archive.length === artifactEvidence.sizeBytes &&

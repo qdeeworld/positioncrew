@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const WORKFLOW_REF =
-  "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main";
+  "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main";
 const TICK_SCHEMA = "positioncrew.bounded-grid-forward-shadow-tick.v1";
 const COLLISION_SCHEMA = "positioncrew.bounded-grid-forward-shadow-collision.v1";
 const COLLISION_REASON = "WINDOW_ALREADY_BOUND_TO_ANOTHER_AUTHENTICATED_RUN";
@@ -79,8 +79,8 @@ function validatedIdentity(environment) {
   if (identity.eventName !== "schedule") {
     throw new Error("Only an authentic scheduled workflow run may collect forward-shadow observations");
   }
-  if (identity.repository !== "dolepee/positioncrew") {
-    throw new Error("Forward-shadow collection is restricted to dolepee/positioncrew");
+  if (identity.repository !== "qdeeworld/positioncrew") {
+    throw new Error("Forward-shadow collection is restricted to qdeeworld/positioncrew");
   }
   if (!/^\d+$/u.test(identity.runId)) throw new Error("GITHUB_RUN_ID is invalid");
   if (identity.runAttempt !== "1") {
@@ -183,7 +183,7 @@ function validatedCollision(body, identity, endpoint, requestedAt) {
     typeof originating !== "object" ||
     originating === null ||
     originating.event !== "schedule" ||
-    originating.repository !== "dolepee/positioncrew" ||
+    originating.repository !== "qdeeworld/positioncrew" ||
     originating.workflowPath !== ".github/workflows/production-smoke.yml" ||
     !/^\d+$/u.test(originating.runId ?? "") ||
     originating.runId === identity.runId ||

@@ -295,12 +295,12 @@ try {
   const headers = {
     Authorization: `Bearer ${token}`,
     "X-GitHub-Event": "schedule",
-    "X-GitHub-Repository": "dolepee/positioncrew",
+    "X-GitHub-Repository": "qdeeworld/positioncrew",
     "X-GitHub-Run-Id": "1001",
     "X-GitHub-Run-Attempt": "1",
     "X-GitHub-Sha": "1".repeat(40),
     "X-GitHub-Workflow-Ref":
-      "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+      "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
   };
   const rejectedMalformedWorkflow = await requestJson(
     baseUrl,
@@ -310,7 +310,7 @@ try {
       headers: {
         ...headers,
         "X-GitHub-Workflow-Ref":
-          "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/not-main",
+          "qdeeworld/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/not-main",
       },
     },
   );
@@ -753,7 +753,7 @@ try {
     assert.equal(provenanceEvent.payload.schedule.headSha, "3".repeat(40));
     assert.equal(
       provenanceEvent.payload.schedule.workflowRef,
-      "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+      "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
     );
   }
   assert.equal(abandonedTerminal.eventType, "VOID_SOURCE_GAP");
@@ -907,7 +907,7 @@ try {
   assert.equal(recoveredGenesis.payload.schedule.headSha, "5".repeat(40));
   assert.equal(
     recoveredGenesis.payload.schedule.workflowRef,
-    "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+    "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
   );
   assert.equal(recoveredGenesisTerminal.eventType, "VOID_SOURCE_GAP");
   assert.equal(recoveredGenesisTerminal.previousEventHash, recoveredGenesis.eventHash);
@@ -1101,7 +1101,7 @@ try {
         ...legacySeedOriginHeaders,
         "X-GitHub-Run-Id": "4098",
         "X-GitHub-Workflow-Ref":
-          "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+          "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
       },
     },
   );
@@ -1116,7 +1116,7 @@ try {
         ...legacySeedOriginHeaders,
         "X-GitHub-Run-Id": "4097",
         "X-GitHub-Workflow-Ref":
-          "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/not-main",
+          "qdeeworld/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/not-main",
       },
     },
   );
@@ -1191,7 +1191,7 @@ try {
   assert.equal(currentWindowAfterRejectedCrossRun.body.events[0].payload.schedule.headSha, "7".repeat(40));
   assert.equal(
     currentWindowAfterRejectedCrossRun.body.events[0].payload.schedule.workflowRef,
-    "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+    "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
   );
   const unrelatedWindowAfterCollisions = await requestJson(
     baseUrl,
@@ -1216,7 +1216,7 @@ try {
   storedLegacyGenesis.payload.schedule.workflowPath =
     ".github/workflows/bounded-grid-shadow-ledger.yml";
   storedLegacyGenesis.payload.schedule.workflowRef =
-    "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main";
+    "qdeeworld/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main";
   storedLegacyGenesis.eventHash = rehashPublicShadowEvent(storedLegacyGenesis);
   const storedLegacyEventId =
     `${legacyRunId}:0:${storedLegacyGenesis.eventHash.slice(7, 19)}`;
@@ -1249,7 +1249,7 @@ try {
         ...legacySeedOriginHeaders,
         "X-GitHub-Run-Id": "4002",
         "X-GitHub-Workflow-Ref":
-          "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+          "qdeeworld/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
       },
     },
   );
@@ -1341,7 +1341,7 @@ try {
   );
   assert.equal(
     recoveredLegacyWindow.body.events[0].payload.schedule.workflowRef,
-    "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+    "qdeeworld/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
   );
   assert.equal(recoveredLegacyWindow.body.events[0].payload.schedule.runId, "4001");
   assert.equal(recoveredLegacyWindow.body.events.at(-1).eventType, "VOID_SOURCE_GAP");
