@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { mkdir } from "node:fs/promises";
 import { EVMWalletProvider, ERC8183Client, JobStatus } from "@bnbagent/sdk";
 import {
   createPublicClient,
@@ -15,6 +14,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { bsc } from "viem/chains";
+import { canonicalHash } from "../core/canonical.js";
 import {
   brainOnBnbPaymentContract,
   HealthFactorLiveMatchJobSchema,
@@ -217,24 +217,19 @@ async function record(phase: string, hash: Hex): Promise<void> {
   await enforceTotalGas(phase);
 }
 
-if (tokenBalance < PAYMENT_BUDGET) {
-  if (requiredWrapInput > 0n) {
-    committedSwapInput += requiredWrapInput;
-    await record("wrap-bnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrapInput }));
-  }
-  const allowance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "allowance", args: [EXPECTED_WALLET, PANCAKE_V3_ROUTER] });
-  if (allowance < SWAP_INPUT) {
-    await record("approve-wbnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, SWAP_INPUT] }));
-  }
-  await record("swap-wbnb-for-u", await walletClient.writeContract({
-    account,
-    chain: bsc,
-    address: PANCAKE_V3_ROUTER,
-    abi: routerAbi,
-    functionName: "exactInputSingle",
-    args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, recipient: EXPECTED_WALLET, amountIn: SWAP_INPUT, amountOutMinimum: minimumOutput, sqrtPriceLimitX96: 0n }],
-  }));
-}
+const outputPath = resolve(
+  argument("output") ??
+    `positioncrew-external-activation-${resumeJobId?.toString() ?? crypto.randomUUID()}.json`,
+);
+await mkdir(dirname(outputPath), { recursive: true });
+await writeFile(outputPath, `${json({
+  schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
+  recordedAt: new Date().toISOString(),
+  state: "BROADCAST_NOT_STARTED",
+  preflight,
+  resumeJobId,
+  boundary: "The output path is writable and the dry-run passed. No transaction represented by this checkpoint has been broadcast.",
+})}\n`, { mode: 0o600, flag: "wx" });
 
 const now = new Date();
 const frozenJob = HealthFactorLiveMatchJobSchema.parse({
@@ -255,15 +250,17 @@ const client = await ERC8183Client.create({ walletProvider: sdkWallet, network: 
 if (client.address !== EXPECTED_WALLET) throw new Error("SDK wallet identity changed after preflight");
 const disputeWindow = await client.policy.disputeWindow();
 const expiredAt = BigInt(Math.floor(Date.now() / 1000)) + disputeWindow + 3_600n;
-const description = JSON.stringify({
+const descriptionBinding = {
   schema: frozenJob.schemaVersion,
   requestHash: quote.frozenJobHash,
   account: frozenJob.account,
   service: quote.quote.service,
   quotedPrice: quote.quote.price,
-});
+};
+const description = JSON.stringify(descriptionBinding);
 let commerceJobId: bigint;
 let originalOnchainDescription: string;
+let resumedJobBudget: bigint | null = null;
 if (resumeJobId !== null) {
   const existingJob = await client.getJob(resumeJobId);
   if (existingJob.client.toLowerCase() !== EXPECTED_WALLET.toLowerCase()) throw new Error("Resumed job client does not match the frozen wallet");
@@ -271,27 +268,84 @@ if (resumeJobId !== null) {
   if (existingJob.status !== JobStatus.OPEN) throw new Error("Resumed job is not OPEN");
   if (existingJob.budget !== 0n && existingJob.budget !== PAYMENT_BUDGET) throw new Error("Resumed job has an unexpected budget");
   if (existingJob.expiredAt <= BigInt(Math.floor(Date.now() / 1000)) + disputeWindow) throw new Error("Resumed job cannot clear the policy dispute window");
+  let existingDescription: unknown;
+  try {
+    existingDescription = JSON.parse(existingJob.description) as unknown;
+  } catch {
+    throw new Error("Resumed job description is not valid JSON");
+  }
+  if (canonicalHash(existingDescription) !== canonicalHash(descriptionBinding)) {
+    throw new Error("Resumed job description does not bind the current account, request hash, service, and quote");
+  }
   commerceJobId = resumeJobId;
   originalOnchainDescription = existingJob.description;
-  if (existingJob.budget === 0n) {
-    await client.setBudget(commerceJobId, PAYMENT_BUDGET);
-    await enforceTotalGas("set-budget");
-  }
+  resumedJobBudget = existingJob.budget;
 } else {
   const creation = await client.createJob({ provider: payment.provider, expiredAt, description });
   await enforceTotalGas("create-job");
   if (creation.jobId === null) throw new Error("ERC-8183 job was broadcast but its job ID could not be recovered; reconcile before retrying");
   commerceJobId = creation.jobId;
   originalOnchainDescription = description;
+}
+await writeFile(outputPath, `${json({
+  schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
+  recordedAt: new Date().toISOString(),
+  state: "ESCROW_SETUP_PENDING",
+  preflight,
+  commerceJobId,
+  resumedExistingJob: resumeJobId !== null,
+  originalOnchainDescription,
+  frozenJob,
+  reaffirmationQuote: quote,
+  transactions,
+  cumulativeGasWei: cumulativeGas,
+  boundary: "The exact job terms and commerce job ID are durable. Registration, budget setup, funding, and provider notification may still be pending.",
+})}\n`, { mode: 0o600 });
+if (resumeJobId !== null) {
+  if (resumedJobBudget === 0n) {
+    await client.setBudget(commerceJobId, PAYMENT_BUDGET);
+    await enforceTotalGas("set-budget");
+  }
+} else {
   await client.registerJob(commerceJobId);
   await enforceTotalGas("register-job");
   await client.setBudget(commerceJobId, PAYMENT_BUDGET);
   await enforceTotalGas("set-budget");
 }
+if (tokenBalance < PAYMENT_BUDGET) {
+  if (requiredWrapInput > 0n) {
+    committedSwapInput += requiredWrapInput;
+    await record("wrap-bnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrapInput }));
+  }
+  const allowance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "allowance", args: [EXPECTED_WALLET, PANCAKE_V3_ROUTER] });
+  if (allowance < SWAP_INPUT) {
+    await record("approve-wbnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, SWAP_INPUT] }));
+  }
+  await record("swap-wbnb-for-u", await walletClient.writeContract({
+    account,
+    chain: bsc,
+    address: PANCAKE_V3_ROUTER,
+    abi: routerAbi,
+    functionName: "exactInputSingle",
+    args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, recipient: EXPECTED_WALLET, amountIn: SWAP_INPUT, amountOutMinimum: minimumOutput, sqrtPriceLimitX96: 0n }],
+  }));
+}
+await writeFile(outputPath, `${json({
+  schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
+  recordedAt: new Date().toISOString(),
+  state: "ESCROW_FUNDING_PENDING",
+  preflight,
+  commerceJobId,
+  resumedExistingJob: resumeJobId !== null,
+  originalOnchainDescription,
+  frozenJob,
+  reaffirmationQuote: quote,
+  transactions,
+  cumulativeGasWei: cumulativeGas,
+  boundary: "The exact job terms are verified and the recovery checkpoint is durable. Escrow funding and provider notification have not started.",
+})}\n`, { mode: 0o600 });
 await client.fund(commerceJobId, PAYMENT_BUDGET, { approveFloor: 0n });
 await enforceTotalGas("fund-job");
-const outputPath = resolve(argument("output") ?? `/Users/qdee/Documents/Codex/competition-controls/build-the-era-positioncrew/audits/brain-on-bnb-funded-activation-${commerceJobId}.json`);
-await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${json({
   schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
   recordedAt: new Date().toISOString(),

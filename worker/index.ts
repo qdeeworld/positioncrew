@@ -1319,6 +1319,41 @@ async function createFreshMarketplaceHire(
   }
   const createdAt = new Date().toISOString();
   const currentBlockPinned = parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2";
+  const persistedRequest = currentBlockPinned
+    ? parsed.request
+    : {
+        schemaVersion: "positioncrew.fresh-marketplace-provider-request.v1",
+        benchmarkSlug: parsed.benchmarkSlug,
+        providerSlug: parsed.providerSlug,
+        providerId: provider.providerId,
+        requestSchema: task.requestSchema,
+        evidenceMode: "HISTORICAL_FIXTURE",
+        directCostUsd: "0.00",
+        walletRequired: false,
+      };
+  const evidenceMode = currentBlockPinned ? "CURRENT_BLOCK_PINNED" : "HISTORICAL_FIXTURE";
+  const providerBinding = {
+    providerSlug: parsed.providerSlug,
+    providerId: provider.providerId,
+    service: task.service,
+    requestSchema: task.requestSchema,
+  };
+  const requestJson = canonicalJson(persistedRequest);
+  const requestHash = await sha256Commitment(persistedRequest);
+  const providerHash = await sha256Commitment(providerBinding);
+  const rateLimitKey = await freshMarketplaceRateLimitKey(request);
+  const store = freshStore(env);
+  const admission = await store.admitHireCreation({
+    request: parsed,
+    providerId: provider.providerId,
+    createdAt,
+    requestHash,
+    providerHash,
+    evidenceMode,
+    service: task.service,
+    rateLimitKey,
+  });
+  if (admission) return json(admission.chain, 200);
   const providerAudition =
     parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
       parsed.benchmarkSlug === "lending-rescue"
@@ -1477,19 +1512,6 @@ async function createFreshMarketplaceHire(
       ]);
     }
   }
-  const persistedRequest = currentBlockPinned
-    ? parsed.request
-    : {
-        schemaVersion: "positioncrew.fresh-marketplace-provider-request.v1",
-        benchmarkSlug: parsed.benchmarkSlug,
-        providerSlug: parsed.providerSlug,
-        providerId: provider.providerId,
-        requestSchema: task.requestSchema,
-        evidenceMode: "HISTORICAL_FIXTURE",
-        directCostUsd: "0.00",
-        walletRequired: false,
-      };
-  const evidenceMode = currentBlockPinned ? "CURRENT_BLOCK_PINNED" : "HISTORICAL_FIXTURE";
   const evidence = currentBlockPinned
     ? CurrentBlockPinnedEvidenceSchema.parse({
         schemaVersion: "positioncrew.current-block-pinned-evidence.v1",
@@ -1526,27 +1548,21 @@ async function createFreshMarketplaceHire(
         benchmarkSlug: parsed.benchmarkSlug,
         requestSchema: task.requestSchema,
       });
-  const providerBinding = {
-    providerSlug: parsed.providerSlug,
-    providerId: provider.providerId,
-    service: task.service,
-    requestSchema: task.requestSchema,
-  };
-  const requestJson = canonicalJson(persistedRequest);
-  const result = await freshStore(env).createHire({
+  const result = await store.createHire({
     request: parsed,
     providerId: provider.providerId,
     hireId: crypto.randomUUID(),
     jobId: crypto.randomUUID(),
     createdAt,
     requestJson,
-    requestHash: await sha256Commitment(persistedRequest),
-    providerHash: await sha256Commitment(providerBinding),
+    requestHash,
+    providerHash,
     evidenceMode,
     evidenceJson: canonicalJson(evidence),
     evidenceHash: await sha256Commitment(evidence),
     service: task.service,
-    rateLimitKey: await freshMarketplaceRateLimitKey(request),
+    rateLimitKey,
+    rateLimitAdmitted: true,
   });
   return json(result.chain, result.replayed ? 200 : 201);
 }

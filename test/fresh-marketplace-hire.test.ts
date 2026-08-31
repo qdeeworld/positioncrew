@@ -71,6 +71,7 @@ class FakeD1 implements D1Database {
   private hire: Record<string, unknown> | null = null;
   private job: Record<string, unknown> | null = null;
   private receipt: Record<string, unknown> | null = null;
+  private rateLimitCount = 0;
 
   constructor(
     private readonly failReads = false,
@@ -113,8 +114,11 @@ class FakeD1 implements D1Database {
 
   first(sql: string, bindings: unknown[]): Record<string, unknown> | null {
     if (this.failReads) throw new Error("unrelated D1 read failure");
-    if (!this.hire || !this.job) return null;
     const normalized = sql.replace(/\s+/g, " ");
+    if (normalized.includes("SELECT create_count FROM fresh_marketplace_rate_limits")) {
+      return { create_count: this.rateLimitCount };
+    }
+    if (!this.hire || !this.job) return null;
     if (
       normalized.includes("WHERE r.receipt_id = ?") &&
       (!this.receipt || this.receipt.receipt_id !== bindings[0])
@@ -147,7 +151,13 @@ class FakeD1 implements D1Database {
 
   run(sql: string, bindings: unknown[]): D1Result {
     const normalized = sql.replace(/\s+/g, " ").trim();
-    if (normalized.startsWith("INSERT INTO fresh_marketplace_hires")) {
+    if (normalized.startsWith("DELETE FROM fresh_marketplace_rate_limits")) {
+      return { success: true, meta: { changes: 0 } };
+    } else if (normalized.startsWith("INSERT INTO fresh_marketplace_rate_limits")) {
+      this.rateLimitCount = this.denyCreates
+        ? FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW + 1
+        : this.rateLimitCount + 1;
+    } else if (normalized.startsWith("INSERT INTO fresh_marketplace_hires")) {
       if (this.denyCreates) return { success: true, meta: { changes: 0 } };
       this.hire = {
         hire_id: bindings[0],
@@ -167,13 +177,15 @@ class FakeD1 implements D1Database {
         hire_created_at: bindings[14],
       };
     } else if (normalized.startsWith("INSERT INTO fresh_marketplace_jobs")) {
-      if (!this.hire || this.hire.hire_id !== bindings[2]) {
+      const directValues = normalized.includes("VALUES (?, ?, 'CREATED', ?)");
+      const hireId = bindings[directValues ? 1 : 2];
+      if (!this.hire || this.hire.hire_id !== hireId) {
         return { success: true, meta: { changes: 0 } };
       }
       this.job = {
         job_id: bindings[0],
         job_state: "CREATED",
-        job_created_at: bindings[1],
+        job_created_at: bindings[directValues ? 2 : 1],
         job_started_at: null,
         job_completed_at: null,
         api_duration_milliseconds: null,
@@ -305,6 +317,10 @@ class RateLimitD1 implements D1Database {
 
   first(sql: string, bindings: unknown[]): Record<string, unknown> | null {
     const normalized = sql.replace(/\s+/g, " ").trim();
+    if (normalized.startsWith("SELECT create_count FROM fresh_marketplace_rate_limits")) {
+      const bucket = this.buckets.get(String(bindings[0]));
+      return bucket ? { create_count: bucket.createCount } : null;
+    }
     let hire: Record<string, unknown> | undefined;
     if (normalized.includes("WHERE h.idempotency_key = ?")) {
       hire = [...this.hires.values()].find(
@@ -364,9 +380,11 @@ class RateLimitD1 implements D1Database {
     }
 
     if (normalized.startsWith("INSERT INTO fresh_marketplace_hires")) {
-      const bucket = this.buckets.get(String(bindings[15]));
-      if (!bucket || bucket.createCount > Number(bindings[16])) {
-        return { success: true, meta: { changes: 0 } };
+      if (normalized.includes("WHERE (SELECT create_count")) {
+        const bucket = this.buckets.get(String(bindings[15]));
+        if (!bucket || bucket.createCount > Number(bindings[16])) {
+          return { success: true, meta: { changes: 0 } };
+        }
       }
       const hireId = String(bindings[0]);
       this.hires.set(hireId, {
@@ -390,12 +408,13 @@ class RateLimitD1 implements D1Database {
     }
 
     if (normalized.startsWith("INSERT INTO fresh_marketplace_jobs")) {
-      const hireId = String(bindings[2]);
+      const directValues = normalized.includes("VALUES (?, ?, 'CREATED', ?)");
+      const hireId = String(bindings[directValues ? 1 : 2]);
       if (!this.hires.has(hireId)) return { success: true, meta: { changes: 0 } };
       this.jobs.set(hireId, {
         job_id: bindings[0],
         job_state: "CREATED",
-        job_created_at: bindings[1],
+        job_created_at: bindings[directValues ? 2 : 1],
         job_started_at: null,
         job_completed_at: null,
         api_duration_milliseconds: null,
@@ -954,6 +973,64 @@ describe("fresh marketplace hire contract", () => {
       ).toISOString(),
       createCount: FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW + 1,
     });
+  });
+
+  it("admits external work once and replays it without consuming another slot", async () => {
+    const database = new RateLimitD1();
+    const store = new FreshMarketplaceStore(database);
+    const input = await rateLimitHireInput(0, NOW);
+    const admissionInput = {
+      request: input.request,
+      providerId: input.providerId,
+      createdAt: input.createdAt,
+      requestHash: input.requestHash,
+      providerHash: input.providerHash,
+      evidenceMode: input.evidenceMode,
+      service: input.service,
+      rateLimitKey: input.rateLimitKey,
+    };
+
+    await expect(store.admitHireCreation(admissionInput)).resolves.toBeNull();
+    await store.createHire({ ...input, rateLimitAdmitted: true });
+    await expect(store.admitHireCreation(admissionInput)).resolves.toMatchObject({
+      replayed: true,
+      chain: { hire: { hireId: input.hireId } },
+    });
+    expect(database.getBucket(HASH_A)?.createCount).toBe(1);
+  });
+
+  it("rejects pre-admission at capacity before provider work can begin", async () => {
+    const database = new RateLimitD1();
+    const store = new FreshMarketplaceStore(database);
+
+    for (let index = 0; index < FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW; index += 1) {
+      const input = await rateLimitHireInput(index, new Date(Date.parse(NOW) + index).toISOString());
+      await expect(store.admitHireCreation({
+        request: input.request,
+        providerId: input.providerId,
+        createdAt: input.createdAt,
+        requestHash: input.requestHash,
+        providerHash: input.providerHash,
+        evidenceMode: input.evidenceMode,
+        service: input.service,
+        rateLimitKey: input.rateLimitKey,
+      })).resolves.toBeNull();
+    }
+
+    const denied = await rateLimitHireInput(
+      FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW,
+      new Date(Date.parse(NOW) + FRESH_MARKETPLACE_MAX_CREATES_PER_WINDOW).toISOString(),
+    );
+    await expect(store.admitHireCreation({
+      request: denied.request,
+      providerId: denied.providerId,
+      createdAt: denied.createdAt,
+      requestHash: denied.requestHash,
+      providerHash: denied.providerHash,
+      evidenceMode: denied.evidenceMode,
+      service: denied.service,
+      rateLimitKey: denied.rateLimitKey,
+    })).rejects.toBeInstanceOf(FreshMarketplaceCapacityExceeded);
   });
 
   it("accepts only the three exact frozen provider/task bindings", () => {
