@@ -95,6 +95,7 @@ export interface CreateFreshMarketplaceHire {
   service: FreshMarketplaceChain["hire"]["service"];
   rateLimitKey: string;
   rateLimitAdmitted?: boolean;
+  admissionLeaseToken?: string;
 }
 
 export interface CompleteFreshMarketplaceJob {
@@ -364,6 +365,7 @@ export class FreshMarketplaceStore {
     replayed: boolean;
     hireId: string;
     jobId: string;
+    leaseToken: string;
   }> {
     const existing = await this.getAdmissionByIdempotencyKey(input.request.idempotencyKey);
     if (existing) return this.replayAdmission(existing, input);
@@ -425,7 +427,13 @@ export class FreshMarketplaceStore {
       if (raced) return this.replayAdmission(raced, input);
       throw error;
     }
-    return { chain: null, replayed: false, hireId: input.hireId, jobId: input.jobId };
+    return {
+      chain: null,
+      replayed: false,
+      hireId: input.hireId,
+      jobId: input.jobId,
+      leaseToken: input.createdAt,
+    };
   }
 
   async createHire(input: CreateFreshMarketplaceHire): Promise<{
@@ -438,12 +446,13 @@ export class FreshMarketplaceStore {
       if (
         input.rateLimitAdmitted &&
         reservation.hire_id === input.hireId &&
+        reservation.hire_created_at === input.admissionLeaseToken &&
         reservation.provider_hash === null &&
         reservation.evidence_json === null
       ) {
         const finalized = await this.db.prepare([
           "UPDATE fresh_marketplace_hires SET provider_hash = ?, evidence_json = ?, evidence_hash = ?",
-          "WHERE hire_id = ? AND idempotency_key = ?",
+          "WHERE hire_id = ? AND idempotency_key = ? AND created_at = ?",
           "AND provider_hash IS NULL AND evidence_json IS NULL AND evidence_hash IS NULL",
         ].join(" ")).bind(
           input.providerHash,
@@ -451,6 +460,7 @@ export class FreshMarketplaceStore {
           input.evidenceHash,
           input.hireId,
           input.request.idempotencyKey,
+          input.admissionLeaseToken,
         ).run();
         if (!finalized.success) throw new Error(finalized.error ?? "D1 admitted hire finalization failed");
         const chain = await this.getHire(input.hireId);
@@ -733,6 +743,7 @@ export class FreshMarketplaceStore {
     replayed: boolean;
     hireId: string;
     jobId: string;
+    leaseToken: string;
   }> {
     this.matchAdmissionRow(existing, input);
     if (existing.evidence_json === null) {
@@ -765,6 +776,7 @@ export class FreshMarketplaceStore {
             replayed: false,
             hireId: existing.hire_id,
             jobId: existing.job_id,
+            leaseToken: input.createdAt,
           };
         }
       }
@@ -773,6 +785,7 @@ export class FreshMarketplaceStore {
         replayed: true,
         hireId: existing.hire_id,
         jobId: existing.job_id,
+        leaseToken: existing.hire_created_at,
       };
     }
     const chain = await this.getByIdempotencyKey(input.request.idempotencyKey);
@@ -782,6 +795,7 @@ export class FreshMarketplaceStore {
       replayed: true,
       hireId: existing.hire_id,
       jobId: existing.job_id,
+      leaseToken: existing.hire_created_at,
     };
   }
 }

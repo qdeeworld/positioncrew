@@ -1575,6 +1575,7 @@ async function createFreshMarketplaceHire(
     service: task.service,
     rateLimitKey,
     rateLimitAdmitted: true,
+    admissionLeaseToken: admission.leaseToken,
   });
   return json(result.chain, result.replayed ? 200 : 201);
 }

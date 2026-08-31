@@ -185,6 +185,7 @@ class FakeD1 implements D1Database {
         !this.hire ||
         this.hire.hire_id !== bindings[3] ||
         this.hire.idempotency_key !== bindings[4] ||
+        this.hire.hire_created_at !== bindings[5] ||
         this.hire.provider_hash !== null ||
         this.hire.evidence_json !== null ||
         this.hire.evidence_hash !== null
@@ -461,6 +462,7 @@ class RateLimitD1 implements D1Database {
       if (
         !hire ||
         hire.idempotency_key !== bindings[4] ||
+        hire.hire_created_at !== bindings[5] ||
         hire.provider_hash !== null ||
         hire.evidence_json !== null ||
         hire.evidence_hash !== null
@@ -1086,6 +1088,7 @@ describe("fresh marketplace hire contract", () => {
       rateLimitKey: input.rateLimitKey,
       hireId: input.hireId,
       jobId: input.jobId,
+      leaseToken: input.createdAt,
       requestJson: input.requestJson,
     };
 
@@ -1094,14 +1097,20 @@ describe("fresh marketplace hire contract", () => {
       chain: null,
       hireId: input.hireId,
       jobId: input.jobId,
+      leaseToken: input.createdAt,
     });
     await expect(store.admitHireCreation(admissionInput)).resolves.toEqual({
       replayed: true,
       chain: null,
       hireId: input.hireId,
       jobId: input.jobId,
+      leaseToken: input.createdAt,
     });
-    await store.createHire({ ...input, rateLimitAdmitted: true });
+    await store.createHire({
+      ...input,
+      rateLimitAdmitted: true,
+      admissionLeaseToken: input.createdAt,
+    });
     await expect(store.admitHireCreation(admissionInput)).resolves.toMatchObject({
       replayed: true,
       chain: { hire: { hireId: input.hireId } },
@@ -1141,7 +1150,19 @@ describe("fresh marketplace hire contract", () => {
       replayed: false,
       hireId: input.hireId,
       jobId: input.jobId,
+      leaseToken: recoveredAt,
     });
+    await expect(store.createHire({
+      ...input,
+      rateLimitAdmitted: true,
+      admissionLeaseToken: input.createdAt,
+    })).rejects.toThrow("D1 hire admission is still in progress");
+    await expect(store.createHire({
+      ...input,
+      createdAt: recoveredAt,
+      rateLimitAdmitted: true,
+      admissionLeaseToken: recoveredAt,
+    })).resolves.toMatchObject({ replayed: false });
     expect(database.getBucket(HASH_A)?.createCount).toBe(1);
   });
 
