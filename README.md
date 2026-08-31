@@ -4,8 +4,8 @@ PositionCrew is a job-first BSC marketplace for bounded capital operations. A bu
 
 Public application: [positioncrew.dolepee.com](https://positioncrew.dolepee.com)
 
-[![Quality](https://github.com/dolepee/positioncrew/actions/workflows/quality.yml/badge.svg)](https://github.com/dolepee/positioncrew/actions/workflows/quality.yml)
-[![Production smoke](https://github.com/dolepee/positioncrew/actions/workflows/production-smoke.yml/badge.svg)](https://github.com/dolepee/positioncrew/actions/workflows/production-smoke.yml)
+[![Quality](https://github.com/qdeeworld/positioncrew/actions/workflows/quality.yml/badge.svg)](https://github.com/qdeeworld/positioncrew/actions/workflows/quality.yml)
+[![Production smoke](https://github.com/qdeeworld/positioncrew/actions/workflows/production-smoke.yml/badge.svg)](https://github.com/qdeeworld/positioncrew/actions/workflows/production-smoke.yml)
 
 The product covers all four Build the Era categories with equal depth:
 

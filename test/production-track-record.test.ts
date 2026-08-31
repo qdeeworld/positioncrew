@@ -24,7 +24,7 @@ function run(
     createdAt,
     completedAt: status === "completed" ? createdAt : null,
     headSha: String(runId).padStart(40, "0"),
-    url: `https://github.com/dolepee/positioncrew/actions/runs/${runId}`,
+    url: `https://github.com/qdeeworld/positioncrew/actions/runs/${runId}`,
   };
 }
 

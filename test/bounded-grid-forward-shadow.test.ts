@@ -94,13 +94,13 @@ function precommittedRun(ordinal = 1): StoredEvent[] {
     {
       schedule: {
         event: "schedule",
-        repository: "dolepee/positioncrew",
+        repository: "qdeeworld/positioncrew",
         workflowPath: ".github/workflows/production-smoke.yml",
         runId: String(10_000 + ordinal),
         runAttempt: "1",
         headSha: String(ordinal).padStart(40, "0"),
         workflowRef:
-          "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+          "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
         recordedAt: startedAt.toISOString(),
       },
       sourceHireId: runBinding.hireId,
@@ -192,13 +192,13 @@ describe("bounded-grid forward shadow evidence", () => {
     const genesis = append([], runBinding, "EPOCH_STARTED", startedAt, {
       schedule: {
         event: "schedule",
-        repository: "dolepee/positioncrew",
+        repository: "qdeeworld/positioncrew",
         workflowPath: ".github/workflows/production-smoke.yml",
         runId: "10991",
         runAttempt: "1",
         headSha: "9".repeat(40),
         workflowRef:
-          "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+          "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
         recordedAt: startedAt,
       },
       method: "FORWARD_ONLY_ACTUAL_SAMPLES",

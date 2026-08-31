@@ -431,10 +431,10 @@ function scheduleEvidence(request: Request, now: Date): ShadowGridScheduleEviden
   const headSha = request.headers.get("X-GitHub-Sha");
   const workflowRef = request.headers.get("X-GitHub-Workflow-Ref");
   const currentWorkflowRef =
-    `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`;
+    `qdeeworld/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`;
   if (
     event !== "schedule" ||
-    repository !== "dolepee/positioncrew" ||
+    repository !== "qdeeworld/positioncrew" ||
     !runId || !/^\d+$/.test(runId) ||
     runAttempt !== "1" ||
     !headSha || !/^[a-f0-9]{40}$/i.test(headSha) ||
@@ -448,7 +448,7 @@ function scheduleEvidence(request: Request, now: Date): ShadowGridScheduleEviden
   }
   return {
     event: "schedule",
-    repository: "dolepee/positioncrew",
+    repository: "qdeeworld/positioncrew",
     workflowPath: SHADOW_GRID_WORKFLOW_PATH,
     runId,
     runAttempt,
@@ -577,7 +577,11 @@ async function appendShadowGridRunEvent(
   return [...events, persisted.event];
 }
 
-type StoredShadowGridScheduleEvidence = Omit<ShadowGridScheduleEvidence, "workflowPath"> & {
+type StoredShadowGridScheduleEvidence = Omit<
+  ShadowGridScheduleEvidence,
+  "repository" | "workflowPath"
+> & {
+  repository: "dolepee/positioncrew" | "qdeeworld/positioncrew";
   workflowPath: typeof SHADOW_GRID_WORKFLOW_PATH | typeof SHADOW_GRID_LEGACY_WORKFLOW_PATH;
 };
 
@@ -597,7 +601,8 @@ function storedScheduleFromShadowGridGenesis(
   if (
     !isShadowGridRecord(schedule) ||
     schedule.event !== "schedule" ||
-    schedule.repository !== "dolepee/positioncrew" ||
+    (schedule.repository !== "dolepee/positioncrew" &&
+      schedule.repository !== "qdeeworld/positioncrew") ||
     (schedule.workflowPath !== SHADOW_GRID_WORKFLOW_PATH &&
       schedule.workflowPath !== SHADOW_GRID_LEGACY_WORKFLOW_PATH) ||
     typeof schedule.runId !== "string" ||
@@ -613,7 +618,7 @@ function storedScheduleFromShadowGridGenesis(
   }
   return {
     event: "schedule",
-    repository: "dolepee/positioncrew",
+    repository: schedule.repository,
     workflowPath: schedule.workflowPath,
     runId: schedule.runId,
     runAttempt: "1",
@@ -630,11 +635,15 @@ function scheduleFromShadowGridGenesis(
   if (
     schedule.workflowPath !== SHADOW_GRID_WORKFLOW_PATH ||
     schedule.workflowRef !==
-      `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
+      `qdeeworld/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
   ) {
     throw new Error("Shadow-grid genesis has no current scheduled-workflow evidence");
   }
-  return { ...schedule, workflowPath: SHADOW_GRID_WORKFLOW_PATH };
+  return {
+    ...schedule,
+    repository: "qdeeworld/positioncrew",
+    workflowPath: SHADOW_GRID_WORKFLOW_PATH,
+  };
 }
 
 function cleanupScheduleFromShadowGridGenesis(
@@ -643,7 +652,7 @@ function cleanupScheduleFromShadowGridGenesis(
   const schedule = storedScheduleFromShadowGridGenesis(events);
   if (
     schedule.workflowRef !==
-      `dolepee/positioncrew/${schedule.workflowPath}@refs/heads/main`
+      `${schedule.repository}/${schedule.workflowPath}@refs/heads/main`
   ) {
     throw new Error("Shadow-grid cleanup genesis has no recognized scheduled-workflow provenance");
   }
@@ -688,7 +697,7 @@ function shadowGridScheduleCollisionResponse(
   if (
     committed.workflowPath !== SHADOW_GRID_WORKFLOW_PATH ||
     committed.workflowRef !==
-      `dolepee/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
+      `qdeeworld/positioncrew/${SHADOW_GRID_WORKFLOW_PATH}@refs/heads/main`
   ) {
     return null;
   }

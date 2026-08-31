@@ -45,12 +45,12 @@ interface SessionArtifact {
 function environment(overrides: Record<string, string> = {}) {
   return {
     GITHUB_EVENT_NAME: "schedule",
-    GITHUB_REPOSITORY: "dolepee/positioncrew",
+    GITHUB_REPOSITORY: "qdeeworld/positioncrew",
     GITHUB_RUN_ID: "123456789",
     GITHUB_RUN_ATTEMPT: "1",
     GITHUB_SHA: "1".repeat(40),
     GITHUB_WORKFLOW_REF:
-      "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+      "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
     SHADOW_GRID_TICK_TOKEN: "test-token",
     POSITIONCREW_BASE_URL: "https://positioncrew.test",
     ...overrides,
@@ -82,24 +82,24 @@ function collision() {
     reason: "WINDOW_ALREADY_BOUND_TO_ANOTHER_AUTHENTICATED_RUN",
     incoming: {
       event: "schedule",
-      repository: "dolepee/positioncrew",
+      repository: "qdeeworld/positioncrew",
       workflowPath: ".github/workflows/production-smoke.yml",
       runId: "123456789",
       runAttempt: "1",
       headSha: "1".repeat(40),
       workflowRef:
-        "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+        "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
       recordedAt: EPOCH,
     },
     originating: {
       event: "schedule",
-      repository: "dolepee/positioncrew",
+      repository: "qdeeworld/positioncrew",
       workflowPath: ".github/workflows/production-smoke.yml",
       runId: "987654321",
       runAttempt: "1",
       headSha: "2".repeat(40),
       workflowRef:
-        "dolepee/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
+        "qdeeworld/positioncrew/.github/workflows/production-smoke.yml@refs/heads/main",
       recordedAt: EPOCH,
     },
     existing: {
@@ -422,7 +422,7 @@ describe("bounded-grid scheduled session collector", () => {
     { GITHUB_RUN_ATTEMPT: "2" },
     {
       GITHUB_WORKFLOW_REF:
-        "dolepee/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
+        "qdeeworld/positioncrew/.github/workflows/bounded-grid-shadow-ledger.yml@refs/heads/main",
     },
   ])("rejects bad identity before network access", async (override) => {
     const runtime = harness([]);
