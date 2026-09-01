@@ -103,12 +103,12 @@ export type BrainOnBnbGridComparison = {
 };
 
 function requestBlock(request: BoundedGridRequest): number | null {
-  for (const source of request.sources) {
-    const match = source.uri.match(/\/block\/(\d+)(?:$|[/?#])/);
-    if (match) return Number(match[1]);
-    const idMatch = source.sourceId.match(/block-(\d+)$/);
-    if (idMatch) return Number(idMatch[1]);
-  }
+  const source = request.sources.find(({ sourceId }) => sourceId === request.marketState.sourceId);
+  if (!source) return null;
+  const match = source.uri.match(/\/block\/(\d+)(?:$|[/?#])/);
+  if (match) return Number(match[1]);
+  const idMatch = source.sourceId.match(/block-(\d+)$/);
+  if (idMatch) return Number(idMatch[1]);
   return null;
 }
 
@@ -124,6 +124,18 @@ function replayEconomicsAreConsistent(
   const expectedNetUsd = candidate.fees_usd_in_window - candidate.assumed_rebalance_cost_usd;
   return Math.abs(candidate.assumed_rebalance_cost_usd - declaredRebalanceCostUsd) <= toleranceUsd &&
     Math.abs(candidate.net_after_rebalancing_usd_in_window - expectedNetUsd) <= toleranceUsd;
+}
+
+function replayActivityIsConsistent(
+  candidate: z.infer<typeof RangeSchema>,
+  window: z.infer<typeof BrainGridResponseSchema>["measured_window"],
+): boolean {
+  const calculatedShare = candidate.swaps_in_range / candidate.swaps_total * 100;
+  return candidate.swaps_total === window.swaps &&
+    candidate.swaps_in_range <= candidate.swaps_total &&
+    candidate.share_of_window_in_range_pct <= 100 &&
+    Math.abs(candidate.share_of_window_in_range_pct - calculatedShare) <= 0.1 &&
+    candidate.fees_usd_in_window <= window.fees_the_pool_paid_usd + 0.000001;
 }
 
 export async function auditionBrainOnBnbGrid(
@@ -187,7 +199,7 @@ export async function auditionBrainOnBnbGrid(
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
       if (
-        candidate.swaps_total !== parsed.measured_window.swaps ||
+        !replayActivityIsConsistent(candidate, parsed.measured_window) ||
         candidate.swaps_in_range < 100 ||
         candidate.share_of_window_in_range_pct < 10 ||
         candidate.fees_usd_in_window <= 0 ||
@@ -215,14 +227,16 @@ export async function auditionBrainOnBnbGrid(
     const rangeInsideBuyerBounds = Boolean(selected);
     const providerEvidenceSufficient = Boolean(selectedRange) &&
       parsed.measured_window.swaps >= 100 &&
-      selectedRange!.swaps_total === parsed.measured_window.swaps &&
+      replayActivityIsConsistent(selectedRange!, parsed.measured_window) &&
       replayEconomicsAreConsistent(selectedRange!, parsed.rebalance_cost_usd_assumed) &&
       selectedRange!.net_after_rebalancing_usd_in_window > 0;
     const normalizedDeliverable = selected?.deliverable;
     const exactOutputContract = normalizedDeliverable?.status === "ACTIONABLE" &&
       normalizedDeliverable.decision === "BUILD_GRID";
-    const eligible = exactPool && exactPair && exactCapital && windowBindsRequest &&
+    const externalEligible = exactPool && exactPair && exactCapital && windowBindsRequest &&
       priceCoherent && rangeInsideBuyerBounds && providerEvidenceSufficient && exactOutputContract;
+    const firstPartyEligible = firstParty.status === "ACTIONABLE" && firstParty.decision === "BUILD_GRID";
+    const liveMatchEligible = externalEligible && firstPartyEligible;
     const checks: BrainOnBnbGridComparison["checks"] = [
       { code: "EXACT_POOL_AND_PAIR", status: exactPool && exactPair ? "PASS" : "FAIL", detail: exactPool && exactPair ? "The provider measured the requested PancakeSwap WBNB/USDT pool." : "The provider result did not bind the requested pool and pair." },
       { code: "EXACT_CAPITAL", status: exactCapital ? "PASS" : "FAIL", detail: exactCapital ? "The replay used the buyer's exact capital amount." : "The replay used a different capital amount." },
@@ -232,15 +246,16 @@ export async function auditionBrainOnBnbGrid(
       { code: "PROVIDER_RANGE_INSIDE_BUYER_BOUND", status: rangeInsideBuyerBounds ? "PASS" : "FAIL", detail: rangeInsideBuyerBounds ? `A provider-replayed ±${widthPct}% width remains inside the buyer's maximum range after centering on the pinned request price.` : "No provider-replayed width remains inside the buyer boundary and survives the unchanged economics contract." },
       { code: "ATTRIBUTABLE_REPLAY_EVIDENCE", status: providerEvidenceSufficient ? "PASS" : "FAIL", detail: providerEvidenceSufficient ? `The admitted width captured at least 100 of ${parsed.measured_window.swaps} replayed swaps, covered at least 10% of the window, earned fees, and preserved positive observed net value after the provider's rebalance-cost model.` : "The provider did not demonstrate meaningful in-range activity and positive replay economics for an admitted width." },
       { code: "EXACT_OUTPUT_CONTRACT", status: exactOutputContract ? "PASS" : "FAIL", detail: exactOutputContract ? "PositionCrew normalized the provider range through the unchanged bounded order, economics, inventory, loss, expiry, and refusal contract." : "The provider thesis did not survive the unchanged PositionCrew grid contract." },
+      { code: "FIRST_PARTY_ACTIONABLE_RESULT", status: firstPartyEligible ? "PASS" : "FAIL", detail: firstPartyEligible ? "The first-party provider also returned an actionable grid under the same buyer contract." : "The first-party provider did not return an actionable grid, so PositionCrew cannot claim a two-provider live match." },
     ];
     return {
       ...base,
-      outcome: eligible ? "SEMANTICALLY_COMPARABLE" : "INCOMPATIBLE",
+      outcome: liveMatchEligible ? "SEMANTICALLY_COMPARABLE" : "INCOMPATIBLE",
       externalRecommendation: exactOutputContract ? "BUILD_GRID" : "NO_GRID",
       externalState: "RANGE_REPLAY_READY",
-      eligibleForRangeAssessmentActivation: eligible,
-      eligibleForGridSelection: eligible,
-      eligibleForLiveMatch: eligible,
+      eligibleForRangeAssessmentActivation: externalEligible,
+      eligibleForGridSelection: liveMatchEligible,
+      eligibleForLiveMatch: liveMatchEligible,
       attributable: exactPool && exactPair,
       adapterNormalized: Boolean(normalizedDeliverable),
       providerRange: selected && widthPct !== null
@@ -258,13 +273,15 @@ export async function auditionBrainOnBnbGrid(
         minutes: parsed.measured_window.minutes,
       },
       ...(normalizedDeliverable ? { normalizedDeliverable } : {}),
-      selection: {
-        selectedProvider: "POSITIONCREW",
-        externalEligible: eligible,
-        basis: eligible
-          ? "The first-party provider won the native exact-contract tiebreak; the external replay-derived range remained attributable and fully evaluated."
-          : "The external replay remained visible, but PositionCrew retained the job because one or more buyer-bound compatibility checks failed.",
-      },
+      ...(liveMatchEligible
+        ? {
+            selection: {
+              selectedProvider: "POSITIONCREW" as const,
+              externalEligible: true,
+              basis: "The first-party provider won the native exact-contract tiebreak; the external replay-derived range remained attributable and fully evaluated.",
+            },
+          }
+        : {}),
       checks,
       boundary,
     };

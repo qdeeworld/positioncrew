@@ -183,6 +183,48 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
   });
 
+  it("rejects impossible replay activity and fee totals", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({
+      ranges: [{
+        ...providerResponse().ranges[1],
+        swaps_in_range: 10001,
+        share_of_window_in_range_pct: 101,
+        fees_usd_in_window: 500,
+        net_after_rebalancing_usd_in_window: 499.52,
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.eligibleForRangeAssessmentActivation).toBe(false);
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
+  it("binds the replay window to the source used by the market state", async () => {
+    const requestWithAuxiliarySource: BoundedGridRequest = {
+      ...request,
+      sources: [
+        { sourceId: "auxiliary-block-119355734", label: "Auxiliary", uri: "https://bscscan.com/block/119355734", observedAt: request.requestedAt },
+        {
+          sourceId: request.marketState.sourceId,
+          label: "Pinned market",
+          uri: "https://bscscan.com/block/119400000",
+          observedAt: request.marketState.observedAt,
+        },
+      ],
+    };
+    const firstParty = createBoundedGridDeliverable(requestWithAuxiliarySource, now);
+    const result = await auditionBrainOnBnbGrid(requestWithAuxiliarySource, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse()), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "MEASURED_WINDOW_BINDING")?.status).toBe("FAIL");
+  });
+
   it("withholds activation when replay evidence is not bound to the requested pool", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse({ pool: "0x0000000000000000000000000000000000000001" });
@@ -193,6 +235,23 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.outcome).toBe("INCOMPATIBLE");
     expect(result.eligibleForRangeAssessmentActivation).toBe(false);
     expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
+  it("does not claim a two-provider match when the first-party result is a refusal", async () => {
+    const firstParty = {
+      ...createBoundedGridDeliverable(request, now),
+      status: "REFUSED_CONSTRAINTS" as const,
+      decision: "NO_GRID" as const,
+    };
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse()), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.eligibleForRangeAssessmentActivation).toBe(true);
+    expect(result.eligibleForLiveMatch).toBe(false);
+    expect(result.selection).toBeUndefined();
+    expect(result.checks.find((check) => check.code === "FIRST_PARTY_ACTIONABLE_RESULT")?.status).toBe("FAIL");
   });
 
   it("fails closed when the provider is unavailable", async () => {
