@@ -379,7 +379,10 @@ export async function auditionBrainOnBnbGrid(
       : null;
     const exactFeeTier = providerFeeTier !== null &&
       decimalTimesIntegerEquals(providerFeeTier, 100n, String(request.marketState.venueFeeBps));
-    const exactWindowBlockCount = parsed.measured_window.blocks ===
+    const safeWindowBlocks = Number.isSafeInteger(parsed.measured_window.from_block) &&
+      Number.isSafeInteger(parsed.measured_window.to_block) &&
+      Number.isSafeInteger(parsed.measured_window.blocks);
+    const exactWindowBlockCount = safeWindowBlocks && parsed.measured_window.blocks ===
       parsed.measured_window.to_block - parsed.measured_window.from_block + 1;
     const pinnedBlock = requestBlock(request);
     const windowBindsRequest = pinnedBlock !== null &&
@@ -418,13 +421,13 @@ export async function auditionBrainOnBnbGrid(
       : null;
     const declaredCandidates = bestWidthPct === null
       ? []
-      : rangeRows.filter(({ candidate, widthLexeme }) =>
-          candidate.width_pct !== null &&
-          !candidate.full_range &&
-          candidate.price_range !== null &&
-          widthLexeme !== null &&
-          numericLexemeToPlainDecimal(widthLexeme) !== null &&
-          decimalsEqual(numericLexemeToPlainDecimal(widthLexeme)!, bestWidthPct));
+      : rangeRows.filter(({ candidate, widthLexeme }) => {
+          if (candidate.width_pct === null || candidate.full_range || candidate.price_range === null || widthLexeme === null) return false;
+          const exactWidth = numericLexemeToPlainDecimal(widthLexeme);
+          return exactWidth !== null
+            ? decimalsEqual(exactWidth, bestWidthPct)
+            : Number(bestWidthPct) === candidate.width_pct;
+        });
     const declaredCandidateRow = declaredCandidates[0];
     const declaredCandidate = declaredCandidateRow?.candidate;
     const unambiguousDeclaredCandidate = declaredCandidates.length === 1;
@@ -497,7 +500,7 @@ export async function auditionBrainOnBnbGrid(
     const firstPartyEligible = firstParty.status === "ACTIONABLE" && firstParty.decision === "BUILD_GRID";
     const liveMatchEligible = externalEligible && firstPartyEligible;
     const checks: BrainOnBnbGridComparison["checks"] = [
-      { code: "RAW_JSON_KEY_SAFETY", status: rawJsonKeySafe ? "PASS" : "FAIL", detail: rawJsonKeySafe ? "Raw numeric evidence contains no escaped object-key syntax that could hide decoded duplicates." : "Escaped object-key syntax prevents trustworthy binding between raw numeric lexemes and parsed fields." },
+      { code: "RAW_JSON_KEY_SAFETY", status: rawJsonKeySafe ? "PASS" : "FAIL", detail: rawJsonKeySafe ? "Every decoded object key is unique within its JSON object." : "At least one JSON object contains duplicate keys after escape decoding, so raw numeric evidence is untrustworthy." },
       { code: "EXACT_CHAIN", status: exactChain ? "PASS" : "FAIL", detail: exactChain ? "The request targets BSC mainnet, the chain measured by this provider." : "The provider evidence is BSC mainnet-only and cannot bind this request chain." },
       { code: "EXACT_POOL_AND_PAIR", status: exactPool && exactPair ? "PASS" : "FAIL", detail: exactPool && exactPair ? "The provider measured the requested PancakeSwap WBNB/USDT pool." : "The provider result did not bind the requested pool and pair." },
       { code: "EXACT_CAPITAL", status: exactCapital ? "PASS" : "FAIL", detail: exactCapital ? "The replay used the buyer's exact capital amount." : "The replay used a different capital amount." },

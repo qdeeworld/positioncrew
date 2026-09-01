@@ -459,6 +459,27 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
   });
 
+  it("preserves a declared width that exceeds the safe exponent expansion bound", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const bestWidth = `0.${"0".repeat(100)}1`;
+    const response = providerResponse({
+      best_range_after_paying_to_put_it_back: `±${bestWidth}%`,
+      ranges: [{
+        ...providerResponse().ranges[0],
+        width_pct: 1e-101,
+        price_range: { low: 687.7, high: 687.7, unit: "USDT per WBNB" },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.externalRecommendation).toBe("BUILD_GRID");
+    expect(result.providerRange?.widthPct).toBe(1e-101);
+    expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
   it("binds token decimals as part of the requested pair identity", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse();
@@ -504,6 +525,19 @@ describe("Brain on BNB Grid adapter", () => {
     });
     expect(result.outcome).toBe("INCOMPATIBLE");
     expect(result.checks.find((check) => check.code === "MEASURED_WINDOW_BLOCK_COUNT")?.status).toBe("FAIL");
+  });
+
+  it("rejects replay block declarations beyond safe integer precision", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse())
+      .replace('"to_block":119355999', '"to_block":10000000000000000000000000')
+      .replace('"blocks":5000', '"blocks":10000000000000000000000000');
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("UNAVAILABLE");
+    expect(result.eligibleForLiveMatch).toBe(false);
   });
 
   it("does not substitute an adapter-selected range for the provider's declared best range", async () => {
