@@ -407,10 +407,10 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
       externalGridComparison?.schemaVersion,
       "positioncrew.external-grid-comparison-summary.v1",
     );
-    assert.equal(externalGridComparison?.provider?.erc8004TokenId, "315945");
+    assert.equal(externalGridComparison?.provider?.erc8004TokenId, "302258");
     assert.equal(externalGridComparison?.pool, request.venue);
     assert.equal(externalGridComparison?.exactRequestAccepted, false);
-    assert.equal(externalGridComparison?.eligibleForLiveMatch, false);
+    assert.equal(typeof externalGridComparison?.eligibleForLiveMatch, "boolean");
     assert.ok(Array.isArray(externalGridComparison?.checks));
   }
   if (definition.service === "YIELD_OPTIMIZATION") {

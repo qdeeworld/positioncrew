@@ -82,9 +82,9 @@ import {
   auditionAiKiVenusGuardian,
 } from "../src/marketplace/aiki-venus-guardian-adapter.js";
 import {
-  AIKI_PANCAKE_GRID,
-  auditionAiKiPancakeGrid,
-} from "../src/marketplace/aiki-pancake-grid-adapter.js";
+  BRAIN_ON_BNB_GRID,
+  auditionBrainOnBnbGrid,
+} from "../src/marketplace/brain-on-bnb-grid-adapter.js";
 import {
   AIKI_VENUS_YIELD,
   auditionAiKiVenusYield,
@@ -1508,27 +1508,29 @@ async function createFreshMarketplaceHire(
       parsed.benchmarkSlug === "bounded-grid"
       ? await (async () => {
           const firstParty = createBoundedGridDeliverable(parsed.request, new Date(createdAt));
-          const comparison = await auditionAiKiPancakeGrid(parsed.request, firstParty, {
+          const comparison = await auditionBrainOnBnbGrid(parsed.request, firstParty, {
             now: new Date(createdAt),
+            completionNow: () => new Date(),
           });
           return {
             schemaVersion: "positioncrew.external-grid-comparison-summary.v1" as const,
-            provider: AIKI_PANCAKE_GRID,
+            provider: BRAIN_ON_BNB_GRID,
             evaluatedAt: comparison.evaluatedAt,
             pool: comparison.pool,
             outcome: comparison.outcome,
             positionCrewDecision: comparison.positionCrewDecision,
             externalRecommendation: comparison.externalRecommendation,
             externalState: comparison.externalState,
-            tickLower: comparison.tickLower,
-            tickUpper: comparison.tickUpper,
-            exactRangeAccepted: comparison.exactRangeAccepted,
             attributable: comparison.attributable,
-            persisted: comparison.persisted,
             exactRequestAccepted: false as const,
             eligibleForRangeAssessmentActivation: comparison.eligibleForRangeAssessmentActivation,
-            eligibleForGridSelection: false as const,
-            eligibleForLiveMatch: false as const,
+            eligibleForGridSelection: comparison.eligibleForGridSelection,
+            eligibleForLiveMatch: comparison.eligibleForLiveMatch,
+            adapterNormalized: comparison.adapterNormalized,
+            providerRange: comparison.providerRange,
+            measuredWindow: comparison.measuredWindow,
+            normalizedDeliverable: comparison.normalizedDeliverable,
+            selection: comparison.selection,
             checks: comparison.checks,
             boundary: comparison.boundary,
           };

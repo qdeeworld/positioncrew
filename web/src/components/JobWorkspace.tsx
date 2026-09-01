@@ -895,25 +895,30 @@ function GridAndYieldExternalComparisonPanel({
   const checks = grid?.checks ?? yieldComparison!.checks;
   const boundary = grid?.boundary ?? yieldComparison!.boundary;
   const partial = (grid?.outcome ?? yieldComparison!.outcome) === "PARTIAL_COMPATIBILITY";
-  const comparable = !isGrid && yieldComparison?.outcome === "SEMANTICALLY_COMPARABLE" &&
-    yieldComparison.eligibleForLiveMatch;
+  const comparable = isGrid
+    ? grid?.outcome === "SEMANTICALLY_COMPARABLE" && grid.eligibleForLiveMatch
+    : yieldComparison?.outcome === "SEMANTICALLY_COMPARABLE" && yieldComparison.eligibleForLiveMatch;
   const eligibleForScopedActivation = isGrid
-    ? Boolean(grid?.eligibleForRangeAssessmentActivation)
+    ? Boolean(comparable ? grid?.eligibleForLiveMatch : grid?.eligibleForRangeAssessmentActivation)
     : Boolean(comparable
       ? yieldComparison?.eligibleForLiveMatch
       : yieldComparison?.eligibleForRateRankingActivation);
   const title = isGrid
-    ? (partial ? "Live range cross-checked" : "External range check recorded")
+    ? (comparable ? "Live grid match completed" : partial ? "Live range cross-checked" : "External grid check recorded")
     : (comparable ? "Live yield match completed" : partial ? "Rate leader cross-checked" : "External rate check recorded");
   const summary = isGrid
     ? `${grid?.externalState ?? "Unavailable"} / ${grid?.externalRecommendation ?? "Unavailable"} externally · ${grid?.positionCrewDecision.replaceAll("_", " ")} by PositionCrew`
     : `${yieldComparison?.externalSimpleAnnualRateBps ?? "-"} bps external · ${yieldComparison?.positionCrewGrossApyBps ?? "-"} bps PositionCrew`;
   const detail = isGrid
-    ? "AiKi checked the exact PositionCrew-derived range on the same live pool. PositionCrew remains responsible for constructing bounded orders and loss controls."
+    ? comparable
+      ? `Brain on BNB replayed ${grid?.measuredWindow?.swaps ?? 0} live swaps and supplied independently measured range candidates. PositionCrew admitted ±${grid?.providerRange?.widthPct ?? "-"}% only after the unchanged order, cost, inventory, maximum-loss, expiry, and refusal contract passed.`
+      : grid?.outcome === "UNAVAILABLE"
+        ? "Brain on BNB was unavailable, so no external grid evidence was obtained. PositionCrew failed closed and retained the first-party result."
+        : "The external grid evidence remains visible, but PositionCrew did not treat it as an eligible bounded plan because one or more buyer-bound checks failed."
     : comparable
       ? `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied the attributable rate thesis; PositionCrew independently bound pinned rates and applied the full buyer contract.`
       : `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied a rate-only candidate; PositionCrew also evaluated liquidity, risk, costs, and horizon benefit.`;
-  const scopedRole = isGrid ? "Range assessment" : comparable ? "Yield job" : "Rate ranking";
+  const scopedRole = isGrid ? (comparable ? "Grid plan" : "Range assessment") : comparable ? "Yield job" : "Rate ranking";
 
   return (
     <section
