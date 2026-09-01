@@ -912,7 +912,9 @@ function GridAndYieldExternalComparisonPanel({
   const detail = isGrid
     ? comparable
       ? `Brain on BNB replayed ${grid?.measuredWindow?.swaps ?? 0} live swaps and supplied independently measured range candidates. PositionCrew admitted ±${grid?.providerRange?.widthPct ?? "-"}% only after the unchanged order, cost, inventory, maximum-loss, expiry, and refusal contract passed.`
-      : "The external grid evidence remains visible, but PositionCrew did not treat it as an eligible bounded plan because one or more buyer-bound checks failed."
+      : grid?.outcome === "UNAVAILABLE"
+        ? "Brain on BNB was unavailable, so no external grid evidence was obtained. PositionCrew failed closed and retained the first-party result."
+        : "The external grid evidence remains visible, but PositionCrew did not treat it as an eligible bounded plan because one or more buyer-bound checks failed."
     : comparable
       ? `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied the attributable rate thesis; PositionCrew independently bound pinned rates and applied the full buyer contract.`
       : `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied a rate-only candidate; PositionCrew also evaluated liquidity, risk, costs, and horizon benefit.`;

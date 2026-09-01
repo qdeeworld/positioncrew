@@ -213,6 +213,29 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "EXACT_FEE_TIER")?.status).toBe("FAIL");
   });
 
+  it("rejects raw price deviations just beyond the declared tolerance", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const priceJustBeyondTolerance = Number(request.marketState.midPrice) * (1 + 25.4 / 10_000);
+    const response = providerResponse({
+      price_now: priceJustBeyondTolerance,
+      ranges: [2].map((width) => ({
+        ...providerResponse().ranges[1],
+        width_pct: width,
+        price_range: {
+          low: priceJustBeyondTolerance * (1 - width / 100),
+          high: priceJustBeyondTolerance * (1 + width / 100),
+          unit: "USDT per WBNB",
+        },
+      })),
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "CURRENT_PRICE_COHERENCE")?.status).toBe("FAIL");
+  });
+
   it("rejects a replay whose declared block count contradicts its endpoints", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse();
@@ -236,6 +259,24 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.outcome).toBe("INCOMPATIBLE");
     expect(result.externalRecommendation).toBe("NO_GRID");
     expect(result.providerRange).toBeNull();
+  });
+
+  it("preserves a validated provider recommendation when buyer-policy normalization refuses it", async () => {
+    const constrainedRequest: BoundedGridRequest = {
+      ...request,
+      constraints: { ...request.constraints, minimumExpectedNetProfitUsd: "10000" },
+    };
+    const firstParty = createBoundedGridDeliverable(constrainedRequest, now);
+    const result = await auditionBrainOnBnbGrid(constrainedRequest, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse()), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.externalRecommendation).toBe("BUILD_GRID");
+    expect(result.providerRange).not.toBeNull();
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("PASS");
+    expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("FAIL");
+    expect(result.eligibleForLiveMatch).toBe(false);
   });
 
   it("binds the replay window to the source used by the market state", async () => {

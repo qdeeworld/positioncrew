@@ -113,7 +113,7 @@ function requestBlock(request: BoundedGridRequest): number | null {
 }
 
 function priceDifferenceBps(left: number, right: number): number {
-  return Math.round(Math.abs(left - right) / right * 10_000);
+  return Math.abs(left - right) / right * 10_000;
 }
 
 function replayEconomicsAreConsistent(
@@ -229,9 +229,7 @@ export async function auditionBrainOnBnbGrid(
       }, now);
       return [{ candidate, lowerPrice, upperPrice, deliverable }];
     });
-    const selected = candidates
-      .filter(({ deliverable }) => deliverable.status === "ACTIONABLE" && deliverable.decision === "BUILD_GRID")
-      .sort((left, right) => Number(right.deliverable.expectedNetProfitUsd) - Number(left.deliverable.expectedNetProfitUsd))[0];
+    const selected = candidates[0];
     const selectedRange = selected?.candidate;
     const widthPct = selectedRange?.width_pct ?? null;
     const rangeInsideBuyerBounds = Boolean(selected);
@@ -264,7 +262,7 @@ export async function auditionBrainOnBnbGrid(
     return {
       ...base,
       outcome: liveMatchEligible ? "SEMANTICALLY_COMPARABLE" : "INCOMPATIBLE",
-      externalRecommendation: exactOutputContract ? "BUILD_GRID" : "NO_GRID",
+      externalRecommendation: selectedRange ? "BUILD_GRID" : "NO_GRID",
       externalState: "RANGE_REPLAY_READY",
       eligibleForRangeAssessmentActivation: externalEligible,
       eligibleForGridSelection: liveMatchEligible,
