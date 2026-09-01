@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BoundedGridRequestSchema } from "../contracts/bounded-grid.js";
+import { BoundedGridDeliverableSchema, BoundedGridRequestSchema } from "../contracts/bounded-grid.js";
 import { LendingRescueRequestSchema } from "../contracts/lending-rescue.js";
 import { LpRebalanceDeliverableSchema, LpRebalanceRequestSchema } from "../contracts/lp-rebalance.js";
 import { YieldOptimizationDeliverableSchema, YieldOptimizationRequestSchema } from "../contracts/yield-optimization.js";
@@ -200,19 +200,38 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     }).strict(),
     evaluatedAt: IsoTimestampSchema,
     pool: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
-    outcome: z.enum(["PARTIAL_COMPATIBILITY", "INCOMPATIBLE", "UNAVAILABLE"]),
+    outcome: z.enum(["SEMANTICALLY_COMPARABLE", "PARTIAL_COMPATIBILITY", "INCOMPATIBLE", "UNAVAILABLE"]),
     positionCrewDecision: z.string().min(1),
     externalRecommendation: z.string().min(1).nullable(),
     externalState: z.string().min(1).nullable(),
-    tickLower: z.number().int().nullable(),
-    tickUpper: z.number().int().nullable(),
-    exactRangeAccepted: z.boolean(),
+    tickLower: z.number().int().nullable().optional(),
+    tickUpper: z.number().int().nullable().optional(),
+    exactRangeAccepted: z.boolean().optional(),
     attributable: z.boolean(),
-    persisted: z.boolean(),
+    persisted: z.boolean().optional(),
     exactRequestAccepted: z.literal(false),
     eligibleForRangeAssessmentActivation: z.boolean(),
-    eligibleForGridSelection: z.literal(false),
-    eligibleForLiveMatch: z.literal(false),
+    eligibleForGridSelection: z.boolean(),
+    eligibleForLiveMatch: z.boolean(),
+    adapterNormalized: z.boolean().optional(),
+    providerRange: z.object({
+      widthPct: z.number().positive(),
+      lowerPrice: z.number().positive(),
+      upperPrice: z.number().positive(),
+      netAfterRebalancingUsdInWindow: z.number(),
+    }).strict().nullable().optional(),
+    measuredWindow: z.object({
+      fromBlock: z.number().int().positive(),
+      toBlock: z.number().int().positive(),
+      swaps: z.number().int().positive(),
+      minutes: z.number().positive(),
+    }).strict().nullable().optional(),
+    normalizedDeliverable: BoundedGridDeliverableSchema.optional(),
+    selection: z.object({
+      selectedProvider: z.enum(["POSITIONCREW", "EXTERNAL"]),
+      externalEligible: z.boolean(),
+      basis: z.string().min(1),
+    }).strict().optional(),
     checks: z.array(z.object({
       code: z.string().min(1),
       status: z.enum(["PASS", "FAIL"]),
