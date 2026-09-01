@@ -684,7 +684,7 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
     schemaVersion: "positioncrew.external-yield-comparison-summary.v1";
     provider: { name: string; erc8004TokenId: string; endpoint: string };
     evaluatedAt: string;
-    outcome: "PARTIAL_COMPATIBILITY" | "INCOMPATIBLE" | "UNAVAILABLE";
+    outcome: "SEMANTICALLY_COMPARABLE" | "PARTIAL_COMPATIBILITY" | "INCOMPATIBLE" | "UNAVAILABLE";
     marketCount: number;
     positionCrewSelectedMarket: string | null;
     externalRecommendedMarket: string | null;
@@ -696,8 +696,15 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
     persisted: boolean;
     exactRequestAccepted: false;
     eligibleForRateRankingActivation: boolean;
-    eligibleForYieldSelection: false;
-    eligibleForLiveMatch: false;
+    eligibleForYieldSelection: boolean;
+    eligibleForLiveMatch: boolean;
+    adapterNormalized?: boolean;
+    normalizedDeliverable?: Record<string, unknown>;
+    selection?: {
+      selectedProvider: "POSITIONCREW" | "EXTERNAL";
+      externalEligible: boolean;
+      basis: string;
+    };
     checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
     boundary: string;
   };

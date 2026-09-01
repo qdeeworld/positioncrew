@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BoundedGridRequestSchema } from "../contracts/bounded-grid.js";
 import { LendingRescueRequestSchema } from "../contracts/lending-rescue.js";
 import { LpRebalanceDeliverableSchema, LpRebalanceRequestSchema } from "../contracts/lp-rebalance.js";
-import { YieldOptimizationRequestSchema } from "../contracts/yield-optimization.js";
+import { YieldOptimizationDeliverableSchema, YieldOptimizationRequestSchema } from "../contracts/yield-optimization.js";
 import { LendingProviderAuditionSchema } from "../marketplace/lending-provider-audition.js";
 
 export const FRESH_MARKETPLACE_HISTORICAL_TASKS = {
@@ -228,7 +228,7 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
       endpoint: z.string().url(),
     }).strict(),
     evaluatedAt: IsoTimestampSchema,
-    outcome: z.enum(["PARTIAL_COMPATIBILITY", "INCOMPATIBLE", "UNAVAILABLE"]),
+    outcome: z.enum(["SEMANTICALLY_COMPARABLE", "PARTIAL_COMPATIBILITY", "INCOMPATIBLE", "UNAVAILABLE"]),
     marketCount: z.number().int().positive(),
     positionCrewSelectedMarket: z.string().regex(/^0x[a-fA-F0-9]{40}$/).nullable(),
     externalRecommendedMarket: z.string().regex(/^0x[a-fA-F0-9]{40}$/).nullable(),
@@ -240,8 +240,15 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     persisted: z.boolean(),
     exactRequestAccepted: z.literal(false),
     eligibleForRateRankingActivation: z.boolean(),
-    eligibleForYieldSelection: z.literal(false),
-    eligibleForLiveMatch: z.literal(false),
+    eligibleForYieldSelection: z.boolean(),
+    eligibleForLiveMatch: z.boolean(),
+    adapterNormalized: z.boolean().optional(),
+    normalizedDeliverable: YieldOptimizationDeliverableSchema.optional(),
+    selection: z.object({
+      selectedProvider: z.enum(["POSITIONCREW", "EXTERNAL"]),
+      externalEligible: z.boolean(),
+      basis: z.string().min(1),
+    }).strict().optional(),
     checks: z.array(z.object({
       code: z.string().min(1),
       status: z.enum(["PASS", "FAIL"]),

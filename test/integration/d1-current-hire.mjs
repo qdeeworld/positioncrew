@@ -421,7 +421,7 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
     assert.equal(externalYieldComparison?.provider?.erc8004TokenId, "315946");
     assert.equal(externalYieldComparison?.marketCount, request.opportunities.length);
     assert.equal(externalYieldComparison?.exactRequestAccepted, false);
-    assert.equal(externalYieldComparison?.eligibleForLiveMatch, false);
+    assert.equal(typeof externalYieldComparison?.eligibleForLiveMatch, "boolean");
     assert.ok(Array.isArray(externalYieldComparison?.checks));
   }
 

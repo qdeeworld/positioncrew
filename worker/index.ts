@@ -1558,8 +1558,11 @@ async function createFreshMarketplaceHire(
             persisted: comparison.persisted,
             exactRequestAccepted: false as const,
             eligibleForRateRankingActivation: comparison.eligibleForRateRankingActivation,
-            eligibleForYieldSelection: false as const,
-            eligibleForLiveMatch: false as const,
+            eligibleForYieldSelection: comparison.eligibleForYieldSelection,
+            eligibleForLiveMatch: comparison.eligibleForLiveMatch,
+            adapterNormalized: comparison.adapterNormalized,
+            normalizedDeliverable: comparison.normalizedDeliverable,
+            selection: comparison.selection,
             checks: comparison.checks,
             boundary: comparison.boundary,
           };
