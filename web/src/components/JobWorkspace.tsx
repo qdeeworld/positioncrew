@@ -895,19 +895,23 @@ function GridAndYieldExternalComparisonPanel({
   const checks = grid?.checks ?? yieldComparison!.checks;
   const boundary = grid?.boundary ?? yieldComparison!.boundary;
   const partial = (grid?.outcome ?? yieldComparison!.outcome) === "PARTIAL_COMPATIBILITY";
+  const comparable = !isGrid && yieldComparison?.outcome === "SEMANTICALLY_COMPARABLE" &&
+    yieldComparison.eligibleForLiveMatch;
   const eligibleForScopedActivation = isGrid
     ? Boolean(grid?.eligibleForRangeAssessmentActivation)
-    : Boolean(yieldComparison?.eligibleForRateRankingActivation);
+    : Boolean(yieldComparison?.eligibleForLiveMatch ?? yieldComparison?.eligibleForRateRankingActivation);
   const title = isGrid
     ? (partial ? "Live range cross-checked" : "External range check recorded")
-    : (partial ? "Rate leader cross-checked" : "External rate check recorded");
+    : (comparable ? "Live yield match completed" : partial ? "Rate leader cross-checked" : "External rate check recorded");
   const summary = isGrid
     ? `${grid?.externalState ?? "Unavailable"} / ${grid?.externalRecommendation ?? "Unavailable"} externally · ${grid?.positionCrewDecision.replaceAll("_", " ")} by PositionCrew`
     : `${yieldComparison?.externalSimpleAnnualRateBps ?? "-"} bps external · ${yieldComparison?.positionCrewGrossApyBps ?? "-"} bps PositionCrew`;
   const detail = isGrid
     ? "AiKi checked the exact PositionCrew-derived range on the same live pool. PositionCrew remains responsible for constructing bounded orders and loss controls."
-    : `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied a rate-only candidate; PositionCrew also evaluated liquidity, risk, costs, and horizon benefit.`;
-  const scopedRole = isGrid ? "Range assessment" : "Rate ranking";
+    : comparable
+      ? `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied the attributable rate thesis; PositionCrew independently bound pinned rates and applied the full buyer contract.`
+      : `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied a rate-only candidate; PositionCrew also evaluated liquidity, risk, costs, and horizon benefit.`;
+  const scopedRole = isGrid ? "Range assessment" : comparable ? "Yield job" : "Rate ranking";
 
   return (
     <section
@@ -922,19 +926,19 @@ function GridAndYieldExternalComparisonPanel({
           <p>{detail}</p>
         </div>
         <span className="provider-audition-selection">
-          {partial ? <CheckCircle2 size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}
-          {partial ? "Partial contract match" : "Not comparable"}
+          {partial || comparable ? <CheckCircle2 size={15} aria-hidden="true" /> : <AlertTriangle size={15} aria-hidden="true" />}
+          {comparable ? "Two eligible providers" : partial ? "Partial contract match" : "Not comparable"}
         </span>
       </div>
 
       <div className="provider-audition-grid">
-        <article className={`provider-audition-candidate ${partial ? "selected" : "ineligible"}`}>
+        <article className={`provider-audition-candidate ${partial || comparable ? "selected" : "ineligible"}`}>
           <div className="provider-audition-candidate-head">
             <div>
               <span>External cross-check · not selected</span>
               <h4>{provider.name}</h4>
             </div>
-            <strong>{partial ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}{partial ? "Result persisted" : "Unavailable"}</strong>
+            <strong>{partial || comparable ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}{comparable ? "Eligible result" : partial ? "Result persisted" : "Unavailable"}</strong>
           </div>
           <ProviderAdmissionLadder
             providerName={provider.name}
@@ -957,7 +961,9 @@ function GridAndYieldExternalComparisonPanel({
                 ? `${scopedRole} eligible · not selected for capital action`
                 : "Cross-check only · not eligible"}</b>
               <small>{eligibleForScopedActivation
-                ? `The provider passed the ${scopedRole.toLowerCase()} subtask only; PositionCrew retains the bounded action, costs, risk and expiry contract.`
+                ? comparable
+                  ? yieldComparison?.selection?.basis ?? "PositionCrew selected the native exact-contract provider after both results passed."
+                  : `The provider passed the ${scopedRole.toLowerCase()} subtask only; PositionCrew retains the bounded action, costs, risk and expiry contract.`
                 : "The provider did not pass its scoped assessment contract, so no activation or ranking is claimed."}</small>
             </div>
           </div>
