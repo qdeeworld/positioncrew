@@ -247,6 +247,9 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
           {scanning ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : cards ? <RefreshCw size={17} aria-hidden="true" /> : <Radar size={17} aria-hidden="true" />}
           {scanning ? "Checking current BSC state" : cards ? "Refresh capital check" : "Check my BSC capital"}
         </button>
+        <button type="button" onClick={() => onOpenJob("LENDING_RESCUE")}>
+          Open Lending Rescue directly <ArrowRight size={17} aria-hidden="true" />
+        </button>
       </form>
 
       {error && <div className="capital-check-error" role="alert"><AlertTriangle size={15} aria-hidden="true" /> {error}</div>}

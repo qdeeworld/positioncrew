@@ -665,7 +665,7 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   await expect(page.getByText("4/4", { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("button", { name: /Lending Rescue v1/ })).toBeVisible({ timeout: 20_000 });
 
-  await page.getByRole("button", { name: /Lending Rescue v1/ }).click();
+  await page.getByRole("button", { name: "Open Lending Rescue directly" }).click();
   await expect(page.getByRole("heading", { name: "Get a bounded answer with evidence you can inspect." })).toBeVisible();
   await expect(page.getByRole("link", { name: "Past benchmark receipts · not a current check" })).toHaveAttribute("href", "#evidence");
   await expect(page.getByText(/Hire remains disabled until the exact request and block evidence are ready/)).toBeVisible();
@@ -737,7 +737,7 @@ test("a cold buyer can cause and reload a safe live lending refusal", async ({ p
   const mockedHire = await installCurrentLendingHireRoutes(page, { safeRefusal: true });
   await page.goto("/#marketplace");
 
-  await page.getByRole("button", { name: /Lending Rescue v1/ }).click();
+  await page.getByRole("button", { name: "Open Lending Rescue directly" }).click();
   await page.getByRole("button", { name: "See how safe refusal works" }).click();
 
   await expect(page.getByPlaceholder("0x account address")).toHaveValue(mockedHire.account);
@@ -897,7 +897,7 @@ test("a current lending hire does not depend on historical fixtures or external 
 test("a lost hire response reuses the unresolved idempotency key", async ({ page }) => {
   const mockedHire = await installCurrentLendingHireRoutes(page, { abortCreate: true });
   await page.goto("/#marketplace");
-  await page.getByRole("button", { name: /Lending Rescue v1/ }).click();
+  await page.getByRole("button", { name: "Open Lending Rescue directly" }).click();
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
   const hireButton = page.getByRole("button", { name: "Check eligibility and hire" });
@@ -912,7 +912,7 @@ test("a lost hire response reuses the unresolved idempotency key", async ({ page
 test("a lost job response resumes the persisted hire instead of creating another", async ({ page }) => {
   const mockedHire = await installCurrentLendingHireRoutes(page, { abortRun: true });
   await page.goto("/#marketplace");
-  await page.getByRole("button", { name: /Lending Rescue v1/ }).click();
+  await page.getByRole("button", { name: "Open Lending Rescue directly" }).click();
   await page.getByPlaceholder("0x account address").fill(mockedHire.account);
   await page.getByRole("button", { name: "Load position" }).click();
   const hireButton = page.getByRole("button", { name: "Check eligibility and hire" });
