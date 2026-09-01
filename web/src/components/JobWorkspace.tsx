@@ -899,7 +899,9 @@ function GridAndYieldExternalComparisonPanel({
     yieldComparison.eligibleForLiveMatch;
   const eligibleForScopedActivation = isGrid
     ? Boolean(grid?.eligibleForRangeAssessmentActivation)
-    : Boolean(yieldComparison?.eligibleForLiveMatch ?? yieldComparison?.eligibleForRateRankingActivation);
+    : Boolean(comparable
+      ? yieldComparison?.eligibleForLiveMatch
+      : yieldComparison?.eligibleForRateRankingActivation);
   const title = isGrid
     ? (partial ? "Live range cross-checked" : "External range check recorded")
     : (comparable ? "Live yield match completed" : partial ? "Rate leader cross-checked" : "External rate check recorded");

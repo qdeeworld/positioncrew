@@ -140,6 +140,22 @@ describe("AiKi Venus Yield adapter", () => {
     expect(result.eligibleForLiveMatch).toBe(false);
   });
 
+  it("rejects a stale request leader when the independently pinned rates rank another market first", async () => {
+    const response = providerResponse();
+    response.assessment.routes[0]!.supplyRatePerBlock = rates[1]!;
+    response.assessment.routes[1]!.supplyRatePerBlock = rates[0]!;
+    const firstParty = createYieldOptimizationDeliverable(request, now);
+    const result = await auditionAiKiVenusYield(request, firstParty, {
+      fetchImpl: fetcher(response, [rates[1]!, rates[0]!]) as typeof fetch,
+      now,
+      rpcUrl: "https://rpc.test",
+    });
+    expect(result.outcome).toBe("PARTIAL_COMPATIBILITY");
+    expect(result.eligibleForLiveMatch).toBe(false);
+    expect(result.checks.find((check) => check.code === "PINNED_RATE_BINDING")?.status).toBe("PASS");
+    expect(result.checks.find((check) => check.code === "PINNED_RATE_LEADER")?.status).toBe("FAIL");
+  });
+
   it("fails closed when the provider returns a different market set", async () => {
     const firstParty = createYieldOptimizationDeliverable(request, now);
     const result = await auditionAiKiVenusYield(request, firstParty, {

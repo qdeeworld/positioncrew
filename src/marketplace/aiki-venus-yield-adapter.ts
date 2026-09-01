@@ -157,6 +157,17 @@ export async function auditionAiKiVenusYield(
     const pinnedRateBinding = exactMarketSet && parsed.assessment.routes.every((route) =>
       pinnedRates.get(route.market.toLowerCase()) === BigInt(route.supplyRatePerBlock)
     );
+    const pinnedRateLeader = request.opportunities.reduce((leader, candidate) => {
+      const leaderRate = pinnedRates.get(leader.vaultOrMarket.toLowerCase()) ?? -1n;
+      const candidateRate = pinnedRates.get(candidate.vaultOrMarket.toLowerCase()) ?? -1n;
+      if (candidateRate > leaderRate) return candidate;
+      if (candidateRate === leaderRate && candidate.opportunityId.localeCompare(leader.opportunityId) < 0) {
+        return candidate;
+      }
+      return leader;
+    });
+    const samePinnedRateLeader = pinnedRateBinding &&
+      pinnedRateLeader.vaultOrMarket.toLowerCase() === parsed.assessment.recommendedMarket.toLowerCase();
     const observedAtMs = Date.parse(parsed.assessment.observedAt);
     const observationFresh = Number.isFinite(observedAtMs) &&
       observedAtMs <= now.getTime() + 30_000 &&
@@ -169,12 +180,13 @@ export async function auditionAiKiVenusYield(
       : undefined;
     const normalizedContractPass = normalizedDeliverable !== undefined &&
       !normalizedDeliverable.status.startsWith("REFUSED_");
-    const eligible = exactMarketSet && pinnedRateBinding && sameRateLeader && observationFresh &&
+    const eligible = exactMarketSet && pinnedRateBinding && sameRateLeader && samePinnedRateLeader && observationFresh &&
       parsed.evidence.persisted && normalizedContractPass;
     const checks: AiKiYieldComparison["checks"] = [
       { code: "EXACT_MARKET_SET", status: exactMarketSet ? "PASS" : "FAIL", detail: exactMarketSet ? "AiKi evaluated the same frozen Venus market set." : "AiKi returned a different market set." },
       { code: "PINNED_RATE_BINDING", status: pinnedRateBinding ? "PASS" : "FAIL", detail: pinnedRateBinding ? "Every provider per-block rate matches an independent Venus read at the request's pinned BSC block." : "At least one provider rate does not match the independently pinned Venus state." },
       { code: "SAME_RATE_LEADER", status: sameRateLeader ? "PASS" : "FAIL", detail: sameRateLeader ? "Both providers identified the same highest-rate market." : "The providers identified different rate leaders." },
+      { code: "PINNED_RATE_LEADER", status: samePinnedRateLeader ? "PASS" : "FAIL", detail: samePinnedRateLeader ? "The provider recommendation is also the highest-rate market in the independently pinned on-chain state." : "The provider recommendation is not the rate leader in the independently pinned on-chain state." },
       { code: "OBSERVATION_FRESHNESS", status: observationFresh ? "PASS" : "FAIL", detail: observationFresh ? "The provider observation is inside the buyer's freshness window." : "The provider observation is stale or future-dated." },
       { code: "PERSISTED_RESULT", status: parsed.evidence.persisted ? "PASS" : "FAIL", detail: "AiKi marked this assessment as persisted." },
       { code: "BUYER_CONSTRAINT_EVALUATION", status: normalizedContractPass ? "PASS" : "FAIL", detail: normalizedContractPass ? "PositionCrew evaluated the provider's attributable market thesis against the unchanged liquidity, risk, cost, concentration, expiry, and horizon limits." : "The provider thesis could not produce a schema-valid bounded decision under the buyer's request." },
