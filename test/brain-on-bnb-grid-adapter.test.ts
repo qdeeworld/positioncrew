@@ -419,6 +419,46 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.eligibleForLiveMatch).toBe(false);
   });
 
+  it("rejects literal duplicate keys even when the later value is signed", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse()).replace(
+      '"net_after_rebalancing_usd_in_window":0.32',
+      '"net_after_rebalancing_usd_in_window":0.32,"net_after_rebalancing_usd_in_window":-1',
+    );
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "RAW_JSON_KEY_SAFETY")?.status).toBe("FAIL");
+  });
+
+  it("accepts harmless unique escaped keys without erasing provider evidence", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse()).replace('"note":', '"n\\u006fte":');
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("SEMANTICALLY_COMPARABLE");
+    expect(result.providerRange).not.toBeNull();
+    expect(result.checks.find((check) => check.code === "RAW_JSON_KEY_SAFETY")?.status).toBe("PASS");
+  });
+
+  it("rejects unbounded decimal exponents without expanding them", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse()).replace(
+      '"fees_the_pool_paid_usd":400',
+      '"fees_the_pool_paid_usd":1e-100000000',
+    );
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
   it("binds token decimals as part of the requested pair identity", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse();

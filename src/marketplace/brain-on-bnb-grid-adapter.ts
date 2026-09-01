@@ -144,7 +144,7 @@ function numberToPlainDecimal(value: number): string | null {
   if (!source.includes("e")) return source;
   const [coefficient, exponentText] = source.split("e");
   const exponent = Number(exponentText);
-  if (!coefficient || !Number.isInteger(exponent)) return null;
+  if (!coefficient || !Number.isInteger(exponent) || Math.abs(exponent) > 100) return null;
   const [whole = "", fraction = ""] = coefficient.split(".");
   const digits = `${whole}${fraction}`;
   const decimalIndex = whole.length + exponent;
@@ -159,7 +159,7 @@ function numericLexemeToPlainDecimal(source: string): string | null {
   if (!normalized.includes("e")) return normalized;
   const [coefficient, exponentText] = normalized.split("e");
   const exponent = Number(exponentText);
-  if (!coefficient || !Number.isInteger(exponent)) return null;
+  if (!coefficient || !Number.isInteger(exponent) || Math.abs(exponent) > 100) return null;
   const [whole = "", fraction = ""] = coefficient.split(".");
   const digits = `${whole}${fraction}`;
   const decimalIndex = whole.length + exponent;
@@ -168,18 +168,62 @@ function numericLexemeToPlainDecimal(source: string): string | null {
   return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
 }
 
-function numericFieldLexemes(source: string, key: string): Array<string | null> {
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(
-    `"${escapedKey}"\\s*:\\s*(null|(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)`,
-    "g",
-  );
-  return [...source.matchAll(pattern)].map((match) =>
-    match[1] === "null" ? null : (match[1] ?? null));
-}
-
-function hasEscapedObjectKey(source: string): boolean {
-  return /"(?:[^"\\]|\\.)*\\u[0-9a-fA-F]{4}(?:[^"\\]|\\.)*"\s*:/.test(source);
+function scanJsonNumericFields(source: string): {
+  hasDuplicateKeys: boolean;
+  fields: Map<string, Array<string | null>>;
+} {
+  const fields = new Map<string, Array<string | null>>();
+  const stack: Array<{ kind: "OBJECT"; keys: Set<string> } | { kind: "ARRAY" }> = [];
+  let hasDuplicateKeys = false;
+  for (let index = 0; index < source.length;) {
+    const character = source[index];
+    if (character === "{") {
+      stack.push({ kind: "OBJECT", keys: new Set() });
+      index += 1;
+      continue;
+    }
+    if (character === "[") {
+      stack.push({ kind: "ARRAY" });
+      index += 1;
+      continue;
+    }
+    if (character === "}" || character === "]") {
+      stack.pop();
+      index += 1;
+      continue;
+    }
+    if (character !== '"') {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    for (; end < source.length; end += 1) {
+      if (source[end] === "\\") {
+        end += 1;
+        continue;
+      }
+      if (source[end] === '"') break;
+    }
+    if (end >= source.length) break;
+    let cursor = end + 1;
+    while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+    const container = stack.at(-1);
+    if (source[cursor] === ":" && container?.kind === "OBJECT") {
+      const key = JSON.parse(source.slice(index, end + 1)) as string;
+      if (container.keys.has(key)) hasDuplicateKeys = true;
+      container.keys.add(key);
+      cursor += 1;
+      while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+      const valueMatch = source.slice(cursor).match(/^(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|null)/);
+      if (valueMatch?.[1]) {
+        const values = fields.get(key) ?? [];
+        values.push(valueMatch[1] === "null" ? null : valueMatch[1]);
+        fields.set(key, values);
+      }
+    }
+    index = end + 1;
+  }
+  return { hasDuplicateKeys, fields };
 }
 
 function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
@@ -308,8 +352,9 @@ export async function auditionBrainOnBnbGrid(
     if (!response.ok) throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
     const rawResponse = await response.text();
     const parsed = BrainGridResponseSchema.parse(JSON.parse(rawResponse));
-    const rawJsonKeySafe = !hasEscapedObjectKey(rawResponse);
-    const rawLexemes = (key: string) => rawJsonKeySafe ? numericFieldLexemes(rawResponse, key) : [];
+    const rawStructure = scanJsonNumericFields(rawResponse);
+    const rawJsonKeySafe = !rawStructure.hasDuplicateKeys;
+    const rawLexemes = (key: string) => rawStructure.fields.get(key) ?? [];
     const capitalLexemes = rawLexemes("capital_considered_usd");
     const feeTierLexemes = rawLexemes("fee_pct");
     const widthLexemes = rawLexemes("width_pct");
