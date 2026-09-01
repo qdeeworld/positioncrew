@@ -145,6 +145,31 @@ function declaredBestWidthPct(value: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
+  const [whole, fraction = ""] = value.split(".");
+  const scale = 10n ** BigInt(fraction.length);
+  return { units: BigInt(`${whole}${fraction}`), scale };
+}
+
+function recenteredRangeFitsBuyerBounds(
+  midPrice: string,
+  widthPct: number,
+  buyerLower: string,
+  buyerUpper: string,
+): boolean {
+  const mid = parseUnsignedDecimal(midPrice);
+  const width = parseUnsignedDecimal(String(widthPct));
+  const lower = parseUnsignedDecimal(buyerLower);
+  const upper = parseUnsignedDecimal(buyerUpper);
+  const hundredAtWidthScale = 100n * width.scale;
+  if (width.units >= hundredAtWidthScale) return false;
+  const denominator = mid.scale * hundredAtWidthScale;
+  const lowerNumerator = mid.units * (hundredAtWidthScale - width.units);
+  const upperNumerator = mid.units * (hundredAtWidthScale + width.units);
+  return lowerNumerator * lower.scale >= lower.units * denominator &&
+    upperNumerator * upper.scale <= upper.units * denominator;
+}
+
 export async function auditionBrainOnBnbGrid(
   request: BoundedGridRequest,
   firstParty: BoundedGridDeliverable,
@@ -207,17 +232,21 @@ export async function auditionBrainOnBnbGrid(
         candidate.price_range.high <= buyerUpper * (1 + 25 / 10_000);
     };
     const bestWidthPct = declaredBestWidthPct(parsed.best_range_after_paying_to_put_it_back);
-    const declaredCandidate = bestWidthPct === null
-      ? undefined
-      : parsed.ranges.find((candidate) =>
+    const declaredCandidates = bestWidthPct === null
+      ? []
+      : parsed.ranges.filter((candidate) =>
           candidate.width_pct !== null &&
           !candidate.full_range &&
           candidate.price_range !== null &&
           Math.abs(candidate.width_pct - bestWidthPct) <= 0.000001);
-    const providerRangeBinding = declaredCandidate
+    const declaredCandidate = declaredCandidates[0];
+    const unambiguousDeclaredCandidate = declaredCandidates.length === 1;
+    const providerRangeBinding = unambiguousDeclaredCandidate && declaredCandidate
       ? rawRangeBindsProviderAndBuyer(declaredCandidate)
       : false;
-    const candidates = parsed.ranges.flatMap((candidate) => {
+    const candidates = !unambiguousDeclaredCandidate || !declaredCandidate
+      ? []
+      : [declaredCandidate].flatMap((candidate) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
       if (bestWidthPct === null || Math.abs(candidate.width_pct - bestWidthPct) > 0.000001) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
@@ -231,8 +260,12 @@ export async function auditionBrainOnBnbGrid(
       ) return [];
       const lowerPrice = midPrice * (1 - candidate.width_pct / 100);
       const upperPrice = midPrice * (1 + candidate.width_pct / 100);
-      const recenteredRangeInsideBuyerBounds =
-        lowerPrice >= buyerLower - 0.000001 && upperPrice <= buyerUpper + 0.000001;
+      const recenteredRangeInsideBuyerBounds = recenteredRangeFitsBuyerBounds(
+        request.marketState.midPrice,
+        candidate.width_pct,
+        request.constraints.lowerPrice,
+        request.constraints.upperPrice,
+      );
       const deliverable = recenteredRangeInsideBuyerBounds
         ? createBoundedGridDeliverable({
             ...request,

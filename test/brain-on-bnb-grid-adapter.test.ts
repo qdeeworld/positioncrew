@@ -37,7 +37,7 @@ const request: BoundedGridRequest = {
   },
   constraints: {
     capitalUsd: "1000",
-    lowerPrice: "673.891392",
+    lowerPrice: "673.891391",
     upperPrice: "701.397163",
     levelCount: 5,
     maximumInventoryUsd: "600",
@@ -164,6 +164,26 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.providerRange?.lowerPrice).toBe(687.71);
     expect(result.providerRange?.upperPrice).toBe(687.69);
     expect(result.checks.find((check) => check.code === "PROVIDER_RANGE_BINDING")?.status).toBe("FAIL");
+    expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
+  it("rejects ambiguous duplicate rows for the declared best width", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const valid = providerResponse().ranges[1];
+    const response = providerResponse({
+      ranges: [
+        { ...valid, price_range: { low: 700, high: 690, unit: "USDT per WBNB" } },
+        valid,
+      ],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.providerRange?.lowerPrice).toBe(700);
+    expect(result.checks.find((check) => check.code === "PROVIDER_RANGE_BINDING")?.status).toBe("FAIL");
+    expect(result.normalizedDeliverable).toBeUndefined();
     expect(result.eligibleForLiveMatch).toBe(false);
   });
 
@@ -353,6 +373,40 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.providerRange?.upperPrice).toBe(rawHigh);
     expect(result.normalizedDeliverable).toBeUndefined();
     expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("FAIL");
+  });
+
+  it("enforces exact buyer bounds for low-priced assets without a dollar epsilon", async () => {
+    const midPrice = 0.0003;
+    const lowPriceRequest: BoundedGridRequest = {
+      ...request,
+      marketState: { ...request.marketState, midPrice: String(midPrice) },
+      constraints: {
+        ...request.constraints,
+        lowerPrice: (midPrice * (1 - 1.99 / 100)).toFixed(8),
+        upperPrice: (midPrice * (1 + 1.99 / 100)).toFixed(8),
+      },
+    };
+    const firstParty = createBoundedGridDeliverable(lowPriceRequest, now);
+    const providerPrice = midPrice * (1 - 20 / 10_000);
+    const response = providerResponse({
+      price_now: providerPrice,
+      ranges: [{
+        ...providerResponse().ranges[1],
+        price_range: {
+          low: providerPrice * 0.98,
+          high: providerPrice * 1.02,
+          unit: "USDT per WBNB",
+        },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(lowPriceRequest, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.externalRecommendation).toBe("BUILD_GRID");
+    expect(result.normalizedDeliverable).toBeUndefined();
+    expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("FAIL");
+    expect(result.eligibleForLiveMatch).toBe(false);
   });
 
   it("binds the replay window to the source used by the market state", async () => {
