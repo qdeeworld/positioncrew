@@ -21,6 +21,8 @@ import {
 } from "./heyanon-v3pools-adapter.js";
 
 const PositiveDecimalSchema = z.string().regex(/^[1-9]\d*(\.\d+)?$|^0\.\d*[1-9]\d*$/);
+const PANCAKE_V3_FACTORY = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865";
+const DEFAULT_BSC_RPC = "https://bsc-rpc.publicnode.com";
 
 const PoolPriceEnvelopeSchema = z.object({
   project: z.literal("v3pools"),
@@ -118,6 +120,40 @@ function alignDown(tick: number, spacing: number): number {
 
 function alignUp(tick: number, spacing: number): number {
   return Math.ceil(tick / spacing) * spacing;
+}
+
+function addressArgument(address: string): string {
+  return address.slice(2).toLowerCase().padStart(64, "0");
+}
+
+async function fetchPancakeV3Pool(
+  token0: string,
+  token1: string,
+  fee: number,
+  blockNumber: number,
+  rpcUrl: string,
+  fetchImpl: typeof fetch,
+): Promise<string> {
+  const response = await fetchImpl(rpcUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_call",
+      params: [{
+        to: PANCAKE_V3_FACTORY,
+        data: `0x1698ee82${addressArgument(token0)}${addressArgument(token1)}${BigInt(fee).toString(16).padStart(64, "0")}`,
+      }, `0x${blockNumber.toString(16)}`],
+    }),
+  });
+  if (!response.ok) throw new Error(`BSC factory RPC returned HTTP ${response.status}`);
+  const parsed = z.object({
+    jsonrpc: z.literal("2.0"),
+    id: z.union([z.string(), z.number()]),
+    result: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+  }).parse(await response.json());
+  return `0x${parsed.result.slice(-40)}`.toLowerCase();
 }
 
 function priceToTick(price: number, rounding: "DOWN" | "UP"): number {
@@ -263,6 +299,17 @@ export async function auditionHeyAnonV3LpJob(
     fetchImpl,
   );
   const feeTier = pinnedPosition.fee;
+  const tickSpacingByFee = new Map([[100, 1], [500, 10], [2_500, 50], [10_000, 200]]);
+  const pinnedTickSpacing = tickSpacingByFee.get(feeTier);
+  if (!pinnedTickSpacing) throw new Error("The pinned PancakeSwap position uses an unsupported fee tier");
+  const pinnedPool = await fetchPancakeV3Pool(
+    pinnedPosition.token0,
+    pinnedPosition.token1,
+    feeTier,
+    pinnedPosition.blockNumber,
+    options.rpcUrl ?? DEFAULT_BSC_RPC,
+    fetchImpl,
+  );
   const args = {
     chainName: "bsc",
     token0: request.token0.address,
@@ -282,8 +329,8 @@ export async function auditionHeyAnonV3LpJob(
   if (lowerPoolPrice >= upperPoolPrice) throw new Error("External range is not ordered");
   const rawLowerTick = priceToTick(lowerPoolPrice, "DOWN");
   const rawUpperTick = priceToTick(upperPoolPrice, "UP");
-  const lowerTick = alignDown(rawLowerTick, request.constraints.tickSpacing);
-  const upperTick = alignUp(rawUpperTick, request.constraints.tickSpacing);
+  const lowerTick = alignDown(rawLowerTick, pinnedTickSpacing);
+  const upperTick = alignUp(rawUpperTick, pinnedTickSpacing);
   const widthTicks = upperTick - lowerTick;
   const currentTickInside = request.marketState.currentTick >= lowerTick &&
     request.marketState.currentTick < upperTick;
@@ -295,6 +342,8 @@ export async function auditionHeyAnonV3LpJob(
     pinnedPosition.tickLower === request.position.lowerTick &&
     pinnedPosition.tickUpper === request.position.upperTick &&
     pinnedPosition.liquidity === request.position.liquidity;
+  const poolBinding = pinnedPool === request.pool.toLowerCase();
+  const tickSpacingBinding = pinnedTickSpacing === request.constraints.tickSpacing;
   const priceBps = relativeDifferenceBps(
     Number(priceEnvelope.data.poolPrice),
     Number(request.marketState.token1PriceUsd) / Number(request.marketState.token0PriceUsd),
@@ -307,6 +356,20 @@ export async function auditionHeyAnonV3LpJob(
       detail: positionBinding
         ? "The request owner, token pair, ticks, and raw liquidity match an independent position-manager read."
         : "The caller-supplied position does not match the independent PancakeSwap position-manager read.",
+    },
+    {
+      code: "EXACT_POOL_BINDING",
+      status: poolBinding ? "PASS" as const : "FAIL" as const,
+      detail: poolBinding
+        ? "The request pool matches the PancakeSwap factory pool for the pinned NFT token pair and fee tier."
+        : "The request pool does not match the PancakeSwap factory pool for the pinned NFT.",
+    },
+    {
+      code: "TICK_SPACING_BINDING",
+      status: tickSpacingBinding ? "PASS" as const : "FAIL" as const,
+      detail: tickSpacingBinding
+        ? `The request tick spacing matches fee tier ${feeTier}.`
+        : `The request tick spacing does not match fee tier ${feeTier}.`,
     },
     {
       code: "CURRENT_PRICE_COHERENCE",

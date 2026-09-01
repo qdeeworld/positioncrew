@@ -7,6 +7,7 @@ const token0 = "0x55d398326f99059fF775485246999027B3197955";
 const token1 = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
 const owner = "0xD746e0921d1a3D7fD3b346F037b6acC34A1eE4B3";
 const liquidity = "67739875241796152863897";
+const pool = "0x172fcD41E0913e95784454622d1c3724f546f849";
 
 const request = LpRebalanceRequestSchema.parse({
   schemaVersion: "positioncrew.lp-rebalance.request.v1",
@@ -27,7 +28,7 @@ const request = LpRebalanceRequestSchema.parse({
     uri: "https://bscscan.com/block/118955550",
     observedAt: "2026-08-30T11:59:00.000Z",
   }],
-  pool: "0x172fcD41E0913e95784454622d1c3724f546f849",
+  pool,
   token0: { symbol: "USDT", address: token0, decimals: 18 },
   token1: { symbol: "WBNB", address: token1, decimals: 18 },
   position: {
@@ -149,6 +150,8 @@ const fetchImpl: typeof fetch = async (input, init) => {
   const data = params[0]?.data ?? "";
   const result = body.method === "eth_blockNumber"
     ? "0x7170000"
+    : data.includes("1698ee82")
+      ? `0x${addressWord(pool)}`
     : data.includes("6352211e")
       ? `0x${addressWord(owner)}`
       : positionResponse();
@@ -201,6 +204,26 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
     });
     expect(result.normalizedDeliverable.status).toBe("REFUSED_EXPIRED");
     expect(result.checks.find((check) => check.code === "NORMALIZED_EVIDENCE_GATE")?.status).toBe("FAIL");
+    expect(result.eligibleForLpRebalance).toBe(false);
+  });
+
+  it("rejects tick spacing that does not match the pinned fee tier", async () => {
+    const alteredRequest = LpRebalanceRequestSchema.parse({
+      ...request,
+      constraints: { ...request.constraints, tickSpacing: 10 },
+    });
+    const result = await auditionHeyAnonV3LpJob(alteredRequest, positionId, { fetchImpl });
+    expect(result.checks.find((check) => check.code === "TICK_SPACING_BINDING")?.status).toBe("FAIL");
+    expect(result.eligibleForLpRebalance).toBe(false);
+  });
+
+  it("rejects market economics bound to a different pool", async () => {
+    const alteredRequest = LpRebalanceRequestSchema.parse({
+      ...request,
+      pool: "0x0000000000000000000000000000000000000001",
+    });
+    const result = await auditionHeyAnonV3LpJob(alteredRequest, positionId, { fetchImpl });
+    expect(result.checks.find((check) => check.code === "EXACT_POOL_BINDING")?.status).toBe("FAIL");
     expect(result.eligibleForLpRebalance).toBe(false);
   });
 });
