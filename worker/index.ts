@@ -74,9 +74,9 @@ import {
   isNoEligibleLendingProviderError,
 } from "../src/marketplace/lending-provider-audition.js";
 import {
-  AIKI_PANCAKE_REBALANCER,
-  auditionAiKiPancakeRebalancer,
-} from "../src/marketplace/aiki-pancake-rebalancer-adapter.js";
+  HEYANON_V3_POOLS,
+} from "../src/marketplace/heyanon-v3pools-adapter.js";
+import { auditionHeyAnonV3LpJob } from "../src/marketplace/heyanon-v3pools-lp-job-adapter.js";
 import {
   AIKI_VENUS_GUARDIAN,
   auditionAiKiVenusGuardian,
@@ -1389,33 +1389,81 @@ async function createFreshMarketplaceHire(
           )?.[1];
           if (!positionTokenId) return undefined;
           const firstParty = createLpRebalanceDeliverable(parsed.request, new Date(createdAt));
-          const comparison = await auditionAiKiPancakeRebalancer(
-            parsed.request,
-            firstParty,
-            positionTokenId,
-            { now: new Date(createdAt) },
-          );
-          return {
-            schemaVersion: "positioncrew.external-lp-comparison-summary.v1" as const,
-            provider: {
-              name: AIKI_PANCAKE_REBALANCER.name,
-              erc8004TokenId: AIKI_PANCAKE_REBALANCER.tokenId,
-              endpoint: AIKI_PANCAKE_REBALANCER.endpoint,
-            },
-            evaluatedAt: comparison.evaluatedAt,
-            positionTokenId,
-            outcome: comparison.outcome,
-            attributableResult: comparison.attributableResult,
-            completedSamePositionAssessment: comparison.completedSamePositionAssessment,
-            persistedByProvider: comparison.persistedByProvider,
-            externalDecision: comparison.externalDecision,
-            firstPartyDecision: comparison.firstPartyDecision,
-            exactRequestAccepted: false as const,
-            eligibleForPositionAssessmentActivation: comparison.eligibleForPositionAssessmentActivation,
-            eligibleForLiveMatch: false as const,
-            checks: comparison.checks,
-            boundary: comparison.boundary,
-          };
+          try {
+            const comparison = await auditionHeyAnonV3LpJob(
+              parsed.request,
+              positionTokenId,
+              { now: new Date(createdAt) },
+            );
+            return {
+              schemaVersion: "positioncrew.external-lp-comparison-summary.v1" as const,
+              provider: {
+                name: HEYANON_V3_POOLS.name,
+                erc8004TokenId: String(HEYANON_V3_POOLS.agentTokenId),
+                endpoint: HEYANON_V3_POOLS.endpoint,
+              },
+              evaluatedAt: createdAt,
+              positionTokenId,
+              outcome: comparison.eligibleForLpRebalance
+                ? "SEMANTICALLY_COMPARABLE" as const
+                : "INCOMPATIBLE" as const,
+              attributableResult: comparison.attributableResult,
+              completedSamePositionAssessment: true,
+              persistedByProvider: false,
+              externalDecision: comparison.normalizedDeliverable.decision === "HOLD"
+                ? "HOLD" as const
+                : "REBALANCE" as const,
+              firstPartyDecision: firstParty.decision,
+              exactRequestAccepted: false as const,
+              eligibleForPositionAssessmentActivation: comparison.eligibleForLpRebalance,
+              eligibleForLiveMatch: comparison.eligibleForLpRebalance,
+              adapterNormalized: true,
+              externalRange: {
+                lowerTick: comparison.recommendation.lowerTick,
+                upperTick: comparison.recommendation.upperTick,
+                widthTicks: comparison.recommendation.widthTicks,
+              },
+              normalizedDeliverable: comparison.normalizedDeliverable,
+              selection: {
+                selectedProvider: "POSITIONCREW" as const,
+                externalEligible: comparison.eligibleForLpRebalance,
+                basis: comparison.eligibleForLpRebalance
+                  ? "The first-party provider won the native exact-contract tiebreak; the external range remains attributable and comparable."
+                  : "The external range failed at least one buyer or compatibility constraint.",
+              },
+              checks: comparison.checks,
+              boundary: comparison.claimBoundary.join(" "),
+            };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "External provider unavailable";
+            return {
+              schemaVersion: "positioncrew.external-lp-comparison-summary.v1" as const,
+              provider: {
+                name: HEYANON_V3_POOLS.name,
+                erc8004TokenId: String(HEYANON_V3_POOLS.agentTokenId),
+                endpoint: HEYANON_V3_POOLS.endpoint,
+              },
+              evaluatedAt: createdAt,
+              positionTokenId,
+              outcome: "UNAVAILABLE" as const,
+              attributableResult: false,
+              completedSamePositionAssessment: false,
+              persistedByProvider: false,
+              externalDecision: "UNKNOWN" as const,
+              firstPartyDecision: firstParty.decision,
+              exactRequestAccepted: false as const,
+              eligibleForPositionAssessmentActivation: false,
+              eligibleForLiveMatch: false,
+              adapterNormalized: false,
+              selection: {
+                selectedProvider: "POSITIONCREW" as const,
+                externalEligible: false,
+                basis: "The external provider was unavailable; the first-party hire remained available.",
+              },
+              checks: [{ code: "REMOTE_PROVIDER_AVAILABLE", status: "FAIL" as const, detail: message }],
+              boundary: "The external outage did not block the first-party LP hire. No external result or ranking is claimed.",
+            };
+          }
         })()
       : undefined;
   const externalLendingComparison =

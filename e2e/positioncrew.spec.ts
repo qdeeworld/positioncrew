@@ -1105,10 +1105,11 @@ test("all three non-lending current hires return category-specific durable resul
     await expect(page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" })).toBeVisible();
     if (candidate.value === "LP_REBALANCE") {
       const comparison = page.getByTestId("lp-external-provider-comparison");
-      await expect(comparison.getByRole("heading", { name: "Same position, same decision" })).toBeVisible();
-      await expect(comparison.getByText("AiKi PancakeSwap LP Rebalancer", { exact: true })).toBeVisible();
+      await expect(comparison.getByRole("heading", { name: "Two live providers evaluated" })).toBeVisible();
+      await expect(comparison.getByText("V3 Pools powered by HeyAnon", { exact: true })).toBeVisible();
       await expect(comparison.getByText("HOLD externally · HOLD by PositionCrew", { exact: true })).toBeVisible();
-      await expect(comparison).toContainText("accepted the position NFT, not every PositionCrew constraint");
+      await expect(comparison).toContainText("Compatible through adapter");
+      await expect(comparison).toContainText("PositionCrew selected");
     }
     if (candidate.value === "BOUNDED_GRID") {
       const comparison = page.getByTestId("grid-external-provider-comparison");
@@ -1633,26 +1634,34 @@ async function installCurrentCategoryHireRoutes(
             externalProviderComparison: {
               schemaVersion: "positioncrew.external-lp-comparison-summary.v1",
               provider: {
-                name: "AiKi PancakeSwap LP Rebalancer",
-                erc8004TokenId: "315944",
-                endpoint: "https://www.useaiki.xyz/v1/reference/pancake/rebalancer/agent/315944",
+                name: "V3 Pools powered by HeyAnon",
+                erc8004TokenId: "45650",
+                endpoint: "https://erc8004.heyanon.ai/mcp/v3pools",
               },
               evaluatedAt: now.toISOString(),
               positionTokenId: "7284554",
               outcome: "SEMANTICALLY_COMPARABLE",
               attributableResult: true,
               completedSamePositionAssessment: true,
-              persistedByProvider: true,
+              persistedByProvider: false,
               externalDecision: "HOLD",
               firstPartyDecision: "HOLD",
               exactRequestAccepted: false,
-              eligibleForLiveMatch: false,
+              eligibleForPositionAssessmentActivation: true,
+              eligibleForLiveMatch: true,
+              adapterNormalized: true,
+              externalRange: { lowerTick: -65840, upperTick: -64830, widthTicks: 1010 },
+              selection: {
+                selectedProvider: "POSITIONCREW",
+                externalEligible: true,
+                basis: "The first-party provider won the native exact-contract tiebreak.",
+              },
               checks: [
                 { code: "EXACT_POSITION_STATE", status: "PASS", detail: "Ticks and raw liquidity exactly match the request." },
                 { code: "DECISION_ALIGNMENT", status: "PASS", detail: "Both providers return HOLD." },
                 { code: "EXACT_REQUEST_ACCEPTANCE", status: "FAIL", detail: "Provider accepts the position NFT, not every PositionCrew constraint." },
               ],
-              boundary: "This proves a second assessment, not provider ranking, activation, payment, or execution.",
+              boundary: "The external range was normalized and evaluated without payment or execution.",
             },
           } : {}),
           ...(definition.service === "BOUNDED_GRID" ? {

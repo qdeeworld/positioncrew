@@ -396,10 +396,10 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
       externalProviderComparison?.schemaVersion,
       "positioncrew.external-lp-comparison-summary.v1",
     );
-    assert.equal(externalProviderComparison?.provider?.erc8004TokenId, "315944");
+    assert.equal(externalProviderComparison?.provider?.erc8004TokenId, "45650");
     assert.equal(externalProviderComparison?.positionTokenId, "9000001");
     assert.equal(externalProviderComparison?.exactRequestAccepted, false);
-    assert.equal(externalProviderComparison?.eligibleForLiveMatch, false);
+    assert.equal(typeof externalProviderComparison?.eligibleForLiveMatch, "boolean");
     assert.ok(Array.isArray(externalProviderComparison?.checks));
   }
   if (definition.service === "BOUNDED_GRID") {
