@@ -123,6 +123,8 @@ function replayEconomicsAreConsistent(
   const toleranceUsd = 0.000001;
   const expectedNetUsd = candidate.fees_usd_in_window - candidate.assumed_rebalance_cost_usd;
   return Math.abs(candidate.assumed_rebalance_cost_usd - declaredRebalanceCostUsd) <= toleranceUsd &&
+    expectedNetUsd > toleranceUsd &&
+    candidate.net_after_rebalancing_usd_in_window > toleranceUsd &&
     Math.abs(candidate.net_after_rebalancing_usd_in_window - expectedNetUsd) <= toleranceUsd;
 }
 
@@ -218,15 +220,18 @@ export async function auditionBrainOnBnbGrid(
       ) return [];
       const lowerPrice = midPrice * (1 - candidate.width_pct / 100);
       const upperPrice = midPrice * (1 + candidate.width_pct / 100);
-      if (lowerPrice < buyerLower - 0.000001 || upperPrice > buyerUpper + 0.000001) return [];
-      const deliverable = createBoundedGridDeliverable({
-        ...request,
-        constraints: {
-          ...request.constraints,
-          lowerPrice: String(lowerPrice),
-          upperPrice: String(upperPrice),
-        },
-      }, now);
+      const recenteredRangeInsideBuyerBounds =
+        lowerPrice >= buyerLower - 0.000001 && upperPrice <= buyerUpper + 0.000001;
+      const deliverable = recenteredRangeInsideBuyerBounds
+        ? createBoundedGridDeliverable({
+            ...request,
+            constraints: {
+              ...request.constraints,
+              lowerPrice: String(lowerPrice),
+              upperPrice: String(upperPrice),
+            },
+          }, now)
+        : undefined;
       return [{ candidate, lowerPrice, upperPrice, deliverable }];
     });
     const selected = candidates[0];
@@ -272,8 +277,8 @@ export async function auditionBrainOnBnbGrid(
       providerRange: selected && widthPct !== null
         ? {
             widthPct,
-            lowerPrice: selected.lowerPrice,
-            upperPrice: selected.upperPrice,
+            lowerPrice: selected.candidate.price_range!.low,
+            upperPrice: selected.candidate.price_range!.high,
             netAfterRebalancingUsdInWindow: selected.candidate.net_after_rebalancing_usd_in_window,
           }
         : null,

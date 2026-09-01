@@ -183,6 +183,25 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
   });
 
+  it("rejects apparent positive net below the consistency tolerance", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({
+      rebalance_cost_usd_assumed: 0.000001,
+      ranges: [{
+        ...providerResponse().ranges[1],
+        fees_usd_in_window: 0.0000005,
+        assumed_rebalance_cost_usd: 0.000001,
+        net_after_rebalancing_usd_in_window: 0.0000001,
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
   it("rejects impossible replay activity and fee totals", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse({
@@ -277,6 +296,39 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("PASS");
     expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("FAIL");
     expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
+  it("preserves raw provider bounds when exact recentering crosses the buyer boundary", async () => {
+    const narrowRequest: BoundedGridRequest = {
+      ...request,
+      constraints: {
+        ...request.constraints,
+        lowerPrice: String(Number(request.marketState.midPrice) * (1 - 1.99 / 100)),
+        upperPrice: String(Number(request.marketState.midPrice) * (1 + 1.99 / 100)),
+      },
+    };
+    const firstParty = createBoundedGridDeliverable(narrowRequest, now);
+    const providerPrice = Number(request.marketState.midPrice) * (1 - 20 / 10_000);
+    const rawLow = providerPrice * 0.98;
+    const rawHigh = providerPrice * 1.02;
+    const response = providerResponse({
+      price_now: providerPrice,
+      ranges: [{
+        ...providerResponse().ranges[1],
+        width_pct: 2,
+        price_range: { low: rawLow, high: rawHigh, unit: "USDT per WBNB" },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(narrowRequest, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.externalRecommendation).toBe("BUILD_GRID");
+    expect(result.providerRange?.lowerPrice).toBe(rawLow);
+    expect(result.providerRange?.upperPrice).toBe(rawHigh);
+    expect(result.normalizedDeliverable).toBeUndefined();
+    expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("FAIL");
   });
 
   it("binds the replay window to the source used by the market state", async () => {
