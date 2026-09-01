@@ -253,6 +253,7 @@ function scanJsonNumericFields(source: string): {
 async function readResponseTextLimited(response: Response, maximumBytes = 1_000_000): Promise<string> {
   const contentLength = response.headers.get("content-length");
   if (contentLength && Number(contentLength) > maximumBytes) {
+    await response.body?.cancel();
     throw new Error("Brain on BNB Grid response exceeds the admitted size");
   }
   if (!response.body) return "";

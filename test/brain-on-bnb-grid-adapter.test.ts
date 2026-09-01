@@ -870,4 +870,23 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks[0]?.detail).toContain("exceeds the admitted size");
     expect(result.eligibleForLiveMatch).toBe(false);
   });
+
+  it("cancels a provider body rejected from its Content-Length header", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    let canceled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        canceled = true;
+      },
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(body, {
+        status: 200,
+        headers: { "content-length": "1000001" },
+      })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("UNAVAILABLE");
+    expect(canceled).toBe(true);
+  });
 });
