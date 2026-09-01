@@ -527,6 +527,20 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "EXACT_POOL_AND_PAIR")?.status).toBe("FAIL");
   });
 
+  it("binds token decimals from their raw integer lexemes", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse()).replace(
+      '"decimals":18',
+      '"decimals":17.999999999999999999',
+    );
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "EXACT_POOL_AND_PAIR")?.status).toBe("FAIL");
+  });
+
   it("rejects raw price deviations just beyond the declared tolerance", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const priceJustBeyondTolerance = Number(request.marketState.midPrice) * (1 + 25.4 / 10_000);
@@ -867,6 +881,27 @@ describe("Brain on BNB Grid adapter", () => {
     });
     expect(result.outcome).toBe("UNAVAILABLE");
     expect(canceled).toBe(2);
+  });
+
+  it("retries a 5xx response even when body cancellation rejects", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    let calls = 0;
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) {
+          return new Response(new ReadableStream<Uint8Array>({
+            cancel() {
+              return Promise.reject(new Error("cancel failed"));
+            },
+          }), { status: 503 });
+        }
+        return new Response(JSON.stringify(providerResponse()), { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(calls).toBe(2);
+    expect(result.outcome).toBe("SEMANTICALLY_COMPARABLE");
   });
 
   it("cancels a final 4xx provider response body", async () => {

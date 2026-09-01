@@ -274,6 +274,14 @@ async function readResponseTextLimited(response: Response, maximumBytes = 1_000_
   return result + decoder.decode();
 }
 
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Cleanup is best-effort and must not suppress retry or fail-closed handling.
+  }
+}
+
 function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
   if (value.length > 256) throw new Error("Decimal precision exceeds the admitted bound");
   const [whole, fraction = ""] = value.split(".");
@@ -392,7 +400,7 @@ export async function auditionBrainOnBnbGrid(
       signal: AbortSignal.timeout(4_000),
     });
     if (response.status >= 500) {
-      await response.body?.cancel();
+      await cancelResponseBody(response);
       await new Promise((resolve) => setTimeout(resolve, 250));
       response = await fetchImpl(url, {
         headers: { accept: "application/json" },
@@ -400,7 +408,7 @@ export async function auditionBrainOnBnbGrid(
       });
     }
     if (!response.ok) {
-      await response.body?.cancel();
+      await cancelResponseBody(response);
       throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
     }
     const rawResponse = await readResponseTextLimited(response);
@@ -409,6 +417,7 @@ export async function auditionBrainOnBnbGrid(
     const rawJsonKeySafe = !rawStructure.hasDuplicateKeys;
     const rawLexemes = (key: string) => rawStructure.fields.get(key) ?? [];
     const capitalLexemes = rawLexemes("capital_considered_usd");
+    const decimalLexemes = rawLexemes("decimals");
     const feeTierLexemes = rawLexemes("fee_pct");
     const widthLexemes = rawLexemes("width_pct");
     const rangeFeeLexemes = rawLexemes("fees_usd_in_window");
@@ -418,11 +427,19 @@ export async function auditionBrainOnBnbGrid(
     const declaredCostLexemes = rawLexemes("rebalance_cost_usd_assumed");
     const exactChain = request.chainId === 56;
     const exactPool = parsed.pool.toLowerCase() === request.venue.toLowerCase();
+    const tokenDecimalLexeme = decimalLexemes[0] ?? null;
+    const quoteDecimalLexeme = decimalLexemes[1] ?? null;
+    const exactTokenDecimals = decimalLexemes.length === 2 &&
+      tokenDecimalLexeme !== null &&
+      quoteDecimalLexeme !== null &&
+      decimalLexemesEqualExact(tokenDecimalLexeme, String(request.baseAsset.decimals)) &&
+      decimalLexemesEqualExact(quoteDecimalLexeme, String(request.quoteAsset.decimals));
     const exactPair =
       parsed.pair.token.address.toLowerCase() === request.baseAsset.address.toLowerCase() &&
       parsed.pair.token.decimals === request.baseAsset.decimals &&
       parsed.pair.quote.address.toLowerCase() === request.quoteAsset.address.toLowerCase() &&
-      parsed.pair.quote.decimals === request.quoteAsset.decimals;
+      parsed.pair.quote.decimals === request.quoteAsset.decimals &&
+      exactTokenDecimals;
     const providerCapital = capitalLexemes.length === 1 && capitalLexemes[0]
       ? numericLexemeToPlainDecimal(capitalLexemes[0])
       : null;
