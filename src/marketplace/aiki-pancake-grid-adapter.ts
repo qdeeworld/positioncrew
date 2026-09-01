@@ -45,6 +45,7 @@ export type AiKiGridComparison = {
   attributable: boolean;
   persisted: boolean;
   exactRequestAccepted: false;
+  eligibleForRangeAssessmentActivation: boolean;
   eligibleForGridSelection: false;
   eligibleForLiveMatch: false;
   checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
@@ -67,6 +68,7 @@ export async function auditionAiKiPancakeGrid(
     pool: request.venue,
     positionCrewDecision: firstParty.decision,
     exactRequestAccepted: false as const,
+    eligibleForRangeAssessmentActivation: false,
     eligibleForGridSelection: false as const,
     eligibleForLiveMatch: false as const,
   };
@@ -101,9 +103,11 @@ export async function auditionAiKiPancakeGrid(
       { code: "PERSISTED_RESULT", status: parsed.evidence.persisted ? "PASS" : "FAIL", detail: "AiKi marked this assessment as persisted." },
       { code: "EXACT_JOB_CONTRACT", status: "FAIL" as const, detail: "AiKi assesses a caller-supplied range; it does not accept PositionCrew's bounded order, cost, loss, expiry, and execution contract." },
     ];
+    const rangeAssessmentCompatible = exactPool && exactRangeAccepted && parsed.evidence.persisted;
     return {
       ...base,
       outcome: exactPool && exactRangeAccepted ? "PARTIAL_COMPATIBILITY" : "INCOMPATIBLE",
+      eligibleForRangeAssessmentActivation: rangeAssessmentCompatible,
       externalRecommendation: parsed.assessment.recommendation,
       externalState: parsed.assessment.state,
       tickLower: parsed.assessment.tickLower,
@@ -118,6 +122,7 @@ export async function auditionAiKiPancakeGrid(
     return {
       ...base,
       outcome: "UNAVAILABLE",
+      eligibleForRangeAssessmentActivation: false,
       externalRecommendation: null,
       externalState: null,
       tickLower: null,

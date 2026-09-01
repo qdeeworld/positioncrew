@@ -457,6 +457,49 @@ function LendingPositionBar({ request }: { request: JobRequest | null }) {
   );
 }
 
+function ProviderAdmissionLadder({
+  providerName,
+  listed,
+  verified,
+  live,
+  compatible,
+  activatable,
+  selected,
+}: {
+  providerName: string;
+  listed: boolean;
+  verified: boolean;
+  live: boolean;
+  compatible: boolean;
+  activatable: boolean;
+  selected: boolean;
+}) {
+  const stages = [
+    { label: "Listed", passed: listed, detail: listed ? "Provider identity recorded" : "Provider is not listed" },
+    { label: "Verified", passed: verified, detail: verified ? "Identity evidence validated" : "Identity evidence is incomplete" },
+    { label: "Live", passed: live, detail: live ? "Provider returned attributable evidence" : "No callable response was proven" },
+    { label: "Compatible", passed: compatible, detail: compatible ? "Declared task contract passed" : "Declared task compatibility is unproven" },
+    { label: "Activatable", passed: activatable, detail: activatable ? "Scoped activation path passed" : "Activation admission is withheld" },
+    { label: "Selected", passed: selected, detail: selected ? "Selected under the disclosed policy" : "Provider was not selected" },
+  ];
+  const firstFailure = stages.findIndex((stage) => !stage.passed);
+
+  return (
+    <ol className="provider-admission-ladder" aria-label={`${providerName} admission status`}>
+      {stages.map((stage, index) => {
+        const state = stage.passed ? "passed" : index === firstFailure ? "failed" : "locked";
+        return (
+          <li data-state={state} key={stage.label} title={stage.detail}>
+            <span aria-hidden="true" />
+            <b>{stage.label}</b>
+            <small>{stage.detail}</small>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function LendingProviderAuditionPanel({
   trace,
 }: {
@@ -494,6 +537,9 @@ function LendingProviderAuditionPanel({
       <div className="provider-audition-grid">
         {audition.candidates.map((candidate) => {
           const selected = candidate.candidateId === audition.selection.winnerCandidateId;
+          const compatible = candidate.checks.every((check) => check.status === "PASS");
+          const live = candidate.executionAdapter.callable;
+          const activatable = compatible && live && candidate.eligibility === "ELIGIBLE";
           return (
             <article
               className={`provider-audition-candidate ${selected ? "selected" : "ineligible"}`}
@@ -509,6 +555,16 @@ function LendingProviderAuditionPanel({
                   {selected ? "Eligible / selected" : "Ineligible / not invoked"}
                 </strong>
               </div>
+
+              <ProviderAdmissionLadder
+                providerName={candidate.name}
+                listed
+                verified
+                live={live}
+                compatible={compatible}
+                activatable={activatable}
+                selected={selected}
+              />
 
               <div className="provider-audition-facts">
                 <div>
@@ -666,6 +722,16 @@ function LpExternalProviderComparisonPanel({
             </strong>
           </div>
 
+          <ProviderAdmissionLadder
+            providerName={comparison.provider.name}
+            listed
+            verified
+            live={comparison.attributableResult}
+            compatible={comparison.eligibleForPositionAssessmentActivation}
+            activatable={comparison.eligibleForPositionAssessmentActivation}
+            selected={false}
+          />
+
           <div className="provider-audition-facts">
             <div>
               <span>Identity and position</span>
@@ -732,8 +798,8 @@ function LendingExternalProviderComparisonPanel({
             {comparable ? "Health factor cross-checked" : "External risk check recorded"}
           </h3>
           <p>
-            A separate ERC-8004 monitor assessed the same Venus account. PositionCrew still selects
-            the rescue provider because the monitor does not return a bounded rescue action.
+            A separate ERC-8004 monitor assessed the same Venus account. A passing assessment admits
+            it only for independent monitoring; PositionCrew still selects the rescue-action provider.
           </p>
         </div>
         <span className="provider-audition-selection">
@@ -748,7 +814,7 @@ function LendingExternalProviderComparisonPanel({
         <article className={`provider-audition-candidate ${comparable ? "selected" : "ineligible"}`}>
           <div className="provider-audition-candidate-head">
             <div>
-              <span>External monitor · not selected</span>
+              <span>External monitor · invoked for cross-check</span>
               <h4>{comparison.provider.name}</h4>
             </div>
             <strong>
@@ -756,6 +822,16 @@ function LendingExternalProviderComparisonPanel({
               {comparable ? "Assessment completed" : "Not comparable"}
             </strong>
           </div>
+
+          <ProviderAdmissionLadder
+            providerName={comparison.provider.name}
+            listed
+            verified
+            live={comparison.attributableResult}
+            compatible={comparison.eligibleForMonitoringActivation}
+            activatable={comparison.eligibleForMonitoringActivation}
+            selected={false}
+          />
 
           <div className="provider-audition-facts">
             <div>
@@ -766,7 +842,9 @@ function LendingExternalProviderComparisonPanel({
             <div>
               <span>Rescue eligibility</span>
               <b>Not eligible · PositionCrew decision {comparison.firstPartyDecision.replaceAll("_", " ")}</b>
-              <small>The monitor diagnoses risk but does not produce the required bounded rescue deliverable.</small>
+              <small>{comparison.eligibleForMonitoringActivation
+                ? "Eligible for the monitoring subtask only; it does not produce the required bounded rescue deliverable."
+                : "The monitoring comparison did not pass; no activation or rescue eligibility is claimed."}</small>
             </div>
           </div>
 
@@ -805,6 +883,9 @@ function GridAndYieldExternalComparisonPanel({
   const checks = grid?.checks ?? yieldComparison!.checks;
   const boundary = grid?.boundary ?? yieldComparison!.boundary;
   const partial = (grid?.outcome ?? yieldComparison!.outcome) === "PARTIAL_COMPATIBILITY";
+  const eligibleForScopedActivation = isGrid
+    ? Boolean(grid?.eligibleForRangeAssessmentActivation)
+    : Boolean(yieldComparison?.eligibleForRateRankingActivation);
   const title = isGrid
     ? (partial ? "Live range cross-checked" : "External range check recorded")
     : (partial ? "Rate leader cross-checked" : "External rate check recorded");
@@ -814,6 +895,7 @@ function GridAndYieldExternalComparisonPanel({
   const detail = isGrid
     ? "AiKi checked the exact PositionCrew-derived range on the same live pool. PositionCrew remains responsible for constructing bounded orders and loss controls."
     : `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied a rate-only candidate; PositionCrew also evaluated liquidity, risk, costs, and horizon benefit.`;
+  const scopedRole = isGrid ? "Range assessment" : "Rate ranking";
 
   return (
     <section
@@ -842,6 +924,15 @@ function GridAndYieldExternalComparisonPanel({
             </div>
             <strong>{partial ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}{partial ? "Result persisted" : "Unavailable"}</strong>
           </div>
+          <ProviderAdmissionLadder
+            providerName={provider.name}
+            listed
+            verified
+            live={checks.some((check) => check.status === "PASS")}
+            compatible={eligibleForScopedActivation}
+            activatable={eligibleForScopedActivation}
+            selected={false}
+          />
           <div className="provider-audition-facts">
             <div>
               <span>Independent result</span>
@@ -850,8 +941,12 @@ function GridAndYieldExternalComparisonPanel({
             </div>
             <div>
               <span>Selection status</span>
-              <b>Cross-check only · not eligible</b>
-              <small>The provider does not accept the full PositionCrew job contract, so this is not a ranking or activation claim.</small>
+              <b>{eligibleForScopedActivation
+                ? `${scopedRole} eligible · not selected for capital action`
+                : "Cross-check only · not eligible"}</b>
+              <small>{eligibleForScopedActivation
+                ? `The provider passed the ${scopedRole.toLowerCase()} subtask only; PositionCrew retains the bounded action, costs, risk and expiry contract.`
+                : "The provider did not pass its scoped assessment contract, so no activation or ranking is claimed."}</small>
             </div>
           </div>
           <ul className="provider-audition-checks">
