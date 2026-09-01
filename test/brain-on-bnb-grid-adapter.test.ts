@@ -431,6 +431,61 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "MEASURED_WINDOW_BINDING")?.status).toBe("FAIL");
   });
 
+  it("rejects conflicting block declarations in the matched market source", async () => {
+    const conflictingRequest: BoundedGridRequest = {
+      ...request,
+      sources: [{
+        ...request.sources[0]!,
+        sourceId: "pancake-v3-mainnet-block-119400000",
+        uri: "https://bscscan.com/block/119355734",
+      }],
+      marketState: { ...request.marketState, sourceId: "pancake-v3-mainnet-block-119400000" },
+    };
+    const firstParty = createBoundedGridDeliverable(conflictingRequest, now);
+    const result = await auditionBrainOnBnbGrid(conflictingRequest, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse()), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "MEASURED_WINDOW_BINDING")?.status).toBe("FAIL");
+  });
+
+  it("rejects BSC-mainnet replay evidence for a testnet request", async () => {
+    const testnetRequest: BoundedGridRequest = { ...request, chainId: 97 };
+    const firstParty = createBoundedGridDeliverable(testnetRequest, now);
+    const result = await auditionBrainOnBnbGrid(testnetRequest, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse()), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "EXACT_CHAIN")?.status).toBe("FAIL");
+    expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
+  it("constructs normalized low-price bounds without exponent or excess precision", async () => {
+    const lowPriceRequest: BoundedGridRequest = {
+      ...request,
+      marketState: { ...request.marketState, midPrice: "0.0003" },
+      constraints: { ...request.constraints, lowerPrice: "0.00029", upperPrice: "0.00031" },
+    };
+    const firstParty = createBoundedGridDeliverable(lowPriceRequest, now);
+    const response = providerResponse({
+      price_now: 0.0003,
+      best_range_after_paying_to_put_it_back: "±1%",
+      ranges: [{
+        ...providerResponse().ranges[0],
+        width_pct: 1,
+        price_range: { low: 0.000297, high: 0.000303, unit: "USDT per WBNB" },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(lowPriceRequest, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).not.toBe("UNAVAILABLE");
+    expect(result.normalizedDeliverable).toBeDefined();
+  });
+
   it("withholds activation when replay evidence is not bound to the requested pool", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse({ pool: "0x0000000000000000000000000000000000000001" });

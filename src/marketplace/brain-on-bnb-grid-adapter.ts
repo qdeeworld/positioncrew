@@ -106,10 +106,11 @@ function requestBlock(request: BoundedGridRequest): number | null {
   const source = request.sources.find(({ sourceId }) => sourceId === request.marketState.sourceId);
   if (!source) return null;
   const match = source.uri.match(/\/block\/(\d+)(?:$|[/?#])/);
-  if (match) return Number(match[1]);
   const idMatch = source.sourceId.match(/block-(\d+)$/);
-  if (idMatch) return Number(idMatch[1]);
-  return null;
+  const uriBlock = match ? Number(match[1]) : null;
+  const idBlock = idMatch ? Number(idMatch[1]) : null;
+  if (uriBlock !== null && idBlock !== null && uriBlock !== idBlock) return null;
+  return uriBlock ?? idBlock;
 }
 
 function priceDifferenceBps(left: number, right: number): number {
@@ -151,23 +152,43 @@ function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
   return { units: BigInt(`${whole}${fraction}`), scale };
 }
 
-function recenteredRangeFitsBuyerBounds(
+function rationalDecimal(
+  numerator: bigint,
+  denominator: bigint,
+  direction: "UP" | "DOWN",
+): string {
+  const decimalScale = 10n ** 18n;
+  const scaledNumerator = numerator * decimalScale;
+  const scaled = direction === "UP"
+    ? (scaledNumerator + denominator - 1n) / denominator
+    : scaledNumerator / denominator;
+  const whole = scaled / decimalScale;
+  const fraction = String(scaled % decimalScale).padStart(18, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : String(whole);
+}
+
+function recenteredRange(
   midPrice: string,
   widthPct: number,
   buyerLower: string,
   buyerUpper: string,
-): boolean {
+): { fitsBuyerBounds: boolean; lowerPrice: string; upperPrice: string } | null {
   const mid = parseUnsignedDecimal(midPrice);
   const width = parseUnsignedDecimal(String(widthPct));
   const lower = parseUnsignedDecimal(buyerLower);
   const upper = parseUnsignedDecimal(buyerUpper);
   const hundredAtWidthScale = 100n * width.scale;
-  if (width.units >= hundredAtWidthScale) return false;
+  if (width.units >= hundredAtWidthScale) return null;
   const denominator = mid.scale * hundredAtWidthScale;
   const lowerNumerator = mid.units * (hundredAtWidthScale - width.units);
   const upperNumerator = mid.units * (hundredAtWidthScale + width.units);
-  return lowerNumerator * lower.scale >= lower.units * denominator &&
-    upperNumerator * upper.scale <= upper.units * denominator;
+  return {
+    fitsBuyerBounds:
+      lowerNumerator * lower.scale >= lower.units * denominator &&
+      upperNumerator * upper.scale <= upper.units * denominator,
+    lowerPrice: rationalDecimal(lowerNumerator, denominator, "UP"),
+    upperPrice: rationalDecimal(upperNumerator, denominator, "DOWN"),
+  };
 }
 
 export async function auditionBrainOnBnbGrid(
@@ -202,6 +223,7 @@ export async function auditionBrainOnBnbGrid(
     }
     if (!response.ok) throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
     const parsed = BrainGridResponseSchema.parse(await response.json());
+    const exactChain = request.chainId === 56;
     const exactPool = parsed.pool.toLowerCase() === request.venue.toLowerCase();
     const exactPair =
       parsed.pair.token.address.toLowerCase() === request.baseAsset.address.toLowerCase() &&
@@ -258,30 +280,29 @@ export async function auditionBrainOnBnbGrid(
         !replayEconomicsAreConsistent(candidate, parsed.rebalance_cost_usd_assumed) ||
         candidate.net_after_rebalancing_usd_in_window <= 0
       ) return [];
-      const lowerPrice = midPrice * (1 - candidate.width_pct / 100);
-      const upperPrice = midPrice * (1 + candidate.width_pct / 100);
-      const recenteredRangeInsideBuyerBounds = recenteredRangeFitsBuyerBounds(
+      const normalizedRange = recenteredRange(
         request.marketState.midPrice,
         candidate.width_pct,
         request.constraints.lowerPrice,
         request.constraints.upperPrice,
       );
-      const deliverable = recenteredRangeInsideBuyerBounds
+      if (!normalizedRange) return [];
+      const deliverable = normalizedRange.fitsBuyerBounds
         ? createBoundedGridDeliverable({
             ...request,
             constraints: {
               ...request.constraints,
-              lowerPrice: String(lowerPrice),
-              upperPrice: String(upperPrice),
+              lowerPrice: normalizedRange.lowerPrice,
+              upperPrice: normalizedRange.upperPrice,
             },
           }, now)
         : undefined;
-      return [{ candidate, lowerPrice, upperPrice, deliverable }];
+      return [{ candidate, normalizedRange, deliverable }];
     });
     const selected = candidates[0];
     const selectedRange = selected?.candidate;
     const widthPct = selectedRange?.width_pct ?? null;
-    const rangeInsideBuyerBounds = Boolean(selected);
+    const rangeInsideBuyerBounds = selected?.normalizedRange.fitsBuyerBounds === true;
     const providerEvidenceSufficient = Boolean(selectedRange) &&
       parsed.measured_window.swaps >= 100 &&
       replayActivityIsConsistent(selectedRange!, parsed.measured_window) &&
@@ -290,12 +311,13 @@ export async function auditionBrainOnBnbGrid(
     const normalizedDeliverable = selected?.deliverable;
     const exactOutputContract = normalizedDeliverable?.status === "ACTIONABLE" &&
       normalizedDeliverable.decision === "BUILD_GRID";
-    const externalEligible = exactPool && exactPair && exactCapital && exactFeeTier &&
+    const externalEligible = exactChain && exactPool && exactPair && exactCapital && exactFeeTier &&
       exactWindowBlockCount && windowBindsRequest &&
       priceCoherent && rangeInsideBuyerBounds && providerEvidenceSufficient && exactOutputContract;
     const firstPartyEligible = firstParty.status === "ACTIONABLE" && firstParty.decision === "BUILD_GRID";
     const liveMatchEligible = externalEligible && firstPartyEligible;
     const checks: BrainOnBnbGridComparison["checks"] = [
+      { code: "EXACT_CHAIN", status: exactChain ? "PASS" : "FAIL", detail: exactChain ? "The request targets BSC mainnet, the chain measured by this provider." : "The provider evidence is BSC mainnet-only and cannot bind this request chain." },
       { code: "EXACT_POOL_AND_PAIR", status: exactPool && exactPair ? "PASS" : "FAIL", detail: exactPool && exactPair ? "The provider measured the requested PancakeSwap WBNB/USDT pool." : "The provider result did not bind the requested pool and pair." },
       { code: "EXACT_CAPITAL", status: exactCapital ? "PASS" : "FAIL", detail: exactCapital ? "The replay used the buyer's exact capital amount." : "The replay used a different capital amount." },
       { code: "EXACT_FEE_TIER", status: exactFeeTier ? "PASS" : "FAIL", detail: exactFeeTier ? "The replay used the same venue fee tier as the pinned buyer request." : "The provider replay and buyer request use different venue fee tiers." },
