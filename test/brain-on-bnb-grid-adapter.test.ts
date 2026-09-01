@@ -383,6 +383,22 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
   });
 
+  it("enforces the measured-window fee ceiling with exact decimal values", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse())
+      .replace('"fees_the_pool_paid_usd":400', '"fees_the_pool_paid_usd":0')
+      .replace('"fees_usd_in_window":0.8', '"fees_usd_in_window":0.0000005')
+      .replace('"assumed_rebalance_cost_usd":0.48', '"assumed_rebalance_cost_usd":0.0000001')
+      .replace('"net_after_rebalancing_usd_in_window":0.32', '"net_after_rebalancing_usd_in_window":0.0000004')
+      .replace('"rebalance_cost_usd_assumed":0.48', '"rebalance_cost_usd_assumed":0.0000001');
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
   it("binds token decimals as part of the requested pair identity", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse();

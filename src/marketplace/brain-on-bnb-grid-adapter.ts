@@ -120,13 +120,17 @@ function priceDifferenceBps(left: number, right: number): number {
 function replayActivityIsConsistent(
   candidate: z.infer<typeof RangeSchema>,
   window: z.infer<typeof BrainGridResponseSchema>["measured_window"],
+  rangeFeeLexeme: string | null,
+  windowFeeLexeme: string | null,
 ): boolean {
   const calculatedShare = candidate.swaps_in_range / candidate.swaps_total * 100;
+  const rangeFees = rangeFeeLexeme ? numericLexemeToPlainDecimal(rangeFeeLexeme) : null;
+  const windowFees = windowFeeLexeme ? numericLexemeToPlainDecimal(windowFeeLexeme) : null;
   return candidate.swaps_total === window.swaps &&
     candidate.swaps_in_range <= candidate.swaps_total &&
     candidate.share_of_window_in_range_pct <= 100 &&
     Math.abs(candidate.share_of_window_in_range_pct - calculatedShare) <= 0.1 &&
-    candidate.fees_usd_in_window <= window.fees_the_pool_paid_usd + 0.000001;
+    rangeFees !== null && windowFees !== null && decimalLessThanOrEqual(rangeFees, windowFees);
 }
 
 function declaredBestWidthPct(value: string): string | null {
@@ -190,6 +194,10 @@ function decimalLessThan(left: string, right: string): boolean {
   const a = parseUnsignedDecimal(left);
   const b = parseUnsignedDecimal(right);
   return a.units * b.scale < b.units * a.scale;
+}
+
+function decimalLessThanOrEqual(left: string, right: string): boolean {
+  return decimalLessThan(left, right) || decimalsEqual(left, right);
 }
 
 function decimalDifferenceEquals(minuend: string, subtrahend: string, result: string): boolean {
@@ -300,6 +308,7 @@ export async function auditionBrainOnBnbGrid(
     const feeTierLexemes = numericFieldLexemes(rawResponse, "fee_pct");
     const widthLexemes = numericFieldLexemes(rawResponse, "width_pct");
     const rangeFeeLexemes = numericFieldLexemes(rawResponse, "fees_usd_in_window");
+    const windowFeeLexemes = numericFieldLexemes(rawResponse, "fees_the_pool_paid_usd");
     const rangeCostLexemes = numericFieldLexemes(rawResponse, "assumed_rebalance_cost_usd");
     const rangeNetLexemes = numericFieldLexemes(rawResponse, "net_after_rebalancing_usd_in_window");
     const declaredCostLexemes = numericFieldLexemes(rawResponse, "rebalance_cost_usd_assumed");
@@ -353,6 +362,9 @@ export async function auditionBrainOnBnbGrid(
     const declaredCostLexeme = declaredCostLexemes.length === 1
       ? declaredCostLexemes[0] ?? null
       : null;
+    const windowFeeLexeme = windowFeeLexemes.length === 1
+      ? windowFeeLexemes[0] ?? null
+      : null;
     const declaredCandidates = bestWidthPct === null
       ? []
       : rangeRows.filter(({ candidate, widthLexeme }) =>
@@ -376,7 +388,7 @@ export async function auditionBrainOnBnbGrid(
       if (bestWidthPct === null || candidateWidth === null || !decimalsEqual(candidateWidth, bestWidthPct)) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
       if (
-        !replayActivityIsConsistent(candidate, parsed.measured_window) ||
+        !replayActivityIsConsistent(candidate, parsed.measured_window, feesLexeme, windowFeeLexeme) ||
         candidate.swaps_in_range < 100 ||
         candidate.share_of_window_in_range_pct < 10 ||
         candidate.fees_usd_in_window <= 0 ||
@@ -413,7 +425,12 @@ export async function auditionBrainOnBnbGrid(
     const rangeInsideBuyerBounds = selected?.normalizedRange.fitsBuyerBounds === true;
     const providerEvidenceSufficient = Boolean(selectedRange) &&
       parsed.measured_window.swaps >= 100 &&
-      replayActivityIsConsistent(selectedRange!, parsed.measured_window) &&
+      replayActivityIsConsistent(
+        selectedRange!,
+        parsed.measured_window,
+        selected!.feesLexeme,
+        windowFeeLexeme,
+      ) &&
       replayEconomicsAreConsistent(
         selected!.feesLexeme,
         selected!.costLexeme,
