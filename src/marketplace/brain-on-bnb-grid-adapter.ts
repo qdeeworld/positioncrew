@@ -178,6 +178,10 @@ function numericFieldLexemes(source: string, key: string): Array<string | null> 
     match[1] === "null" ? null : (match[1] ?? null));
 }
 
+function hasEscapedObjectKey(source: string): boolean {
+  return /"(?:[^"\\]|\\.)*\\u[0-9a-fA-F]{4}(?:[^"\\]|\\.)*"\s*:/.test(source);
+}
+
 function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
   const [whole, fraction = ""] = value.split(".");
   const scale = 10n ** BigInt(fraction.length);
@@ -304,14 +308,16 @@ export async function auditionBrainOnBnbGrid(
     if (!response.ok) throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
     const rawResponse = await response.text();
     const parsed = BrainGridResponseSchema.parse(JSON.parse(rawResponse));
-    const capitalLexemes = numericFieldLexemes(rawResponse, "capital_considered_usd");
-    const feeTierLexemes = numericFieldLexemes(rawResponse, "fee_pct");
-    const widthLexemes = numericFieldLexemes(rawResponse, "width_pct");
-    const rangeFeeLexemes = numericFieldLexemes(rawResponse, "fees_usd_in_window");
-    const windowFeeLexemes = numericFieldLexemes(rawResponse, "fees_the_pool_paid_usd");
-    const rangeCostLexemes = numericFieldLexemes(rawResponse, "assumed_rebalance_cost_usd");
-    const rangeNetLexemes = numericFieldLexemes(rawResponse, "net_after_rebalancing_usd_in_window");
-    const declaredCostLexemes = numericFieldLexemes(rawResponse, "rebalance_cost_usd_assumed");
+    const rawJsonKeySafe = !hasEscapedObjectKey(rawResponse);
+    const rawLexemes = (key: string) => rawJsonKeySafe ? numericFieldLexemes(rawResponse, key) : [];
+    const capitalLexemes = rawLexemes("capital_considered_usd");
+    const feeTierLexemes = rawLexemes("fee_pct");
+    const widthLexemes = rawLexemes("width_pct");
+    const rangeFeeLexemes = rawLexemes("fees_usd_in_window");
+    const windowFeeLexemes = rawLexemes("fees_the_pool_paid_usd");
+    const rangeCostLexemes = rawLexemes("assumed_rebalance_cost_usd");
+    const rangeNetLexemes = rawLexemes("net_after_rebalancing_usd_in_window");
+    const declaredCostLexemes = rawLexemes("rebalance_cost_usd_assumed");
     const exactChain = request.chainId === 56;
     const exactPool = parsed.pool.toLowerCase() === request.venue.toLowerCase();
     const exactPair =
@@ -440,12 +446,13 @@ export async function auditionBrainOnBnbGrid(
     const normalizedDeliverable = selected?.deliverable;
     const exactOutputContract = normalizedDeliverable?.status === "ACTIONABLE" &&
       normalizedDeliverable.decision === "BUILD_GRID";
-    const externalEligible = exactChain && exactPool && exactPair && exactCapital && exactFeeTier &&
+    const externalEligible = rawJsonKeySafe && exactChain && exactPool && exactPair && exactCapital && exactFeeTier &&
       exactWindowBlockCount && windowBindsRequest &&
       priceCoherent && rangeInsideBuyerBounds && providerEvidenceSufficient && exactOutputContract;
     const firstPartyEligible = firstParty.status === "ACTIONABLE" && firstParty.decision === "BUILD_GRID";
     const liveMatchEligible = externalEligible && firstPartyEligible;
     const checks: BrainOnBnbGridComparison["checks"] = [
+      { code: "RAW_JSON_KEY_SAFETY", status: rawJsonKeySafe ? "PASS" : "FAIL", detail: rawJsonKeySafe ? "Raw numeric evidence contains no escaped object-key syntax that could hide decoded duplicates." : "Escaped object-key syntax prevents trustworthy binding between raw numeric lexemes and parsed fields." },
       { code: "EXACT_CHAIN", status: exactChain ? "PASS" : "FAIL", detail: exactChain ? "The request targets BSC mainnet, the chain measured by this provider." : "The provider evidence is BSC mainnet-only and cannot bind this request chain." },
       { code: "EXACT_POOL_AND_PAIR", status: exactPool && exactPair ? "PASS" : "FAIL", detail: exactPool && exactPair ? "The provider measured the requested PancakeSwap WBNB/USDT pool." : "The provider result did not bind the requested pool and pair." },
       { code: "EXACT_CAPITAL", status: exactCapital ? "PASS" : "FAIL", detail: exactCapital ? "The replay used the buyer's exact capital amount." : "The replay used a different capital amount." },
