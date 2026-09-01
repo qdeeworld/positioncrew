@@ -1904,6 +1904,100 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   background: var(--red-soft);
 }
 
+.provider-admission-ladder {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  margin: 16px 0 2px;
+  padding: 0;
+  list-style: none;
+}
+
+.provider-admission-ladder li {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: 5px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.provider-admission-ladder li::before,
+.provider-admission-ladder li::after {
+  position: absolute;
+  top: 5px;
+  height: 1px;
+  background: #d4ddd8;
+  content: "";
+}
+
+.provider-admission-ladder li::before {
+  right: 50%;
+  left: 0;
+}
+
+.provider-admission-ladder li::after {
+  right: 0;
+  left: 50%;
+}
+
+.provider-admission-ladder li:first-child::before,
+.provider-admission-ladder li:last-child::after {
+  display: none;
+}
+
+.provider-admission-ladder li > span {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #aebbb5;
+  border-radius: 50%;
+  background: #fbfdfb;
+}
+
+.provider-admission-ladder li[data-state="passed"] {
+  color: var(--green-dark);
+}
+
+.provider-admission-ladder li[data-state="passed"]::before,
+.provider-admission-ladder li[data-state="passed"]::after,
+.provider-admission-ladder li[data-state="passed"] > span {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.provider-admission-ladder li[data-state="failed"] {
+  color: #8c3542;
+}
+
+.provider-admission-ladder li[data-state="failed"] > span {
+  border-color: #b94e5d;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #fff;
+}
+
+.provider-admission-ladder b,
+.provider-admission-ladder small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-admission-ladder b {
+  font-size: 7px;
+  font-weight: 850;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.provider-admission-ladder small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
 .provider-audition-facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2047,5 +2141,26 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .provider-audition-candidate-head > strong {
     width: max-content;
     max-width: 100%;
+  }
+
+  .provider-admission-ladder {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 18px;
+  }
+
+  .provider-admission-ladder li:nth-child(3)::after,
+  .provider-admission-ladder li:nth-child(4)::before {
+    display: none;
+  }
+
+  .provider-admission-ladder b {
+    font-size: 11px;
+  }
+
+  .provider-admission-ladder small {
+    font-size: 12px;
+    line-height: 1.35;
+    overflow: visible;
+    white-space: normal;
   }
 }

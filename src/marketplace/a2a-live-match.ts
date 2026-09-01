@@ -142,6 +142,24 @@ const BrainHealthFactorDeliverySchema = z
   })
   .passthrough();
 
+export const BrainPrepaymentCapabilityProofSchema = z
+  .object({
+    schemaVersion: z.literal("positioncrew.live-match.prepayment-capability-proof.v1"),
+    providerAgentId: z.literal(302257),
+    adapterId: z.literal("positioncrew:a2a:brain-on-bnb:health-factor:v1"),
+    frozenJobHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    responseHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    providerNativeUrl: z.string().url(),
+    financialValueAtomic: z.literal("0"),
+    issuedAt: TimestampSchema,
+    completedAt: TimestampSchema,
+  })
+  .strict();
+
+export type BrainPrepaymentCapabilityProof = z.infer<
+  typeof BrainPrepaymentCapabilityProofSchema
+>;
+
 export interface ExternalQuoteTrace {
   schemaVersion: "positioncrew.live-match.adapter-trace.v1";
   adapterId: "positioncrew:a2a:brain-on-bnb:health-factor:v1";
@@ -356,6 +374,64 @@ export function validateBrainHealthFactorDelivery(
     boundary: compatible
       ? "The provider-specific result passed every frozen health-factor compatibility check. This does not rank provider performance or authorize a financial action."
       : "At least one frozen compatibility check failed. No normalized PositionCrew result, provider eligibility, selection, or ranking was created.",
+  };
+}
+
+export async function verifyBrainPrepaymentCapabilityProof(
+  input: HealthFactorLiveMatchJob,
+  proofInput: unknown,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<{
+  proof: BrainPrepaymentCapabilityProof;
+  delivery: z.infer<typeof BrainHealthFactorDeliverySchema>;
+  checks: Array<{ id: string; passed: boolean; detail: string }>;
+}> {
+  const job = HealthFactorLiveMatchJobSchema.parse(input);
+  const proof = BrainPrepaymentCapabilityProofSchema.parse(proofInput);
+  if (proof.frozenJobHash !== canonicalHash(job)) {
+    throw new Error("Prepayment capability proof does not bind the exact frozen job");
+  }
+  const providerOrigin = new URL(BRAIN_ON_BNB.endpoint).origin;
+  const proofUrl = new URL(proof.providerNativeUrl);
+  if (
+    proofUrl.protocol !== "https:" ||
+    proofUrl.origin !== providerOrigin ||
+    !proofUrl.pathname.startsWith("/a2a/capability-proofs/")
+  ) {
+    throw new Error("Prepayment capability proof is not hosted on the provider's frozen proof path");
+  }
+  const issuedAt = Date.parse(proof.issuedAt);
+  const completedAt = Date.parse(proof.completedAt);
+  if (
+    issuedAt < Date.parse(job.requestedAt) ||
+    completedAt < issuedAt ||
+    completedAt > Date.parse(job.deadline)
+  ) {
+    throw new Error("Prepayment capability proof was not completed inside the frozen job window");
+  }
+  const response = await fetchImplementation(proof.providerNativeUrl, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Provider-native capability proof failed with HTTP ${response.status}`);
+  }
+  const deliveryInput = await readBoundedJson(response);
+  if (canonicalHash(deliveryInput) !== proof.responseHash) {
+    throw new Error("Provider-native capability response does not match its frozen hash");
+  }
+  const validation = validateBrainHealthFactorDelivery(job, deliveryInput);
+  if (validation.status !== "COMPATIBLE" || validation.parsedDelivery === null) {
+    const failed = validation.checks
+      .filter((check) => !check.passed)
+      .map((check) => check.id)
+      .join(", ");
+    throw new Error(`Prepayment capability response is incompatible: ${failed || "unknown validation failure"}`);
+  }
+  return {
+    proof,
+    delivery: validation.parsedDelivery,
+    checks: validation.checks,
   };
 }
 

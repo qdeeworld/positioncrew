@@ -43,6 +43,7 @@ export type AiKiYieldComparison = {
   attributable: boolean;
   persisted: boolean;
   exactRequestAccepted: false;
+  eligibleForRateRankingActivation: boolean;
   eligibleForYieldSelection: false;
   eligibleForLiveMatch: false;
   checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
@@ -63,6 +64,7 @@ export async function auditionAiKiVenusYield(
     positionCrewSelectedMarket: selected?.vaultOrMarket ?? null,
     positionCrewGrossApyBps: firstParty.grossApyBps ?? null,
     exactRequestAccepted: false as const,
+    eligibleForRateRankingActivation: false,
     eligibleForYieldSelection: false as const,
     eligibleForLiveMatch: false as const,
   };
@@ -92,9 +94,11 @@ export async function auditionAiKiVenusYield(
       { code: "PERSISTED_RESULT", status: parsed.evidence.persisted ? "PASS" : "FAIL", detail: "AiKi marked this assessment as persisted." },
       { code: "EXACT_JOB_CONTRACT", status: "FAIL" as const, detail: "AiKi labels its output rate-only and does not accept PositionCrew's risk, liquidity, cost, horizon, and allocation constraints." },
     ];
+    const rateRankingCompatible = exactMarketSet && sameRateLeader && parsed.evidence.persisted;
     return {
       ...base,
       outcome: exactMarketSet && sameRateLeader ? "PARTIAL_COMPATIBILITY" : "INCOMPATIBLE",
+      eligibleForRateRankingActivation: rateRankingCompatible,
       externalRecommendedMarket: parsed.assessment.recommendedMarket,
       sameRateLeader,
       externalSimpleAnnualRateBps: externalRate,
@@ -108,6 +112,7 @@ export async function auditionAiKiVenusYield(
     return {
       ...base,
       outcome: "UNAVAILABLE",
+      eligibleForRateRankingActivation: false,
       externalRecommendedMarket: null,
       sameRateLeader: false,
       externalSimpleAnnualRateBps: null,
