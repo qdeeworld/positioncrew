@@ -43,6 +43,7 @@ export type AiKiYieldComparison = {
   attributable: boolean;
   persisted: boolean;
   exactRequestAccepted: false;
+  eligibleForRateRankingActivation: boolean;
   eligibleForYieldSelection: false;
   eligibleForLiveMatch: false;
   checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
@@ -55,14 +56,22 @@ export async function auditionAiKiVenusYield(
   options: { fetchImpl?: typeof fetch; now?: Date } = {},
 ): Promise<AiKiYieldComparison> {
   const now = options.now ?? new Date();
-  const selected = request.opportunities.find((candidate) => candidate.opportunityId === firstParty.selectedOpportunityId);
+  const frozenRateLeader = request.opportunities.reduce((leader, candidate) => {
+    if (candidate.grossApyBps > leader.grossApyBps) return candidate;
+    if (
+      candidate.grossApyBps === leader.grossApyBps &&
+      candidate.opportunityId.localeCompare(leader.opportunityId) < 0
+    ) return candidate;
+    return leader;
+  });
   const base = {
     provider: AIKI_VENUS_YIELD,
     evaluatedAt: now.toISOString(),
     marketCount: request.opportunities.length,
-    positionCrewSelectedMarket: selected?.vaultOrMarket ?? null,
-    positionCrewGrossApyBps: firstParty.grossApyBps ?? null,
+    positionCrewSelectedMarket: frozenRateLeader.vaultOrMarket,
+    positionCrewGrossApyBps: frozenRateLeader.grossApyBps,
     exactRequestAccepted: false as const,
+    eligibleForRateRankingActivation: false,
     eligibleForYieldSelection: false as const,
     eligibleForLiveMatch: false as const,
   };
@@ -82,19 +91,21 @@ export async function auditionAiKiVenusYield(
     const requestedMarkets = new Set(markets.map((market) => market.toLowerCase()));
     const returnedMarkets = new Set(parsed.assessment.routes.map((route) => route.market.toLowerCase()));
     const exactMarketSet = requestedMarkets.size === returnedMarkets.size && [...requestedMarkets].every((market) => returnedMarkets.has(market));
-    const sameRateLeader = selected?.vaultOrMarket.toLowerCase() === parsed.assessment.recommendedMarket.toLowerCase();
+    const sameRateLeader = frozenRateLeader.vaultOrMarket.toLowerCase() === parsed.assessment.recommendedMarket.toLowerCase();
     const externalRoute = parsed.assessment.routes.find((route) => route.market.toLowerCase() === parsed.assessment.recommendedMarket.toLowerCase());
     const externalRate = externalRoute ? Number(externalRoute.simpleAnnualRateBps) : null;
-    const localRate = firstParty.grossApyBps ?? null;
+    const localRate = frozenRateLeader.grossApyBps;
     const checks: AiKiYieldComparison["checks"] = [
       { code: "EXACT_MARKET_SET", status: exactMarketSet ? "PASS" : "FAIL", detail: exactMarketSet ? "AiKi evaluated the same frozen Venus market set." : "AiKi returned a different market set." },
       { code: "SAME_RATE_LEADER", status: sameRateLeader ? "PASS" : "FAIL", detail: sameRateLeader ? "Both providers identified the same highest-rate market." : "The providers identified different rate leaders." },
       { code: "PERSISTED_RESULT", status: parsed.evidence.persisted ? "PASS" : "FAIL", detail: "AiKi marked this assessment as persisted." },
       { code: "EXACT_JOB_CONTRACT", status: "FAIL" as const, detail: "AiKi labels its output rate-only and does not accept PositionCrew's risk, liquidity, cost, horizon, and allocation constraints." },
     ];
+    const rateRankingCompatible = exactMarketSet && sameRateLeader && parsed.evidence.persisted;
     return {
       ...base,
       outcome: exactMarketSet && sameRateLeader ? "PARTIAL_COMPATIBILITY" : "INCOMPATIBLE",
+      eligibleForRateRankingActivation: rateRankingCompatible,
       externalRecommendedMarket: parsed.assessment.recommendedMarket,
       sameRateLeader,
       externalSimpleAnnualRateBps: externalRate,
@@ -108,6 +119,7 @@ export async function auditionAiKiVenusYield(
     return {
       ...base,
       outcome: "UNAVAILABLE",
+      eligibleForRateRankingActivation: false,
       externalRecommendedMarket: null,
       sameRateLeader: false,
       externalSimpleAnnualRateBps: null,

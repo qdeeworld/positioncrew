@@ -26,7 +26,7 @@ interface AiKiVenusAssessment {
   observedAt?: string;
   status?: string;
   minimumHealthFactor?: string;
-  healthFactor?: string;
+  healthFactor?: string | null;
   supplied?: FixedPointUsd;
   adjustedCollateral?: FixedPointUsd;
   borrowed?: FixedPointUsd;
@@ -63,6 +63,7 @@ export interface AiKiVenusAudition {
   firstPartyDecision: string;
   exactRequestAccepted: false;
   exactOutputContract: false;
+  eligibleForMonitoringActivation: boolean;
   eligibleForRescueSelection: false;
   eligibleForLiveMatch: false;
   checks: AiKiVenusCheck[];
@@ -115,6 +116,7 @@ export async function auditionAiKiVenusGuardian(
       firstPartyDecision: firstParty.decision,
       exactRequestAccepted: false,
       exactOutputContract: false,
+      eligibleForMonitoringActivation: false,
       eligibleForRescueSelection: false,
       eligibleForLiveMatch: false,
       checks: [
@@ -171,12 +173,21 @@ export async function auditionAiKiVenusGuardian(
 
   const externalHealth = Number(assessment?.healthFactor);
   const firstPartyHealth = Number(firstParty.position.currentHealthFactor);
+  const matchingNoDebtAssessment =
+    assessment?.status === "NO_DEBT" &&
+    assessment.healthFactor == null &&
+    firstParty.position.currentHealthFactor === null;
   const healthFactorDifferenceBps =
     Number.isFinite(externalHealth) && Number.isFinite(firstPartyHealth) && firstPartyHealth > 0
       ? (Math.abs(externalHealth - firstPartyHealth) / firstPartyHealth) * 10_000
       : null;
   checks.push(
-    healthFactorDifferenceBps !== null && healthFactorDifferenceBps <= 5
+    matchingNoDebtAssessment
+      ? pass(
+          "HEALTH_FACTOR_ALIGNMENT",
+          "Both providers found no debt, so no finite health-factor ratio exists.",
+        )
+      : healthFactorDifferenceBps !== null && healthFactorDifferenceBps <= 5
       ? pass(
           "HEALTH_FACTOR_ALIGNMENT",
           `Health factors differ by ${healthFactorDifferenceBps.toFixed(4)} bps.`,
@@ -230,11 +241,13 @@ export async function auditionAiKiVenusGuardian(
     firstPartyDecision: firstParty.decision,
     exactRequestAccepted: false,
     exactOutputContract: false,
+    eligibleForMonitoringActivation: comparable,
     eligibleForRescueSelection: false,
     eligibleForLiveMatch: false,
     checks,
     response: responseBody,
-    boundary:
-      "This proves two providers completed comparable health assessments of the same Venus account. AiKi did not accept the complete rescue contract, propose the bounded action, become selected, receive payment, or execute a transaction.",
+    boundary: comparable
+      ? "This proves two providers completed comparable health assessments of the same Venus account. AiKi did not accept the complete rescue contract, propose the bounded action, become selected, receive payment, or execute a transaction."
+      : "AiKi returned an attributable assessment, but at least one frozen same-account comparison check failed. No compatibility, rescue eligibility, selection, payment, or execution is claimed.",
   };
 }

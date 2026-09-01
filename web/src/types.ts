@@ -620,6 +620,7 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
     externalRiskStatus: string;
     firstPartyDecision: string;
     exactRequestAccepted: false;
+    eligibleForMonitoringActivation: boolean;
     eligibleForRescueSelection: false;
     eligibleForLiveMatch: false;
     checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
@@ -641,6 +642,7 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
     externalDecision: "HOLD" | "REBALANCE" | "UNKNOWN";
     firstPartyDecision: string;
     exactRequestAccepted: false;
+    eligibleForPositionAssessmentActivation: boolean;
     eligibleForLiveMatch: false;
     checks: Array<{
       code: string;
@@ -664,6 +666,7 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
     attributable: boolean;
     persisted: boolean;
     exactRequestAccepted: false;
+    eligibleForRangeAssessmentActivation: boolean;
     eligibleForGridSelection: false;
     eligibleForLiveMatch: false;
     checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
@@ -684,6 +687,7 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
     attributable: boolean;
     persisted: boolean;
     exactRequestAccepted: false;
+    eligibleForRateRankingActivation: boolean;
     eligibleForYieldSelection: false;
     eligibleForLiveMatch: false;
     checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;

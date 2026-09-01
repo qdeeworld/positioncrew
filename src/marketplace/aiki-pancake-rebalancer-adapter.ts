@@ -55,6 +55,7 @@ export interface AiKiPancakeAudition {
   persistedByProvider: boolean;
   exactRequestAccepted: false;
   exactOutputContract: false;
+  eligibleForPositionAssessmentActivation: boolean;
   eligibleForLiveMatch: false;
   externalDecision: "HOLD" | "REBALANCE" | "UNKNOWN";
   firstPartyDecision: string;
@@ -108,6 +109,7 @@ export async function auditionAiKiPancakeRebalancer(
       persistedByProvider: false,
       exactRequestAccepted: false,
       exactOutputContract: false,
+      eligibleForPositionAssessmentActivation: false,
       eligibleForLiveMatch: false,
       externalDecision: "UNKNOWN",
       firstPartyDecision: firstParty.decision,
@@ -231,6 +233,7 @@ export async function auditionAiKiPancakeRebalancer(
     persistedByProvider: responseBody.evidence?.persisted === true,
     exactRequestAccepted: false,
     exactOutputContract: false,
+    eligibleForPositionAssessmentActivation: comparable,
     eligibleForLiveMatch: false,
     externalDecision,
     firstPartyDecision: firstParty.decision,

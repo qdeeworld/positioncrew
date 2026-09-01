@@ -20,6 +20,7 @@ import {
   HealthFactorLiveMatchJobSchema,
   notifyBrainHealthFactorFunded,
   requestBrainHealthFactorQuote,
+  verifyBrainPrepaymentCapabilityProof,
 } from "../marketplace/a2a-live-match.js";
 
 const EXPECTED_WALLET = getAddress("0xADd748C416E8A7efd7d65D18Abb121dea268ddF9");
@@ -126,6 +127,8 @@ const broadcast = process.argv.includes("--broadcast");
 const confirmation = argument("confirmation-token");
 const resumeJobId = argument("resume-job-id") ? BigInt(argument("resume-job-id")!) : null;
 const resumeCheckpointArgument = argument("resume-checkpoint");
+const capabilityProofArgument = argument("capability-proof");
+const challengeCheckpointArgument = argument("challenge-checkpoint");
 if (resumeJobId !== null && !resumeCheckpointArgument) {
   throw new Error("--resume-job-id requires --resume-checkpoint=<original activation checkpoint>");
 }
@@ -286,21 +289,46 @@ if (resumeJobId !== null && resumeCheckpointPath) {
   }
   quote = checkpointQuote as unknown as Awaited<ReturnType<typeof requestBrainHealthFactorQuote>>;
 } else {
-  const now = new Date();
-  frozenJob = HealthFactorLiveMatchJobSchema.parse({
-    schemaVersion: "positioncrew.live-match.health-factor-job.v1",
-    jobId: `pc-live-match-${crypto.randomUUID()}`,
-    category: "HEALTH_FACTOR_MONITORING",
-    chainId: 56,
-    protocol: "Venus Classic",
-    account: accountToInspect,
-    requestedAt: now.toISOString(),
-    deadline: new Date(now.getTime() + 15 * 60_000).toISOString(),
-    requiredOutputs: ["CURRENT_HEALTH_FACTOR", "LIQUIDATION_DISTANCE", "COLLATERAL_STRESS_TABLE", "PROTOCOL_CROSS_CHECK", "BLOCK_ATTRIBUTION"],
-    maximumPrice: { amountAtomic: PAYMENT_BUDGET.toString(), token: paymentToken, chainId: 56 },
-  });
+  if (!challengeCheckpointArgument) {
+    throw new Error(
+      "Broadcast blocked: prepare and complete a zero-value challenge, then supply --challenge-checkpoint=<frozen challenge>.",
+    );
+  }
+  const challengeCheckpoint = JSON.parse(
+    await readFile(resolve(challengeCheckpointArgument), "utf8"),
+  ) as Record<string, unknown>;
+  if (challengeCheckpoint.schemaVersion !== "positioncrew.live-match.challenge-checkpoint.v1") {
+    throw new Error("Challenge checkpoint schema is unsupported");
+  }
+  frozenJob = HealthFactorLiveMatchJobSchema.parse(challengeCheckpoint.frozenJob);
+  if (challengeCheckpoint.frozenJobHash !== canonicalHash(frozenJob)) {
+    throw new Error("Challenge checkpoint does not bind its frozen job");
+  }
+  if (frozenJob.account.toLowerCase() !== accountToInspect.toLowerCase()) {
+    throw new Error("Challenge checkpoint account does not match --account");
+  }
+  if (
+    frozenJob.maximumPrice.amountAtomic !== PAYMENT_BUDGET.toString() ||
+    frozenJob.maximumPrice.token.toLowerCase() !== paymentToken.toLowerCase()
+  ) {
+    throw new Error("Challenge checkpoint payment boundary does not match the activation budget and token");
+  }
+  if (Date.parse(frozenJob.deadline) <= Date.now()) {
+    throw new Error("Challenge checkpoint is past its delivery deadline");
+  }
   quote = await requestBrainHealthFactorQuote(frozenJob);
 }
+if (!capabilityProofArgument) {
+  throw new Error(
+    "Broadcast blocked: a signed quote is not compatibility evidence. Supply --capability-proof=<provider-native zero-value challenge manifest>.",
+  );
+}
+const capabilityProofPath = resolve(capabilityProofArgument);
+const capabilityProofInput = JSON.parse(await readFile(capabilityProofPath, "utf8")) as unknown;
+const capabilityProof = await verifyBrainPrepaymentCapabilityProof(
+  frozenJob,
+  capabilityProofInput,
+);
 const sdkWallet = new EVMWalletProvider({ password: randomBytes(32).toString("hex"), privateKey, persist: false });
 const client = await ERC8183Client.create({ walletProvider: sdkWallet, network: "bsc-mainnet" });
 if (client.address !== EXPECTED_WALLET) throw new Error("SDK wallet identity changed after preflight");
@@ -312,6 +340,7 @@ const descriptionBinding = {
   account: frozenJob.account,
   service: quote.quote.service,
   quotedPrice: quote.quote.price,
+  capabilityProofHash: canonicalHash(capabilityProof.proof),
 };
 const description = JSON.stringify(descriptionBinding);
 let commerceJobId: bigint;
@@ -353,6 +382,7 @@ await writeFile(outputPath, `${json({
   originalOnchainDescription,
   frozenJob,
   reaffirmationQuote: quote,
+  capabilityProof,
   transactions,
   cumulativeGasWei: cumulativeGas,
   boundary: "The exact job terms and commerce job ID are durable. Registration, budget setup, funding, and provider notification may still be pending.",
@@ -396,6 +426,7 @@ await writeFile(outputPath, `${json({
   originalOnchainDescription,
   frozenJob,
   reaffirmationQuote: quote,
+  capabilityProof,
   transactions,
   cumulativeGasWei: cumulativeGas,
   boundary: "The exact job terms are verified and the recovery checkpoint is durable. Escrow funding and provider notification have not started.",
@@ -411,6 +442,7 @@ await writeFile(outputPath, `${json({
   resumedExistingJob: resumeJobId !== null,
   originalOnchainDescription,
   reaffirmationQuote: quote,
+  capabilityProof,
   transactions,
   cumulativeGasWei: cumulativeGas,
   boundary: "Escrow funding is confirmed, but provider notification, delivery and PositionCrew output compatibility remain pending.",
@@ -433,6 +465,7 @@ const evidence = {
   preflight,
   frozenJob,
   quote,
+  capabilityProof,
   commerceJobId,
   resumedExistingJob: resumeJobId !== null,
   originalOnchainDescription,

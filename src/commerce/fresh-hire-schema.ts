@@ -144,6 +144,7 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     externalRiskStatus: z.string().min(1),
     firstPartyDecision: z.string().min(1),
     exactRequestAccepted: z.literal(false),
+    eligibleForMonitoringActivation: z.boolean(),
     eligibleForRescueSelection: z.literal(false),
     eligibleForLiveMatch: z.literal(false),
     checks: z.array(z.object({
@@ -169,6 +170,7 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     externalDecision: z.enum(["HOLD", "REBALANCE", "UNKNOWN"]),
     firstPartyDecision: z.string().min(1),
     exactRequestAccepted: z.literal(false),
+    eligibleForPositionAssessmentActivation: z.boolean(),
     eligibleForLiveMatch: z.literal(false),
     checks: z.array(z.object({
       code: z.string().min(1),
@@ -196,6 +198,7 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     attributable: z.boolean(),
     persisted: z.boolean(),
     exactRequestAccepted: z.literal(false),
+    eligibleForRangeAssessmentActivation: z.boolean(),
     eligibleForGridSelection: z.literal(false),
     eligibleForLiveMatch: z.literal(false),
     checks: z.array(z.object({
@@ -224,6 +227,7 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     attributable: z.boolean(),
     persisted: z.boolean(),
     exactRequestAccepted: z.literal(false),
+    eligibleForRateRankingActivation: z.boolean(),
     eligibleForYieldSelection: z.literal(false),
     eligibleForLiveMatch: z.literal(false),
     checks: z.array(z.object({
