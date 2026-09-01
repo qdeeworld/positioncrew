@@ -1,4 +1,5 @@
 import { RecentJobsPanel } from "./RecentJobsPanel";
+import { readCapitalCheckSeed } from "../capital-check";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   AlertTriangle,
@@ -1389,7 +1390,8 @@ function WalletRiskProbe({
   onUseRequest: (request: JobRequest, observation: CurrentMarketplaceObservation) => void;
   onClearRequest: () => void;
 }) {
-  const [account, setAccount] = useState("");
+  const seededAccount = useRef(readCapitalCheckSeed()?.account ?? "");
+  const [account, setAccount] = useState(seededAccount.current);
   const [probe, setProbe] = useState<VenusAccountProbe | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1451,6 +1453,13 @@ function WalletRiskProbe({
       }
     }
   }
+
+  useEffect(() => {
+    const initialAccount = seededAccount.current;
+    if (!EVM_ACCOUNT_PATTERN.test(initialAccount)) return;
+    seededAccount.current = "";
+    void inspect(initialAccount, "ACCOUNT");
+  }, []);
 
   const tone = probe?.state === "LIQUID" ? "good" : probe?.state === "SHORTFALL" ? "warn" : "neutral";
   return (
@@ -1537,7 +1546,7 @@ function LpPositionProbe({
   onUseRequest: (request: JobRequest, observation: CurrentMarketplaceObservation) => void;
   onClearRequest: () => void;
 }) {
-  const [tokenId, setTokenId] = useState(REFERENCE_PANCAKE_POSITION_ID);
+  const [tokenId, setTokenId] = useState(() => readCapitalCheckSeed()?.pancakePositionId ?? REFERENCE_PANCAKE_POSITION_ID);
   const [probe, setProbe] = useState<PancakePositionProbe | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { TASKS } from "../task-config";
 import { serviceLabel, shortHash } from "../presentation";
+import { CapitalCheckPanel } from "./CapitalCheckPanel";
 import { ProviderCompatibilityPanel } from "./ProviderCompatibilityPanel";
 import type {
   ExternalComparisonSnapshot,
@@ -90,8 +91,8 @@ export function MarketplaceView({
             <span className="page-kicker">Job-first BSC agent marketplace</span>
             <h1>Bring the job. We prove who can handle it.</h1>
             <p>Start with a current lending, LP, yield, or grid request. PositionCrew checks identity, liveness, and exact-job eligibility before preserving a bounded result or explicit refusal.</p>
-            <button className="market-intro-action" type="button" onClick={() => onCreateJob("LENDING_RESCUE")}>
-              Check a live Venus position <ArrowRight size={17} aria-hidden="true" />
+            <button className="market-intro-action" type="button" onClick={() => document.getElementById("capital-check")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" })}>
+              Check my BSC capital <ArrowRight size={17} aria-hidden="true" />
             </button>
           </div>
           <div className="market-system-panel" aria-label="Marketplace system status">
@@ -109,6 +110,8 @@ export function MarketplaceView({
           </div>
         </div>
       </section>
+
+      <CapitalCheckPanel onOpenJob={onCreateJob} />
 
       <section className="task-deck" aria-label="Capital tasks">
         {TASKS.map((task) => {
