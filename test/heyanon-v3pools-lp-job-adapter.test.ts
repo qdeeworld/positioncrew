@@ -164,4 +164,24 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
     expect(result.status).toBe("INCOMPATIBLE_CONSTRAINTS");
     expect(result.eligibleForLpRebalance).toBe(false);
   });
+
+  it("normalizes a compatible external range into the exact LP deliverable contract", async () => {
+    const compatibleRequest = LpRebalanceRequestSchema.parse({
+      ...request,
+      constraints: {
+        ...request.constraints,
+        minimumWidthTicks: 500,
+        maximumWidthTicks: 3_000,
+        tickSpacing: 10,
+      },
+    });
+    const result = await auditionHeyAnonV3LpJob(compatibleRequest, positionId, {
+      fetchImpl,
+      now: new Date("2026-08-30T12:00:30.000Z"),
+    });
+    expect(result.status).toBe("ELIGIBLE_WITH_ADAPTER");
+    expect(result.eligibleForLpRebalance).toBe(true);
+    expect(result.normalizedDeliverable.schemaVersion).toBe("positioncrew.lp-rebalance.deliverable.v1");
+    expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("PASS");
+  });
 });

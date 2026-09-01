@@ -682,6 +682,8 @@ function LpExternalProviderComparisonPanel({
     : undefined;
   if (!comparison) return null;
   const comparable = comparison.outcome === "SEMANTICALLY_COMPARABLE";
+  const externalEligible = comparison.selection?.externalEligible ??
+    comparison.eligibleForPositionAssessmentActivation;
   const passedChecks = comparison.checks.filter((check) => check.status === "PASS").length;
 
   return (
@@ -694,31 +696,31 @@ function LpExternalProviderComparisonPanel({
         <div>
           <span className="section-kicker">Second-provider check</span>
           <h3 id="lp-external-comparison-title">
-            {comparable ? "Same position, same decision" : "External comparison recorded"}
+            {externalEligible ? "Two live providers evaluated" : "External comparison recorded"}
           </h3>
           <p>
-            PositionCrew asked an unrelated ERC-8004 provider to inspect the same PancakeSwap
-            position. The comparison is evidence of a second assessment, not a provider ranking.
+            PositionCrew sent the same current LP job to an unrelated ERC-8004 provider, normalized
+            its range through a disclosed adapter, and applied the same buyer constraints before selection.
           </p>
         </div>
         <span className="provider-audition-selection">
           {comparable
             ? <CheckCircle2 size={15} aria-hidden="true" />
             : <AlertTriangle size={15} aria-hidden="true" />}
-          {comparable ? "Semantic match" : comparison.outcome.toLowerCase().replaceAll("_", " ")}
+          {externalEligible ? "Compatible through adapter" : comparison.outcome.toLowerCase().replaceAll("_", " ")}
         </span>
       </div>
 
       <div className="provider-audition-grid">
-        <article className={`provider-audition-candidate ${comparable ? "selected" : "ineligible"}`}>
+        <article className={`provider-audition-candidate ${externalEligible ? "selected" : "ineligible"}`}>
           <div className="provider-audition-candidate-head">
             <div>
               <span>External provider</span>
               <h4>{comparison.provider.name}</h4>
             </div>
             <strong>
-              {comparable ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}
-              {comparable ? "Assessment completed" : "Not comparable"}
+              {externalEligible ? <Check size={13} aria-hidden="true" /> : <AlertTriangle size={13} aria-hidden="true" />}
+              {externalEligible ? "Eligible, not selected" : "Not eligible"}
             </strong>
           </div>
 
@@ -727,8 +729,8 @@ function LpExternalProviderComparisonPanel({
             listed
             verified
             live={comparison.attributableResult}
-            compatible={comparison.eligibleForPositionAssessmentActivation}
-            activatable={comparison.eligibleForPositionAssessmentActivation}
+            compatible={externalEligible}
+            activatable={externalEligible}
             selected={false}
           />
 
@@ -747,6 +749,16 @@ function LpExternalProviderComparisonPanel({
                 ? "The external provider accepted the full PositionCrew request."
                 : "The external provider accepted the position NFT, not every PositionCrew constraint."}</small>
             </div>
+            {comparison.externalRange ? <div>
+              <span>Normalized range</span>
+              <b>{comparison.externalRange.lowerTick}..{comparison.externalRange.upperTick}</b>
+              <small>{comparison.externalRange.widthTicks} ticks after spacing alignment.</small>
+            </div> : null}
+            {comparison.selection ? <div>
+              <span>Selection</span>
+              <b>{comparison.selection.selectedProvider === "POSITIONCREW" ? "PositionCrew selected" : "External provider selected"}</b>
+              <small>{comparison.selection.basis}</small>
+            </div> : null}
           </div>
 
           <ul className="provider-audition-checks">

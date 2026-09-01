@@ -643,7 +643,15 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
     firstPartyDecision: string;
     exactRequestAccepted: false;
     eligibleForPositionAssessmentActivation: boolean;
-    eligibleForLiveMatch: false;
+    eligibleForLiveMatch: boolean;
+    adapterNormalized?: boolean;
+    externalRange?: { lowerTick: number; upperTick: number; widthTicks: number };
+    normalizedDeliverable?: FixtureJobResponse["result"]["deliverable"];
+    selection?: {
+      selectedProvider: "POSITIONCREW" | "EXTERNAL";
+      externalEligible: boolean;
+      basis: string;
+    };
     checks: Array<{
       code: string;
       status: "PASS" | "FAIL";

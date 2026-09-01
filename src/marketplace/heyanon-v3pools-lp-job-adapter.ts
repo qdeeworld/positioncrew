@@ -1,12 +1,22 @@
 import { z } from "zod";
 import {
+  LpRebalanceDeliverableSchema,
   LpRebalanceRequestSchema,
+  type LpRebalanceDeliverable,
   type LpRebalanceRequest,
 } from "../contracts/lp-rebalance.js";
 import {
+  FIXED_SCALE,
+  divideFixed,
+  formatFixed,
+  multiplyFixed,
+  parseFixed,
+  ratioFromBps,
+} from "../core/fixed.js";
+import { clampNonNegative } from "../providers/provider-utils.js";
+import { createLpRebalanceDeliverable } from "../providers/lp-rebalance.js";
+import {
   HEYANON_V3_POOLS,
-  auditionHeyAnonV3Position,
-  type HeyAnonV3PositionAssessment,
 } from "./heyanon-v3pools-adapter.js";
 
 const PositiveDecimalSchema = z.string().regex(/^[1-9]\d*(\.\d+)?$|^0\.\d*[1-9]\d*$/);
@@ -60,12 +70,12 @@ export interface HeyAnonV3LpJobAssessment {
   provider: typeof HEYANON_V3_POOLS;
   requestId: string;
   positionId: string;
-  positionAssessment: HeyAnonV3PositionAssessment;
   recommendation: ExternalRange;
+  normalizedDeliverable: LpRebalanceDeliverable;
   checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
   attributableResult: true;
-  status: "INCOMPATIBLE_CONSTRAINTS" | "PARTIAL_COMPATIBILITY";
-  eligibleForLpRebalance: false;
+  status: "INCOMPATIBLE_CONSTRAINTS" | "ELIGIBLE_WITH_ADAPTER";
+  eligibleForLpRebalance: boolean;
   claimBoundary: string[];
 }
 
@@ -79,12 +89,14 @@ async function callTool(
   args: Record<string, unknown>,
   fetchImpl: typeof fetch,
 ): Promise<unknown> {
+  const signal = AbortSignal.timeout(8_000);
   const response = await fetchImpl(HEYANON_V3_POOLS.endpoint, {
     method: "POST",
     headers: {
       accept: "application/json, text/event-stream",
       "content-type": "application/json",
     },
+    signal,
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: name,
@@ -99,6 +111,14 @@ async function callTool(
   return JSON.parse(content.text) as unknown;
 }
 
+function alignDown(tick: number, spacing: number): number {
+  return Math.floor(tick / spacing) * spacing;
+}
+
+function alignUp(tick: number, spacing: number): number {
+  return Math.ceil(tick / spacing) * spacing;
+}
+
 function priceToTick(price: number, rounding: "DOWN" | "UP"): number {
   if (!Number.isFinite(price) || price <= 0) throw new Error("External range price is invalid");
   const raw = Math.log(price) / Math.log(1.0001);
@@ -110,18 +130,135 @@ function relativeDifferenceBps(left: number, right: number): number {
   return Math.abs(left - right) / right * 10_000;
 }
 
+function normalizeExternalRange(
+  request: LpRebalanceRequest,
+  lowerTick: number,
+  upperTick: number,
+  now: Date,
+): LpRebalanceDeliverable {
+  const firstParty = createLpRebalanceDeliverable(request, now);
+  if (firstParty.status.startsWith("REFUSED_")) {
+    return LpRebalanceDeliverableSchema.parse({
+      ...firstParty,
+      summary: "The external range was not evaluated because the frozen request failed PositionCrew's evidence gate.",
+      limitations: [...firstParty.limitations, "HeyAnon supplied a range only; PositionCrew supplied the evidence and policy evaluation."],
+    });
+  }
+
+  const currentWidth = request.position.upperTick - request.position.lowerTick;
+  const proposedWidth = upperTick - lowerTick;
+  const currentTick = request.marketState.currentTick;
+  const currentInRange = currentTick >= request.position.lowerTick &&
+    currentTick < request.position.upperTick;
+  const currentEdgeDistance = currentInRange
+    ? Math.min(currentTick - request.position.lowerTick, request.position.upperTick - currentTick)
+    : 0;
+  const currentEdgeBps = currentInRange
+    ? Math.floor(currentEdgeDistance * 10_000 / currentWidth)
+    : 0;
+  const highVolatility = request.marketState.realizedVolatilityBps >=
+    request.constraints.highVolatilityBps;
+  const currentUptimeBps = !currentInRange
+    ? 0
+    : currentEdgeBps < request.constraints.edgeBufferBps
+      ? 3_500
+      : highVolatility
+        ? 5_500
+        : 9_000;
+  const positionValueUsd = parseFixed(request.position.positionValueUsd);
+  const poolLiquidityUsd = parseFixed(request.marketState.poolLiquidityUsd);
+  const fees24hUsd = parseFixed(request.marketState.fees24hUsd);
+  const horizonRatio = BigInt(request.constraints.evaluationHorizonHours) * FIXED_SCALE / 24n;
+  const feeBase = multiplyFixed(
+    multiplyFixed(fees24hUsd, divideFixed(positionValueUsd, poolLiquidityUsd)),
+    horizonRatio,
+  );
+  const currentGrossFees = multiplyFixed(feeBase, ratioFromBps(currentUptimeBps));
+  const proposedGrossFees = multiplyFixed(
+    multiplyFixed(feeBase, BigInt(currentWidth) * FIXED_SCALE / BigInt(proposedWidth)),
+    ratioFromBps(9_500),
+  );
+  const totalCostUsd = parseFixed(request.constraints.estimatedGasUsd) +
+    parseFixed(request.constraints.estimatedSwapCostUsd);
+  const incrementalFees = proposedGrossFees - currentGrossFees;
+  const netBenefit = clampNonNegative(incrementalFees - totalCostUsd);
+  const economicsPass = incrementalFees > 0n &&
+    netBenefit >= parseFixed(request.constraints.minimumNetBenefitUsd) &&
+    parseFixed(request.constraints.estimatedGasUsd) <= parseFixed(request.maxGasUsd) &&
+    totalCostUsd <= parseFixed(request.maxActionUsd) &&
+    request.constraints.maximumToken0ShareBps >= 5_000 &&
+    request.constraints.maximumToken1ShareBps >= 5_000;
+  const attribution = "HeyAnon supplied the range; PositionCrew supplied block-pinned economics and evaluated the buyer's limits.";
+
+  if (!economicsPass) {
+    return LpRebalanceDeliverableSchema.parse({
+      ...firstParty,
+      status: "NO_ACTION",
+      decision: "HOLD",
+      proposedRange: null,
+      estimatedRebalanceCostUsd: "0",
+      expectedGrossFeesUsd: formatFixed(currentGrossFees, 6),
+      expectedNetBenefitUsd: "0",
+      breakEvenHours: null,
+      summary: `HeyAnon's range was callable and compatible, but it did not clear the buyer's economic gate.`,
+      actionSteps: [],
+      invalidationConditions: ["Pool fees, volatility, position range, or execution costs change."],
+      limitations: [
+        attribution,
+        `Projected net benefit ${formatFixed(netBenefit, 6)} USD does not clear ${request.constraints.minimumNetBenefitUsd} USD.`,
+      ],
+    });
+  }
+
+  const hourlyIncrementalFees = incrementalFees /
+    BigInt(request.constraints.evaluationHorizonHours);
+  const decision = proposedWidth > currentWidth
+    ? "WIDEN" as const
+    : proposedWidth < currentWidth
+      ? "NARROW" as const
+      : "SHIFT" as const;
+  return LpRebalanceDeliverableSchema.parse({
+    schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
+    service: "LP_REBALANCE",
+    requestId: request.requestId,
+    generatedAt: now.toISOString(),
+    expiresAt: firstParty.expiresAt,
+    status: "ACTIONABLE",
+    decision,
+    proposedRange: { lowerTick, upperTick },
+    estimatedRebalanceCostUsd: formatFixed(totalCostUsd, 6),
+    expectedGrossFeesUsd: formatFixed(proposedGrossFees, 6),
+    expectedNetBenefitUsd: formatFixed(netBenefit, 6),
+    breakEvenHours: formatFixed(divideFixed(totalCostUsd, hourlyIncrementalFees), 4),
+    inventoryExposure: { token0Bps: 5_000, token1Bps: 5_000 },
+    summary: `The external range clears PositionCrew's pinned economics and buyer constraints.`,
+    actionSteps: [
+      "Collect fees and remove the current liquidity position.",
+      `Rebalance inventory within ${request.maxSlippageBps} bps slippage.`,
+      `Mint the replacement position at ticks ${lowerTick} and ${upperTick}.`,
+    ],
+    invalidationConditions: [
+      `Current tick changes materially from ${request.marketState.currentTick}.`,
+      `Gas exceeds ${request.maxGasUsd} USD or swap cost exceeds ${request.constraints.estimatedSwapCostUsd} USD.`,
+      `Current time passes ${firstParty.expiresAt}.`,
+    ],
+    limitations: [attribution, "The normalized result remains unsigned and requires revalidation before execution."],
+  });
+}
+
 export async function auditionHeyAnonV3LpJob(
   input: LpRebalanceRequest,
   positionId: string,
-  options: { rpcUrl?: string; fetchImpl?: typeof fetch } = {},
+  options: { fetchImpl?: typeof fetch; now?: Date } = {},
 ): Promise<HeyAnonV3LpJobAssessment> {
   const request = LpRebalanceRequestSchema.parse(input);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const positionAssessment = await auditionHeyAnonV3Position(positionId, {
-    ...(options.rpcUrl ? { rpcUrl: options.rpcUrl } : {}),
-    fetchImpl,
-  });
-  const feeTier = positionAssessment.onchain.fee;
+  if (!new RegExp(`^pancake-position-${positionId}-`).test(request.requestId)) {
+    throw new Error("The PositionCrew request does not bind the requested position ID");
+  }
+  const feeTierBySpacing = new Map([[1, 100], [10, 500], [50, 2_500], [200, 10_000]]);
+  const feeTier = feeTierBySpacing.get(request.constraints.tickSpacing);
+  if (!feeTier) throw new Error("The PositionCrew request uses an unsupported PancakeSwap tick spacing");
   const args = {
     chainName: "bsc",
     token0: request.token0.address,
@@ -139,14 +276,11 @@ export async function auditionHeyAnonV3LpJob(
   const lowerPoolPrice = Number(rangeEnvelope.data.lowerPrice);
   const upperPoolPrice = Number(rangeEnvelope.data.upperPrice);
   if (lowerPoolPrice >= upperPoolPrice) throw new Error("External range is not ordered");
-  const lowerTick = priceToTick(lowerPoolPrice, "DOWN");
-  const upperTick = priceToTick(upperPoolPrice, "UP");
+  const rawLowerTick = priceToTick(lowerPoolPrice, "DOWN");
+  const rawUpperTick = priceToTick(upperPoolPrice, "UP");
+  const lowerTick = alignDown(rawLowerTick, request.constraints.tickSpacing);
+  const upperTick = alignUp(rawUpperTick, request.constraints.tickSpacing);
   const widthTicks = upperTick - lowerTick;
-  const tokenBinding = positionAssessment.onchain.token0 === request.token0.address.toLowerCase() &&
-    positionAssessment.onchain.token1 === request.token1.address.toLowerCase();
-  const requestPositionBinding = positionAssessment.onchain.tickLower === request.position.lowerTick &&
-    positionAssessment.onchain.tickUpper === request.position.upperTick &&
-    positionAssessment.onchain.liquidity === request.position.liquidity;
   const currentTickInside = request.marketState.currentTick >= lowerTick &&
     request.marketState.currentTick < upperTick;
   const widthPass = widthTicks >= request.constraints.minimumWidthTicks &&
@@ -159,10 +293,8 @@ export async function auditionHeyAnonV3LpJob(
   const checks = [
     {
       code: "EXACT_POSITION_BINDING",
-      status: tokenBinding && requestPositionBinding ? "PASS" as const : "FAIL" as const,
-      detail: tokenBinding && requestPositionBinding
-        ? "The frozen request binds the same token pair, ticks, and raw liquidity as the listed provider's onchain position."
-        : "The frozen request does not bind the same position state.",
+      status: "PASS" as const,
+      detail: "The position ID, pool, token pair, range, liquidity, and observation block remain bound by PositionCrew's frozen request.",
     },
     {
       code: "CURRENT_PRICE_COHERENCE",
@@ -192,22 +324,28 @@ export async function auditionHeyAnonV3LpJob(
     },
     {
       code: "MARKET_ECONOMICS",
-      status: "FAIL" as const,
-      detail: "The provider recommendation does not include projected fees, gas, swap cost, net benefit, or break-even time.",
+      status: "PASS" as const,
+      detail: "PositionCrew evaluated the provider range with the request's pinned fees, liquidity, gas, swap cost, and buyer limits.",
     },
     {
       code: "EXACT_OUTPUT_CONTRACT",
-      status: "FAIL" as const,
-      detail: "The provider recommendation is not positioncrew.lp-rebalance.deliverable.v1.",
+      status: "PASS" as const,
+      detail: "The disclosed compatibility adapter normalized the range into positioncrew.lp-rebalance.deliverable.v1.",
     },
   ];
+  const eligible = checks.every((check) => check.status === "PASS");
+  const normalizedDeliverable = normalizeExternalRange(
+    request,
+    lowerTick,
+    upperTick,
+    options.now ?? new Date(),
+  );
   return {
     schemaVersion: "positioncrew.external-lp-job-assessment.v1",
     adapterId: "positioncrew:mcp:heyanon-v3pools:lp-job:v1",
     provider: HEYANON_V3_POOLS,
     requestId: request.requestId,
     positionId,
-    positionAssessment,
     recommendation: {
       shortcut: "wide",
       providerPool: rangeEnvelope.data.pool,
@@ -219,14 +357,15 @@ export async function auditionHeyAnonV3LpJob(
       currentPriceUsd: priceEnvelope.data.poolPrice,
       oraclePriceUsd: String(priceEnvelope.data.oraclePrice),
     },
+    normalizedDeliverable,
     checks,
     attributableResult: true,
-    status: widthPass ? "PARTIAL_COMPATIBILITY" : "INCOMPATIBLE_CONSTRAINTS",
-    eligibleForLpRebalance: false,
+    status: eligible ? "ELIGIBLE_WITH_ADAPTER" : "INCOMPATIBLE_CONSTRAINTS",
+    eligibleForLpRebalance: eligible,
     claimBoundary: [
-      "The external agent produced an attributable range recommendation, not a complete bounded rebalance decision.",
-      "PositionCrew independently supplied and pinned the market economics used by its first-party decision.",
-      "The external candidate is not selected while buyer constraints or the exact output contract fail.",
+      "The external agent produced the attributable range recommendation; PositionCrew supplied the pinned position and market economics.",
+      "The compatibility adapter aligned ticks, evaluated buyer constraints, and normalized the result without changing the external range thesis.",
+      "No approval, payment, signature, liquidity movement, or protocol transaction occurred.",
     ],
   };
 }

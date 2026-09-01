@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { BoundedGridRequestSchema } from "../contracts/bounded-grid.js";
 import { LendingRescueRequestSchema } from "../contracts/lending-rescue.js";
-import { LpRebalanceRequestSchema } from "../contracts/lp-rebalance.js";
+import { LpRebalanceDeliverableSchema, LpRebalanceRequestSchema } from "../contracts/lp-rebalance.js";
 import { YieldOptimizationRequestSchema } from "../contracts/yield-optimization.js";
 import { LendingProviderAuditionSchema } from "../marketplace/lending-provider-audition.js";
 
@@ -171,7 +171,19 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     firstPartyDecision: z.string().min(1),
     exactRequestAccepted: z.literal(false),
     eligibleForPositionAssessmentActivation: z.boolean(),
-    eligibleForLiveMatch: z.literal(false),
+    eligibleForLiveMatch: z.boolean(),
+    adapterNormalized: z.boolean().optional(),
+    externalRange: z.object({
+      lowerTick: z.number().int(),
+      upperTick: z.number().int(),
+      widthTicks: z.number().int().positive(),
+    }).strict().optional(),
+    normalizedDeliverable: LpRebalanceDeliverableSchema.optional(),
+    selection: z.object({
+      selectedProvider: z.enum(["POSITIONCREW", "EXTERNAL"]),
+      externalEligible: z.boolean(),
+      basis: z.string().min(1),
+    }).strict().optional(),
     checks: z.array(z.object({
       code: z.string().min(1),
       status: z.enum(["PASS", "FAIL"]),
