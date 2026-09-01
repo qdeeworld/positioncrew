@@ -28,6 +28,8 @@ The flagship cold-buyer journey is **Rescue a lending position**. It returns exa
 
 The public hire API provides a D1-persisted outer lifecycle for all four current block-referenced BSC request categories: `lending-rescue`, `lp-rebalance`, `yield-optimization`, and `bounded-grid`. It commits the request, provider binding, declared block evidence, result, evaluation, and timing trace so a completed receipt can be reloaded after the creating browser session ends. The observation is caller-supplied and is not independently re-fetched during provider execution, so every result must be revalidated before financial action.
 
+The current bounded-grid journey also auditions Brain on BNB ERC-8004 agent `#302258` against the same frozen PancakeSwap job. PositionCrew preserves the provider's raw replay claim, verifies its pool, pair, fee tier, capital, block window, activity, economics, range, expiry, and output contract, and exposes every acceptance or refusal in the durable receipt. A two-provider Live Match is claimed only when both providers remain actionable under that exact job; no payment, authority grant, order placement, swap, or protocol transaction occurs.
+
 Three separate historical tasks remain immutable: `lending-rescue`, `lp-rebalance`, and `bounded-grid`. They reproduce the committed frozen fixtures and do not widen historical evidence to yield optimisation.
 
 The persisted lifecycle uses these routes:
