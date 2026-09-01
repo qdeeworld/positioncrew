@@ -80,9 +80,9 @@ function providerResponse(overrides: Record<string, unknown> = {}) {
       swaps_total: 10000,
       share_of_window_in_range_pct: 100,
       times_it_crossed_the_edge: 0,
-      fees_usd_in_window: 0.4,
+      fees_usd_in_window: 0.8,
       assumed_rebalance_cost_usd: 0.48,
-      net_after_rebalancing_usd_in_window: 0.4,
+      net_after_rebalancing_usd_in_window: 0.32,
     })),
     best_earning_range_in_this_window: "±0.25%",
     best_range_after_paying_to_put_it_back: "±1%",
@@ -162,6 +162,37 @@ describe("Brain on BNB Grid adapter", () => {
     });
     expect(result.outcome).toBe("INCOMPATIBLE");
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
+  it("rejects replay economics that do not subtract the declared rebalance cost", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({
+      ranges: [{
+        ...providerResponse().ranges[1],
+        fees_usd_in_window: 0.4,
+        assumed_rebalance_cost_usd: 0.48,
+        net_after_rebalancing_usd_in_window: 0.4,
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.eligibleForRangeAssessmentActivation).toBe(false);
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
+  it("withholds activation when replay evidence is not bound to the requested pool", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({ pool: "0x0000000000000000000000000000000000000001" });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.eligibleForRangeAssessmentActivation).toBe(false);
+    expect(result.eligibleForLiveMatch).toBe(false);
   });
 
   it("fails closed when the provider is unavailable", async () => {

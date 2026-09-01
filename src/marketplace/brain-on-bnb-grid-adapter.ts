@@ -116,6 +116,16 @@ function priceDifferenceBps(left: number, right: number): number {
   return Math.round(Math.abs(left - right) / right * 10_000);
 }
 
+function replayEconomicsAreConsistent(
+  candidate: z.infer<typeof RangeSchema>,
+  declaredRebalanceCostUsd: number,
+): boolean {
+  const toleranceUsd = 0.000001;
+  const expectedNetUsd = candidate.fees_usd_in_window - candidate.assumed_rebalance_cost_usd;
+  return Math.abs(candidate.assumed_rebalance_cost_usd - declaredRebalanceCostUsd) <= toleranceUsd &&
+    Math.abs(candidate.net_after_rebalancing_usd_in_window - expectedNetUsd) <= toleranceUsd;
+}
+
 export async function auditionBrainOnBnbGrid(
   request: BoundedGridRequest,
   firstParty: BoundedGridDeliverable,
@@ -181,6 +191,7 @@ export async function auditionBrainOnBnbGrid(
         candidate.swaps_in_range < 100 ||
         candidate.share_of_window_in_range_pct < 10 ||
         candidate.fees_usd_in_window <= 0 ||
+        !replayEconomicsAreConsistent(candidate, parsed.rebalance_cost_usd_assumed) ||
         candidate.net_after_rebalancing_usd_in_window <= 0
       ) return [];
       const lowerPrice = midPrice * (1 - candidate.width_pct / 100);
@@ -205,7 +216,8 @@ export async function auditionBrainOnBnbGrid(
     const providerEvidenceSufficient = Boolean(selectedRange) &&
       parsed.measured_window.swaps >= 100 &&
       selectedRange!.swaps_total === parsed.measured_window.swaps &&
-      selectedRange!.net_after_rebalancing_usd_in_window >= 0;
+      replayEconomicsAreConsistent(selectedRange!, parsed.rebalance_cost_usd_assumed) &&
+      selectedRange!.net_after_rebalancing_usd_in_window > 0;
     const normalizedDeliverable = selected?.deliverable;
     const exactOutputContract = normalizedDeliverable?.status === "ACTIONABLE" &&
       normalizedDeliverable.decision === "BUILD_GRID";
@@ -226,7 +238,7 @@ export async function auditionBrainOnBnbGrid(
       outcome: eligible ? "SEMANTICALLY_COMPARABLE" : "INCOMPATIBLE",
       externalRecommendation: exactOutputContract ? "BUILD_GRID" : "NO_GRID",
       externalState: "RANGE_REPLAY_READY",
-      eligibleForRangeAssessmentActivation: providerEvidenceSufficient,
+      eligibleForRangeAssessmentActivation: eligible,
       eligibleForGridSelection: eligible,
       eligibleForLiveMatch: eligible,
       attributable: exactPool && exactPair,
