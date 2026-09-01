@@ -50,7 +50,7 @@ export function ShellHeader({
             <span className={`api-state ${apiState}`} role="status">
               <i /> {apiState === "online" ? "API reachable" : apiState === "unavailable" ? "API unavailable" : "Connecting"}
             </span>
-            <a href="https://github.com/dolepee/positioncrew" target="_blank" rel="noreferrer">
+            <a href="https://github.com/qdeeworld/positioncrew" target="_blank" rel="noreferrer">
               <GitBranch size={15} aria-hidden="true" /> Source
             </a>
           </div>
