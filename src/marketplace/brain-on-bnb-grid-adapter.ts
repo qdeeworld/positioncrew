@@ -397,6 +397,7 @@ export async function auditionBrainOnBnbGrid(
     positionCrewDecision: firstParty.decision,
     exactRequestAccepted: false as const,
   };
+  const firstPartyEligible = firstParty.status === "ACTIONABLE" && firstParty.decision === "BUILD_GRID";
 
   try {
     const url = new URL(BRAIN_ON_BNB_GRID.endpoint);
@@ -465,10 +466,10 @@ export async function auditionBrainOnBnbGrid(
     const safeWindowBlocks = fromBlockLexemes.length === 1 &&
       toBlockLexemes.length === 1 &&
       blockCountLexemes.length === 1 &&
-      windowSwapLexemes.length === 1 &&
       rawUnsignedIntegerLexemeMatches(fromBlockLexemes[0] ?? null, parsed.measured_window.from_block) &&
       rawUnsignedIntegerLexemeMatches(toBlockLexemes[0] ?? null, parsed.measured_window.to_block) &&
-      rawUnsignedIntegerLexemeMatches(blockCountLexemes[0] ?? null, parsed.measured_window.blocks) &&
+      rawUnsignedIntegerLexemeMatches(blockCountLexemes[0] ?? null, parsed.measured_window.blocks);
+    const safeWindowSwaps = windowSwapLexemes.length === 1 &&
       rawUnsignedIntegerLexemeMatches(windowSwapLexemes[0] ?? null, parsed.measured_window.swaps);
     const exactWindowBlockCount = safeWindowBlocks && parsed.measured_window.blocks ===
       parsed.measured_window.to_block - parsed.measured_window.from_block + 1;
@@ -571,7 +572,7 @@ export async function auditionBrainOnBnbGrid(
     const selectedRange = selected?.candidate;
     const widthPct = selectedRange?.width_pct ?? null;
     const rangeInsideBuyerBounds = selected?.normalizedRange.fitsBuyerBounds === true;
-    const providerEvidenceSufficient = safeWindowBlocks && Boolean(selectedRange) &&
+    const providerEvidenceSufficient = safeWindowSwaps && Boolean(selectedRange) &&
       parsed.measured_window.swaps >= 100 &&
       replayActivityIsConsistent(
         selectedRange!,
@@ -591,7 +592,6 @@ export async function auditionBrainOnBnbGrid(
     const externalEligible = rawJsonKeySafe && exactChain && exactPool && exactPair && exactCapital && exactFeeTier &&
       exactWindowBlockCount && windowBindsRequest &&
       priceCoherent && rangeInsideBuyerBounds && providerEvidenceSufficient && exactOutputContract;
-    const firstPartyEligible = firstParty.status === "ACTIONABLE" && firstParty.decision === "BUILD_GRID";
     const liveMatchEligible = externalEligible && firstPartyEligible;
     const checks: BrainOnBnbGridComparison["checks"] = [
       { code: "RAW_JSON_KEY_SAFETY", status: rawJsonKeySafe ? "PASS" : "FAIL", detail: rawJsonKeySafe ? "Every decoded object key is unique within its JSON object." : "At least one JSON object contains duplicate keys after escape decoding, so raw numeric evidence is untrustworthy." },
@@ -658,11 +658,15 @@ export async function auditionBrainOnBnbGrid(
       adapterNormalized: false,
       providerRange: null,
       measuredWindow: null,
-      selection: {
-        selectedProvider: "POSITIONCREW",
-        externalEligible: false,
-        basis: "The external provider was unavailable; the first-party bounded-grid hire remained available.",
-      },
+      ...(firstPartyEligible
+        ? {
+            selection: {
+              selectedProvider: "POSITIONCREW" as const,
+              externalEligible: false,
+              basis: "The external provider was unavailable; the first-party provider still returned an actionable bounded grid.",
+            },
+          }
+        : {}),
       checks: [{ code: "CALLABLE_RESULT", status: "FAIL", detail: error instanceof Error ? error.message : "Brain on BNB Grid was unavailable." }],
       boundary,
     };

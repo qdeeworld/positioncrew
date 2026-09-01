@@ -615,6 +615,7 @@ describe("Brain on BNB Grid adapter", () => {
       fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
     });
     expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "MEASURED_WINDOW_BLOCK_COUNT")?.status).toBe("PASS");
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
     expect(result.eligibleForLiveMatch).toBe(false);
   });
@@ -895,6 +896,20 @@ describe("Brain on BNB Grid adapter", () => {
     });
     expect(result.outcome).toBe("UNAVAILABLE");
     expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
+  it("does not select a nonactionable first-party result when the external provider is unavailable", async () => {
+    const firstParty = {
+      ...createBoundedGridDeliverable(request, now),
+      status: "REFUSED_CONSTRAINTS" as const,
+      decision: "NO_GRID" as const,
+    };
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response("down", { status: 503 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("UNAVAILABLE");
+    expect(result.selection).toBeUndefined();
   });
 
   it("cancels both failed response bodies across a 5xx retry", async () => {
