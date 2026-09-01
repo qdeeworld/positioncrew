@@ -129,6 +129,41 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "PROVIDER_RANGE_INSIDE_BUYER_BOUND")?.status).toBe("FAIL");
   });
 
+  it("rejects declared widths whose returned prices are unrelated", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({
+      ranges: [{
+        ...providerResponse().ranges[1],
+        price_range: { low: 600, high: 800, unit: "USDT per WBNB" },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "PROVIDER_RANGE_BINDING")?.status).toBe("FAIL");
+  });
+
+  it("rejects replay ranges with no demonstrated in-range activity", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({
+      ranges: [{
+        ...providerResponse().ranges[1],
+        swaps_in_range: 0,
+        share_of_window_in_range_pct: 0,
+        fees_usd_in_window: 0,
+        net_after_rebalancing_usd_in_window: 0,
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
   it("fails closed when the provider is unavailable", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const result = await auditionBrainOnBnbGrid(request, firstParty, {

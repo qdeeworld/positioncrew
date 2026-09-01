@@ -156,14 +156,33 @@ export async function auditionBrainOnBnbGrid(
     const pinnedBlock = requestBlock(request);
     const windowBindsRequest = pinnedBlock !== null &&
       pinnedBlock >= parsed.measured_window.from_block &&
-      pinnedBlock <= parsed.measured_window.to_block + 2_500;
+      pinnedBlock <= parsed.measured_window.to_block;
     const priceCoherent = priceDifferenceBps(parsed.price_now, Number(request.marketState.midPrice)) <= 25;
     const midPrice = Number(request.marketState.midPrice);
     const buyerLower = Number(request.constraints.lowerPrice);
     const buyerUpper = Number(request.constraints.upperPrice);
+    const rawRangeBindsProviderAndBuyer = (candidate: z.infer<typeof RangeSchema>): boolean => {
+      if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return false;
+      const expectedLower = parsed.price_now * (1 - candidate.width_pct / 100);
+      const expectedUpper = parsed.price_now * (1 + candidate.width_pct / 100);
+      const expectedUnit = `${request.quoteAsset.symbol} per ${request.baseAsset.symbol}`.toLowerCase();
+      return candidate.price_range.unit.toLowerCase() === expectedUnit &&
+        priceDifferenceBps(candidate.price_range.low, expectedLower) <= 5 &&
+        priceDifferenceBps(candidate.price_range.high, expectedUpper) <= 5 &&
+        candidate.price_range.low >= buyerLower * (1 - 25 / 10_000) &&
+        candidate.price_range.high <= buyerUpper * (1 + 25 / 10_000);
+    };
+    const providerRangeBinding = parsed.ranges.some(rawRangeBindsProviderAndBuyer);
     const candidates = parsed.ranges.flatMap((candidate) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
-      if (candidate.swaps_total !== parsed.measured_window.swaps || candidate.net_after_rebalancing_usd_in_window < 0) return [];
+      if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
+      if (
+        candidate.swaps_total !== parsed.measured_window.swaps ||
+        candidate.swaps_in_range < 100 ||
+        candidate.share_of_window_in_range_pct < 10 ||
+        candidate.fees_usd_in_window <= 0 ||
+        candidate.net_after_rebalancing_usd_in_window <= 0
+      ) return [];
       const lowerPrice = midPrice * (1 - candidate.width_pct / 100);
       const upperPrice = midPrice * (1 + candidate.width_pct / 100);
       if (lowerPrice < buyerLower - 0.000001 || upperPrice > buyerUpper + 0.000001) return [];
@@ -195,10 +214,11 @@ export async function auditionBrainOnBnbGrid(
     const checks: BrainOnBnbGridComparison["checks"] = [
       { code: "EXACT_POOL_AND_PAIR", status: exactPool && exactPair ? "PASS" : "FAIL", detail: exactPool && exactPair ? "The provider measured the requested PancakeSwap WBNB/USDT pool." : "The provider result did not bind the requested pool and pair." },
       { code: "EXACT_CAPITAL", status: exactCapital ? "PASS" : "FAIL", detail: exactCapital ? "The replay used the buyer's exact capital amount." : "The replay used a different capital amount." },
-      { code: "MEASURED_WINDOW_BINDING", status: windowBindsRequest ? "PASS" : "FAIL", detail: windowBindsRequest ? "The request's pinned block is inside or immediately before the provider's disclosed replay window." : "The provider replay window does not bind the request's pinned market observation." },
+      { code: "MEASURED_WINDOW_BINDING", status: windowBindsRequest ? "PASS" : "FAIL", detail: windowBindsRequest ? "The request's pinned block is inside the provider's disclosed replay window." : "The provider replay window does not bind the request's pinned market observation." },
       { code: "CURRENT_PRICE_COHERENCE", status: priceCoherent ? "PASS" : "FAIL", detail: priceCoherent ? "Provider and PositionCrew prices differ by no more than 25 bps." : "Provider and PositionCrew prices diverge beyond the admitted tolerance." },
+      { code: "PROVIDER_RANGE_BINDING", status: providerRangeBinding ? "PASS" : "FAIL", detail: providerRangeBinding ? "At least one returned low/high pair matches its declared width and unit, and remains inside the buyer boundary within the admitted price-coherence tolerance." : "No returned low/high pair binds its declared width, unit, and buyer boundary." },
       { code: "PROVIDER_RANGE_INSIDE_BUYER_BOUND", status: rangeInsideBuyerBounds ? "PASS" : "FAIL", detail: rangeInsideBuyerBounds ? `A provider-replayed ±${widthPct}% width remains inside the buyer's maximum range after centering on the pinned request price.` : "No provider-replayed width remains inside the buyer boundary and survives the unchanged economics contract." },
-      { code: "ATTRIBUTABLE_REPLAY_EVIDENCE", status: providerEvidenceSufficient ? "PASS" : "FAIL", detail: providerEvidenceSufficient ? `The provider replayed ${parsed.measured_window.swaps} swaps and preserved non-negative observed net value for the admitted width after its rebalance-cost model.` : "The provider did not return enough attributable replay evidence for normalization." },
+      { code: "ATTRIBUTABLE_REPLAY_EVIDENCE", status: providerEvidenceSufficient ? "PASS" : "FAIL", detail: providerEvidenceSufficient ? `The admitted width captured at least 100 of ${parsed.measured_window.swaps} replayed swaps, covered at least 10% of the window, earned fees, and preserved positive observed net value after the provider's rebalance-cost model.` : "The provider did not demonstrate meaningful in-range activity and positive replay economics for an admitted width." },
       { code: "EXACT_OUTPUT_CONTRACT", status: exactOutputContract ? "PASS" : "FAIL", detail: exactOutputContract ? "PositionCrew normalized the provider range through the unchanged bounded order, economics, inventory, loss, expiry, and refusal contract." : "The provider thesis did not survive the unchanged PositionCrew grid contract." },
     ];
     return {
