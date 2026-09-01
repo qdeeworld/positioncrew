@@ -1,5 +1,5 @@
 import { RecentJobsPanel } from "./RecentJobsPanel";
-import { readCapitalCheckSeed } from "../capital-check";
+import { clearCapitalCheckSeed, readCapitalCheckSeed } from "../capital-check";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   AlertTriangle,
@@ -1432,6 +1432,10 @@ function WalletRiskProbe({
       }
       const next = await response.json() as VenusAccountProbe;
       if (operation !== probeOperation.current || controller.signal.aborted) return;
+      if (requestedAccount === seededAccount.current) {
+        clearCapitalCheckSeed();
+        seededAccount.current = "";
+      }
       setProbe(next);
       if (next.rescueRequest) {
         const source = objectValue((next.rescueRequest.sources as unknown[] | undefined)?.[0]);
@@ -1482,6 +1486,10 @@ function WalletRiskProbe({
             aria-invalid={Boolean(error) || (account.trim().length > 0 && !validAccount)}
             aria-describedby={error ? "wallet-probe-help wallet-probe-error" : "wallet-probe-help"}
             onChange={(event) => {
+              activeProbeController.current?.abort();
+              probeOperation.current += 1;
+              clearCapitalCheckSeed();
+              seededAccount.current = "";
               setAccount(event.target.value);
               setProbe(null);
               setError(null);
@@ -1566,6 +1574,7 @@ function LpPositionProbe({
         throw new Error(Array.isArray(body?.details) ? String(body.details[0]) : `Position probe failed (${response.status})`);
       }
       setProbe(await response.json() as PancakePositionProbe);
+      clearCapitalCheckSeed();
     } catch (probeError) {
       setError(probeError instanceof Error ? probeError.message : "Position probe failed");
     } finally {
@@ -1597,6 +1606,7 @@ function LpPositionProbe({
             aria-invalid={Boolean(error) || !validTokenId}
             aria-describedby={error ? "lp-position-probe-error" : undefined}
             onChange={(event) => {
+              clearCapitalCheckSeed();
               setTokenId(event.target.value);
               setProbe(null);
               setError(null);

@@ -15,7 +15,10 @@ export function readCapitalCheckSeed(): CapitalCheckSeed | null {
     if (typeof account !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(account) || typeof value.checkedAt !== "string") {
       return null;
     }
-    if (value.pancakePositionId !== undefined && !/^[1-9][0-9]{0,77}$/.test(value.pancakePositionId)) {
+    if (value.pancakePositionId !== undefined && (
+      typeof value.pancakePositionId !== "string"
+      || !/^[1-9][0-9]{0,77}$/.test(value.pancakePositionId)
+    )) {
       return null;
     }
     return {
@@ -33,5 +36,13 @@ export function saveCapitalCheckSeed(seed: CapitalCheckSeed): void {
     window.sessionStorage.setItem(CAPITAL_CHECK_SEED_KEY, JSON.stringify(seed));
   } catch {
     // Session handoff is optional; the public scan remains useful without browser storage.
+  }
+}
+
+export function clearCapitalCheckSeed(): void {
+  try {
+    window.sessionStorage.removeItem(CAPITAL_CHECK_SEED_KEY);
+  } catch {
+    // Session handoff is optional; storage failures must not block a current job.
   }
 }

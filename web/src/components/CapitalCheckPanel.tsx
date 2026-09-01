@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   WalletCards,
 } from "lucide-react";
-import { saveCapitalCheckSeed } from "../capital-check";
+import { clearCapitalCheckSeed, saveCapitalCheckSeed } from "../capital-check";
 import { TASKS } from "../task-config";
 import type { ServiceId } from "../types";
 
@@ -61,17 +61,26 @@ interface LpScan {
 }
 
 async function fetchJson<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(path, {
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-    signal,
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null) as { details?: unknown } | null;
-    const detail = Array.isArray(body?.details) ? String(body.details[0]) : `HTTP ${response.status}`;
-    throw new Error(detail);
+  const requestController = new AbortController();
+  const abortRequest = () => requestController.abort();
+  const timeout = window.setTimeout(abortRequest, 12_000);
+  signal.addEventListener("abort", abortRequest, { once: true });
+  try {
+    const response = await fetch(path, {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+      signal: requestController.signal,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { details?: unknown } | null;
+      const detail = Array.isArray(body?.details) ? String(body.details[0]) : `HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+    return response.json() as Promise<T>;
+  } finally {
+    window.clearTimeout(timeout);
+    signal.removeEventListener("abort", abortRequest);
   }
-  return response.json() as Promise<T>;
 }
 
 function failedCard(service: ServiceId): ScanCard {
@@ -101,6 +110,7 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
   function cancelScan() {
     controllerRef.current?.abort();
     controllerRef.current = null;
+    clearCapitalCheckSeed();
     setScanning(false);
   }
 
@@ -114,12 +124,6 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
     setCards(null);
     const wallet = account.trim();
     const nft = positionId.trim();
-    saveCapitalCheckSeed({
-      account: wallet,
-      checkedAt: new Date().toISOString(),
-      ...(nft ? { pancakePositionId: nft } : {}),
-    });
-
     try {
       const [venusResult, yieldResult, gridResult, lpResult] = await Promise.allSettled([
         fetchJson<VenusScan>(`/api/wallets/${encodeURIComponent(wallet)}/venus`, controller.signal),
@@ -211,6 +215,11 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
         });
       } else nextCards.push(failedCard("BOUNDED_GRID"));
 
+      saveCapitalCheckSeed({
+        account: wallet,
+        checkedAt: new Date().toISOString(),
+        ...(nft ? { pancakePositionId: nft } : {}),
+      });
       setCards(nextCards);
     } catch (scanError) {
       if (controller.signal.aborted) return;
