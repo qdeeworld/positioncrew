@@ -620,6 +620,40 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.eligibleForLiveMatch).toBe(false);
   });
 
+  it("applies the minimum replay coverage to exact swap counts", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({
+      measured_window: { ...providerResponse().measured_window, swaps: 1010 },
+      ranges: [{
+        ...providerResponse().ranges[1],
+        swaps_in_range: 100,
+        swaps_total: 1010,
+        share_of_window_in_range_pct: 10,
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
+  it("records overlong expanded capital evidence as incompatible rather than unavailable", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const overlongExponent = `1.${"0".repeat(200)}e-100`;
+    const raw = JSON.stringify(providerResponse()).replace(
+      '"capital_considered_usd":1000',
+      `"capital_considered_usd":${overlongExponent}`,
+    );
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "EXACT_CAPITAL")?.status).toBe("FAIL");
+  });
+
   it("does not substitute an adapter-selected range for the provider's declared best range", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const result = await auditionBrainOnBnbGrid(request, firstParty, {

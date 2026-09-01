@@ -164,9 +164,12 @@ function numericLexemeToPlainDecimal(source: string): string | null {
   const [whole = "", fraction = ""] = coefficient.split(".");
   const digits = `${whole}${fraction}`;
   const decimalIndex = whole.length + exponent;
-  if (decimalIndex <= 0) return `0.${"0".repeat(-decimalIndex)}${digits}`;
-  if (decimalIndex >= digits.length) return `${digits}${"0".repeat(decimalIndex - digits.length)}`;
-  return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+  const expanded = decimalIndex <= 0
+    ? `0.${"0".repeat(-decimalIndex)}${digits}`
+    : decimalIndex >= digits.length
+      ? `${digits}${"0".repeat(decimalIndex - digits.length)}`
+      : `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+  return expanded.length <= 256 ? expanded : null;
 }
 
 function canonicalDecimalLexeme(source: string): { digits: string; power: number } | null {
@@ -539,7 +542,7 @@ export async function auditionBrainOnBnbGrid(
         !rawUnsignedIntegerLexemeMatches(totalSwapLexeme, candidate.swaps_total) ||
         !replayActivityIsConsistent(candidate, parsed.measured_window, feesLexeme, windowFeeLexeme) ||
         candidate.swaps_in_range < 100 ||
-        candidate.share_of_window_in_range_pct < 10 ||
+        BigInt(candidate.swaps_in_range) * 10n < BigInt(candidate.swaps_total) ||
         candidate.fees_usd_in_window <= 0 ||
         !replayEconomicsAreConsistent(feesLexeme, costLexeme, netLexeme, declaredCostLexeme)
       ) return [];
