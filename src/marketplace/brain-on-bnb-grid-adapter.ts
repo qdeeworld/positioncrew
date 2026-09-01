@@ -161,6 +161,31 @@ function numberToPlainDecimal(value: number): string | null {
   return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
 }
 
+function numericLexemeToPlainDecimal(source: string): string | null {
+  const normalized = source.toLowerCase();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/.test(normalized)) return null;
+  if (!normalized.includes("e")) return normalized;
+  const [coefficient, exponentText] = normalized.split("e");
+  const exponent = Number(exponentText);
+  if (!coefficient || !Number.isInteger(exponent)) return null;
+  const [whole = "", fraction = ""] = coefficient.split(".");
+  const digits = `${whole}${fraction}`;
+  const decimalIndex = whole.length + exponent;
+  if (decimalIndex <= 0) return `0.${"0".repeat(-decimalIndex)}${digits}`;
+  if (decimalIndex >= digits.length) return `${digits}${"0".repeat(decimalIndex - digits.length)}`;
+  return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+}
+
+function numericFieldLexemes(source: string, key: string): Array<string | null> {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(
+    `"${escapedKey}"\\s*:\\s*(null|(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)`,
+    "g",
+  );
+  return [...source.matchAll(pattern)].map((match) =>
+    match[1] === "null" ? null : (match[1] ?? null));
+}
+
 function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
   const [whole, fraction = ""] = value.split(".");
   const scale = 10n ** BigInt(fraction.length);
@@ -171,6 +196,12 @@ function decimalsEqual(left: string, right: string): boolean {
   const a = parseUnsignedDecimal(left);
   const b = parseUnsignedDecimal(right);
   return a.units * b.scale === b.units * a.scale;
+}
+
+function decimalLessThan(left: string, right: string): boolean {
+  const a = parseUnsignedDecimal(left);
+  const b = parseUnsignedDecimal(right);
+  return a.units * b.scale < b.units * a.scale;
 }
 
 function rationalDecimal(
@@ -190,12 +221,12 @@ function rationalDecimal(
 
 function recenteredRange(
   midPrice: string,
-  widthPct: number,
+  widthPct: string,
   buyerLower: string,
   buyerUpper: string,
 ): { fitsBuyerBounds: boolean; lowerPrice: string; upperPrice: string } | null {
   const mid = parseUnsignedDecimal(midPrice);
-  const widthText = numberToPlainDecimal(widthPct);
+  const widthText = numericLexemeToPlainDecimal(widthPct);
   if (!widthText) return null;
   const width = parseUnsignedDecimal(widthText);
   const lower = parseUnsignedDecimal(buyerLower);
@@ -245,7 +276,10 @@ export async function auditionBrainOnBnbGrid(
       });
     }
     if (!response.ok) throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
-    const parsed = BrainGridResponseSchema.parse(await response.json());
+    const rawResponse = await response.text();
+    const parsed = BrainGridResponseSchema.parse(JSON.parse(rawResponse));
+    const capitalLexemes = numericFieldLexemes(rawResponse, "capital_considered_usd");
+    const widthLexemes = numericFieldLexemes(rawResponse, "width_pct");
     const exactChain = request.chainId === 56;
     const exactPool = parsed.pool.toLowerCase() === request.venue.toLowerCase();
     const exactPair =
@@ -253,9 +287,10 @@ export async function auditionBrainOnBnbGrid(
       parsed.pair.token.decimals === request.baseAsset.decimals &&
       parsed.pair.quote.address.toLowerCase() === request.quoteAsset.address.toLowerCase() &&
       parsed.pair.quote.decimals === request.quoteAsset.decimals;
-    const providerCapital = numberToPlainDecimal(parsed.capital_considered_usd);
-    const exactCapital = providerCapital !== null &&
-      decimalsEqual(providerCapital, request.constraints.capitalUsd);
+    const providerCapital = capitalLexemes.length === 1 && capitalLexemes[0]
+      ? numericLexemeToPlainDecimal(capitalLexemes[0])
+      : null;
+    const exactCapital = providerCapital !== null && decimalsEqual(providerCapital, request.constraints.capitalUsd);
     const exactFeeTier = Math.abs(parsed.fee_pct * 100 - request.marketState.venueFeeBps) < 0.000001;
     const exactWindowBlockCount = parsed.measured_window.blocks ===
       parsed.measured_window.to_block - parsed.measured_window.from_block + 1;
@@ -281,24 +316,30 @@ export async function auditionBrainOnBnbGrid(
         candidate.price_range.high <= buyerUpper * (1 + 25 / 10_000);
     };
     const bestWidthPct = declaredBestWidthPct(parsed.best_range_after_paying_to_put_it_back);
+    const rangeRows = parsed.ranges.map((candidate, index) => ({
+      candidate,
+      widthLexeme: widthLexemes.length === parsed.ranges.length ? widthLexemes[index] ?? null : null,
+    }));
     const declaredCandidates = bestWidthPct === null
       ? []
-      : parsed.ranges.filter((candidate) =>
+      : rangeRows.filter(({ candidate, widthLexeme }) =>
           candidate.width_pct !== null &&
           !candidate.full_range &&
           candidate.price_range !== null &&
-          numberToPlainDecimal(candidate.width_pct) !== null &&
-          decimalsEqual(numberToPlainDecimal(candidate.width_pct)!, bestWidthPct));
-    const declaredCandidate = declaredCandidates[0];
+          widthLexeme !== null &&
+          numericLexemeToPlainDecimal(widthLexeme) !== null &&
+          decimalsEqual(numericLexemeToPlainDecimal(widthLexeme)!, bestWidthPct));
+    const declaredCandidateRow = declaredCandidates[0];
+    const declaredCandidate = declaredCandidateRow?.candidate;
     const unambiguousDeclaredCandidate = declaredCandidates.length === 1;
     const providerRangeBinding = unambiguousDeclaredCandidate && declaredCandidate
       ? rawRangeBindsProviderAndBuyer(declaredCandidate)
       : false;
     const candidates = !unambiguousDeclaredCandidate || !declaredCandidate
       ? []
-      : [declaredCandidate].flatMap((candidate) => {
+      : [declaredCandidateRow].flatMap(({ candidate, widthLexeme }) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
-      const candidateWidth = numberToPlainDecimal(candidate.width_pct);
+      const candidateWidth = widthLexeme ? numericLexemeToPlainDecimal(widthLexeme) : null;
       if (bestWidthPct === null || candidateWidth === null || !decimalsEqual(candidateWidth, bestWidthPct)) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
       if (
@@ -311,12 +352,13 @@ export async function auditionBrainOnBnbGrid(
       ) return [];
       const normalizedRange = recenteredRange(
         request.marketState.midPrice,
-        candidate.width_pct,
+        widthLexeme!,
         request.constraints.lowerPrice,
         request.constraints.upperPrice,
       );
       if (!normalizedRange) return [];
-      const deliverable = normalizedRange.fitsBuyerBounds
+      const representableRange = decimalLessThan(normalizedRange.lowerPrice, normalizedRange.upperPrice);
+      const deliverable = normalizedRange.fitsBuyerBounds && representableRange
         ? createBoundedGridDeliverable({
             ...request,
             constraints: {

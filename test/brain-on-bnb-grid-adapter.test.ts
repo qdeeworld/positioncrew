@@ -339,6 +339,20 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "EXACT_CAPITAL")?.status).toBe("FAIL");
   });
 
+  it("uses the raw capital lexeme instead of its rounded JSON number", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse()).replace(
+      '"capital_considered_usd":1000',
+      '"capital_considered_usd":1000.000000000000000001',
+    );
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "EXACT_CAPITAL")?.status).toBe("FAIL");
+  });
+
   it("binds token decimals as part of the requested pair identity", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse();
@@ -559,6 +573,40 @@ describe("Brain on BNB Grid adapter", () => {
     });
     expect(result.outcome).not.toBe("UNAVAILABLE");
     expect(result.normalizedDeliverable).toBeDefined();
+  });
+
+  it("preserves evidence when an exact range collapses at 18-decimal output precision", async () => {
+    const tinyRequest: BoundedGridRequest = {
+      ...request,
+      marketState: { ...request.marketState, midPrice: "0.000000000000000002" },
+      constraints: {
+        ...request.constraints,
+        lowerPrice: "0.000000000000000001",
+        upperPrice: "0.000000000000000003",
+      },
+    };
+    const firstParty = createBoundedGridDeliverable(tinyRequest, now);
+    const response = providerResponse({
+      price_now: 0.000000000000000002,
+      best_range_after_paying_to_put_it_back: "±10%",
+      ranges: [{
+        ...providerResponse().ranges[0],
+        width_pct: 10,
+        price_range: {
+          low: 0.0000000000000000018,
+          high: 0.0000000000000000022,
+          unit: "USDT per WBNB",
+        },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(tinyRequest, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.externalRecommendation).toBe("BUILD_GRID");
+    expect(result.providerRange).not.toBeNull();
+    expect(result.normalizedDeliverable).toBeUndefined();
   });
 
   it("withholds activation when replay evidence is not bound to the requested pool", async () => {
