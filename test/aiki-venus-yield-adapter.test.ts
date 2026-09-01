@@ -8,7 +8,7 @@ const markets = [
   "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
   "0xC4eF4229FEc74Ccfe17B2bdeF7715fAC740BA0ba",
 ];
-const rates = ["376473318", "373214201"];
+const rates = ["2470000000", "2450000000"];
 const now = new Date("2026-09-01T13:00:30.000Z");
 const observedAt = "2026-09-01T13:00:00.000Z";
 const sourceId = "venus-yield-mainnet-block-119000000";
@@ -62,6 +62,14 @@ function rpcResult(value: string, id: number): Response {
   }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
+function rpcBlock(timestamp: bigint, id: number, blockNumber: string): Response {
+  return new Response(JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    result: { number: blockNumber, timestamp: `0x${timestamp.toString(16)}` },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
 function providerResponse(recommendedMarket = markets[0], returnedMarkets = markets, responseObservedAt = observedAt) {
   return {
     assessment: {
@@ -86,13 +94,17 @@ function providerResponse(recommendedMarket = markets[0], returnedMarkets = mark
 }
 
 function fetcher(response = providerResponse(), pinnedRates = rates) {
-  let rpcIndex = 0;
-  return vi.fn(async (input: URL | RequestInfo) => {
+  return vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
     const url = String(input);
     if (url === "https://rpc.test") {
-      const rate = pinnedRates[rpcIndex] ?? "1";
-      rpcIndex += 1;
-      return rpcResult(rate, rpcIndex);
+      const payload = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] };
+      if (payload.method === "eth_getBlockByNumber") {
+        const blockNumber = String(payload.params[0]);
+        return rpcBlock(blockNumber === "0x717cbc0" ? 1_000_000n : 999_640n, payload.id, blockNumber);
+      }
+      const call = payload.params[0] as { to: string };
+      const marketIndex = markets.findIndex((market) => market.toLowerCase() === call.to.toLowerCase());
+      return rpcResult(pinnedRates[marketIndex] ?? "1", payload.id);
     }
     const parsed = new URL(url);
     expect(parsed.searchParams.get("markets")).toBe(markets.join(","));
@@ -154,6 +166,21 @@ describe("AiKi Venus Yield adapter", () => {
     expect(result.eligibleForLiveMatch).toBe(false);
     expect(result.checks.find((check) => check.code === "PINNED_RATE_BINDING")?.status).toBe("PASS");
     expect(result.checks.find((check) => check.code === "PINNED_RATE_LEADER")?.status).toBe("FAIL");
+  });
+
+  it("rejects inflated caller APY even when the provider and pinned rate leader agree", async () => {
+    const inflated = structuredClone(request);
+    inflated.opportunities[0]!.grossApyBps = 500;
+    inflated.opportunities[1]!.grossApyBps = 400;
+    const firstParty = createYieldOptimizationDeliverable(inflated, now);
+    const result = await auditionAiKiVenusYield(inflated, firstParty, {
+      fetchImpl: fetcher() as typeof fetch,
+      now,
+      rpcUrl: "https://rpc.test",
+    });
+    expect(result.outcome).toBe("PARTIAL_COMPATIBILITY");
+    expect(result.eligibleForLiveMatch).toBe(false);
+    expect(result.checks.find((check) => check.code === "PINNED_APY_BINDING")?.status).toBe("FAIL");
   });
 
   it("fails closed when the provider returns a different market set", async () => {
