@@ -623,11 +623,12 @@ export async function auditionBrainOnBnbGrid(
         declaredCostLexeme,
       );
     const normalizedDeliverable = selected?.deliverable;
-    const exactOutputContract = normalizedDeliverable !== undefined && actionableAt(normalizedDeliverable, completedAt);
+    const admissionAt = options.completionNow?.() ?? options.now ?? new Date();
+    const exactOutputContract = normalizedDeliverable !== undefined && actionableAt(normalizedDeliverable, admissionAt);
     const externalEligible = rawJsonKeySafe && exactChain && exactPool && exactPair && exactCapital && exactFeeTier &&
       exactWindowBlockCount && windowBindsRequest &&
       priceCoherent && rangeInsideBuyerBounds && providerEvidenceSufficient && exactOutputContract;
-    const firstPartyEligible = actionableAt(firstParty, completedAt);
+    const firstPartyEligible = actionableAt(firstParty, admissionAt);
     const liveMatchEligible = externalEligible && firstPartyEligible;
     const checks: BrainOnBnbGridComparison["checks"] = [
       { code: "RAW_JSON_KEY_SAFETY", status: rawJsonKeySafe ? "PASS" : "FAIL", detail: rawJsonKeySafe ? "Every decoded object key is unique within its JSON object." : "At least one JSON object contains duplicate keys after escape decoding, so raw numeric evidence is untrustworthy." },

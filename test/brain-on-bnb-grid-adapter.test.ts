@@ -682,6 +682,23 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "FIRST_PARTY_ACTIONABLE_RESULT")?.status).toBe("FAIL");
   });
 
+  it("rechecks expiry after normalization before admitting Live Match", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const completionTimes = [
+      new Date("2026-09-01T14:03:05.900Z"),
+      new Date("2026-09-01T14:03:06.100Z"),
+    ];
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      completionNow: () => completionTimes.shift() ?? completionTimes.at(-1)!,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse()), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.eligibleForLiveMatch).toBe(false);
+    expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("FAIL");
+    expect(result.checks.find((check) => check.code === "FIRST_PARTY_ACTIONABLE_RESULT")?.status).toBe("FAIL");
+  });
+
   it("does not substitute an adapter-selected range for the provider's declared best range", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const result = await auditionBrainOnBnbGrid(request, firstParty, {
