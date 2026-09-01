@@ -853,6 +853,38 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.eligibleForLiveMatch).toBe(false);
   });
 
+  it("cancels both failed response bodies across a 5xx retry", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    let canceled = 0;
+    const failedResponse = () => new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        canceled += 1;
+      },
+    }), { status: 503 });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => failedResponse()) as typeof fetch,
+    });
+    expect(result.outcome).toBe("UNAVAILABLE");
+    expect(canceled).toBe(2);
+  });
+
+  it("cancels a final 4xx provider response body", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    let canceled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        canceled = true;
+      },
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(body, { status: 422 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("UNAVAILABLE");
+    expect(canceled).toBe(true);
+  });
+
   it("cancels a chunked provider response as soon as it exceeds the byte cap", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const oversizedBody = new ReadableStream<Uint8Array>({

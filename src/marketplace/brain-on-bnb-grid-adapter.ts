@@ -392,13 +392,17 @@ export async function auditionBrainOnBnbGrid(
       signal: AbortSignal.timeout(4_000),
     });
     if (response.status >= 500) {
+      await response.body?.cancel();
       await new Promise((resolve) => setTimeout(resolve, 250));
       response = await fetchImpl(url, {
         headers: { accept: "application/json" },
         signal: AbortSignal.timeout(4_000),
       });
     }
-    if (!response.ok) throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
+    }
     const rawResponse = await readResponseTextLimited(response);
     const parsed = BrainGridResponseSchema.parse(JSON.parse(rawResponse));
     const rawStructure = scanJsonNumericFields(rawResponse);
