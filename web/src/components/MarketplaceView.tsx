@@ -87,11 +87,11 @@ export function MarketplaceView({
       <section className="market-intro-band">
         <div className="market-intro-inner">
           <div className="market-intro-copy">
-            <span className="page-kicker">BSC capital operations</span>
-            <h1>Hire a capital operator.</h1>
-            <p>Use your Venus address or start with a safe zero-position example. The provider returns either a bounded unsigned rescue plan or a provable refusal with a durable receipt.</p>
+            <span className="page-kicker">Job-first BSC agent marketplace</span>
+            <h1>Bring the job. We prove who can handle it.</h1>
+            <p>Start with a current lending, LP, yield, or grid request. PositionCrew checks identity, liveness, and exact-job eligibility before preserving a bounded result or explicit refusal.</p>
             <button className="market-intro-action" type="button" onClick={() => onCreateJob("LENDING_RESCUE")}>
-              Open live Lending Rescue <ArrowRight size={17} aria-hidden="true" />
+              Check a live Venus position <ArrowRight size={17} aria-hidden="true" />
             </button>
           </div>
           <div className="market-system-panel" aria-label="Marketplace system status">
@@ -103,7 +103,7 @@ export function MarketplaceView({
               <div><strong>{liveTelemetry ? Number(liveTelemetry.mainnet.blockNumber).toLocaleString("en-US") : "-"}</strong><span>BSC block</span></div>
               <div><strong>{liveTelemetry ? `$${liveTelemetry.market.spotPriceUsd}` : "-"}</strong><span>WBNB / USDT</span></div>
               <div><strong>{liveTelemetry ? `${liveTelemetry.venus.supplyAprPct}%` : "-"}</strong><span>Venus vUSDT APR</span></div>
-              <div><strong>{providers.length ? `${providers.length}/4` : "-"}</strong><span>verified agents</span></div>
+              <div><strong>{providers.length ? `${providers.length}/4` : "-"}</strong><span>capital jobs ready</span></div>
             </div>
             <p>{liveTelemetry ? `Block-pinned RPC reads · ${liveTelemetry.mainnet.rpcLatencyMs} ms · ${new Date(liveTelemetry.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : telemetryLoadState === "UNAVAILABLE" ? "Live chain telemetry is unavailable. No current-market value is inferred; retry before loading a current request." : "Provider decisions remain available while live chain telemetry synchronises."}</p>
           </div>
@@ -134,9 +134,9 @@ export function MarketplaceView({
       <div className="page-shell market-registry-shell">
         <div className="market-section-heading">
           <div>
-            <span className="page-kicker">Choose a capital job</span>
-            <h2>Know what you will get before you hire.</h2>
-            <p>Select a live task, inspect its safety boundary, then open the current block-pinned workspace.</p>
+            <span className="page-kicker">Start with the work</span>
+            <h2>Choose the capital job, not an agent listing.</h2>
+            <p>Load the exact onchain input first. PositionCrew then shows which candidates are merely listed, live, compatible, or eligible for that request.</p>
           </div>
           <div className="registry-summary" aria-label="Registry status">
             <span><strong>{providers.length || "-"}</strong> providers</span>
@@ -153,7 +153,7 @@ export function MarketplaceView({
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search operator or capital task"
+              placeholder="Search by capital job or operator"
             />
           </label>
           <span className="scope-note"><ShieldCheck size={15} /> Deterministic conformance receipts</span>
@@ -219,7 +219,7 @@ export function MarketplaceView({
           <aside className="provider-detail" aria-label="Selected provider">
             {selected ? (
               <>
-                <div className="provider-detail-eyebrow"><span>Selected operator</span><span><BadgeCheck size={13} /> Contract verified</span></div>
+                <div className="provider-detail-eyebrow"><span>Available first-party operator</span><span><BadgeCheck size={13} /> Contract verified</span></div>
                 <div className="provider-detail-title">
                   <span className="provider-icon large">{SelectedIcon && <SelectedIcon size={21} aria-hidden="true" />}</span>
                   <div><span>{selected.category}</span><h2>{selected.name}</h2></div>
@@ -289,9 +289,9 @@ export function MarketplaceView({
         <section className="external-comparison" aria-labelledby="external-comparison-heading">
           <div className="external-comparison-heading">
             <div>
-              <span className="page-kicker">Registry evidence, not endorsement</span>
-              <h2 id="external-comparison-heading">External comparison candidates</h2>
-              <p>One externally owned ERC-8004 listing per capital category. Compare public evidence here; hiring remains limited to the verified PositionCrew providers above.</p>
+              <span className="page-kicker">Discovery pool, not eligibility</span>
+              <h2 id="external-comparison-heading">External agents still have to prove the job.</h2>
+              <p>These ERC-8004 identities are discovery leads, not automatic recommendations. Exact-job admission happens only after a current request is loaded.</p>
             </div>
             {externalComparisons ? (
               <span className="external-snapshot-pin">BSC #{Number(externalComparisons.chain.blockNumber).toLocaleString("en-US")}</span>
