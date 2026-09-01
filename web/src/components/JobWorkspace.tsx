@@ -1457,7 +1457,6 @@ function WalletRiskProbe({
   useEffect(() => {
     const initialAccount = seededAccount.current;
     if (!EVM_ACCOUNT_PATTERN.test(initialAccount)) return;
-    seededAccount.current = "";
     void inspect(initialAccount, "ACCOUNT");
   }, []);
 

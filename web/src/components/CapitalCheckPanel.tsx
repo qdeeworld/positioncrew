@@ -98,6 +98,12 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
+  function cancelScan() {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    setScanning(false);
+  }
+
   async function scanCapital() {
     if (!validAccount || !validPositionId) return;
     controllerRef.current?.abort();
@@ -229,12 +235,12 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
       <form className="capital-check-form" onSubmit={(event) => { event.preventDefault(); void scanCapital(); }}>
         <label>
           <span>BSC wallet address</span>
-          <div><WalletCards size={17} aria-hidden="true" /><input value={account} onChange={(event) => { setAccount(event.target.value); setCards(null); setError(null); }} placeholder="0x..." spellCheck={false} autoComplete="off" aria-invalid={account.length > 0 && !validAccount} /></div>
+          <div><WalletCards size={17} aria-hidden="true" /><input value={account} onChange={(event) => { cancelScan(); setAccount(event.target.value); setCards(null); setError(null); }} placeholder="0x..." spellCheck={false} autoComplete="off" aria-invalid={account.length > 0 && !validAccount} /></div>
           <small>Used for the block-pinned Venus account read.</small>
         </label>
         <label>
           <span>PancakeSwap V3 NFT ID <em>optional</em></span>
-          <div><Layers3 size={17} aria-hidden="true" /><input value={positionId} onChange={(event) => { setPositionId(event.target.value); setCards(null); setError(null); }} placeholder="Position token ID" inputMode="numeric" pattern="[0-9]*" aria-invalid={!validPositionId} /></div>
+          <div><Layers3 size={17} aria-hidden="true" /><input value={positionId} onChange={(event) => { cancelScan(); setPositionId(event.target.value); setCards(null); setError(null); }} placeholder="Position token ID" inputMode="numeric" pattern="[0-9]*" aria-invalid={!validPositionId} /></div>
           <small>Required only to inspect a specific LP position.</small>
         </label>
         <button type="submit" disabled={scanning || !validAccount || !validPositionId}>
