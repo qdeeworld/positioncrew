@@ -17,6 +17,7 @@ import { clampNonNegative } from "../providers/provider-utils.js";
 import { createLpRebalanceDeliverable } from "../providers/lp-rebalance.js";
 import {
   HEYANON_V3_POOLS,
+  fetchPinnedPancakeV3Position,
 } from "./heyanon-v3pools-adapter.js";
 
 const PositiveDecimalSchema = z.string().regex(/^[1-9]\d*(\.\d+)?$|^0\.\d*[1-9]\d*$/);
@@ -249,16 +250,19 @@ function normalizeExternalRange(
 export async function auditionHeyAnonV3LpJob(
   input: LpRebalanceRequest,
   positionId: string,
-  options: { fetchImpl?: typeof fetch; now?: Date } = {},
+  options: { fetchImpl?: typeof fetch; now?: Date; rpcUrl?: string } = {},
 ): Promise<HeyAnonV3LpJobAssessment> {
   const request = LpRebalanceRequestSchema.parse(input);
   const fetchImpl = options.fetchImpl ?? fetch;
   if (!new RegExp(`^pancake-position-${positionId}-`).test(request.requestId)) {
     throw new Error("The PositionCrew request does not bind the requested position ID");
   }
-  const feeTierBySpacing = new Map([[1, 100], [10, 500], [50, 2_500], [200, 10_000]]);
-  const feeTier = feeTierBySpacing.get(request.constraints.tickSpacing);
-  if (!feeTier) throw new Error("The PositionCrew request uses an unsupported PancakeSwap tick spacing");
+  const pinnedPosition = await fetchPinnedPancakeV3Position(
+    positionId,
+    options.rpcUrl,
+    fetchImpl,
+  );
+  const feeTier = pinnedPosition.fee;
   const args = {
     chainName: "bsc",
     token0: request.token0.address,
@@ -285,6 +289,12 @@ export async function auditionHeyAnonV3LpJob(
     request.marketState.currentTick < upperTick;
   const widthPass = widthTicks >= request.constraints.minimumWidthTicks &&
     widthTicks <= request.constraints.maximumWidthTicks;
+  const positionBinding = pinnedPosition.owner === request.account.toLowerCase() &&
+    pinnedPosition.token0 === request.token0.address.toLowerCase() &&
+    pinnedPosition.token1 === request.token1.address.toLowerCase() &&
+    pinnedPosition.tickLower === request.position.lowerTick &&
+    pinnedPosition.tickUpper === request.position.upperTick &&
+    pinnedPosition.liquidity === request.position.liquidity;
   const priceBps = relativeDifferenceBps(
     Number(priceEnvelope.data.poolPrice),
     Number(request.marketState.token1PriceUsd) / Number(request.marketState.token0PriceUsd),
@@ -293,8 +303,10 @@ export async function auditionHeyAnonV3LpJob(
   const checks = [
     {
       code: "EXACT_POSITION_BINDING",
-      status: "PASS" as const,
-      detail: "The position ID, pool, token pair, range, liquidity, and observation block remain bound by PositionCrew's frozen request.",
+      status: positionBinding ? "PASS" as const : "FAIL" as const,
+      detail: positionBinding
+        ? "The request owner, token pair, ticks, and raw liquidity match an independent position-manager read."
+        : "The caller-supplied position does not match the independent PancakeSwap position-manager read.",
     },
     {
       code: "CURRENT_PRICE_COHERENCE",
@@ -333,13 +345,21 @@ export async function auditionHeyAnonV3LpJob(
       detail: "The disclosed compatibility adapter normalized the range into positioncrew.lp-rebalance.deliverable.v1.",
     },
   ];
-  const eligible = checks.every((check) => check.status === "PASS");
   const normalizedDeliverable = normalizeExternalRange(
     request,
     lowerTick,
     upperTick,
     options.now ?? new Date(),
   );
+  const evidenceAccepted = !normalizedDeliverable.status.startsWith("REFUSED_");
+  checks.push({
+    code: "NORMALIZED_EVIDENCE_GATE",
+    status: evidenceAccepted ? "PASS" : "FAIL",
+    detail: evidenceAccepted
+      ? "The normalized deliverable passed the request freshness, deadline, and source-evidence gate."
+      : `The normalized deliverable refused the request with ${normalizedDeliverable.status}.`,
+  });
+  const eligible = evidenceAccepted && checks.every((check) => check.status === "PASS");
   return {
     schemaVersion: "positioncrew.external-lp-job-assessment.v1",
     adapterId: "positioncrew:mcp:heyanon-v3pools:lp-job:v1",

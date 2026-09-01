@@ -172,7 +172,6 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
         ...request.constraints,
         minimumWidthTicks: 500,
         maximumWidthTicks: 3_000,
-        tickSpacing: 10,
       },
     });
     const result = await auditionHeyAnonV3LpJob(compatibleRequest, positionId, {
@@ -183,5 +182,25 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
     expect(result.eligibleForLpRebalance).toBe(true);
     expect(result.normalizedDeliverable.schemaVersion).toBe("positioncrew.lp-rebalance.deliverable.v1");
     expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("PASS");
+  });
+
+  it("rejects a caller-supplied position that does not match the position manager", async () => {
+    const alteredRequest = LpRebalanceRequestSchema.parse({
+      ...request,
+      position: { ...request.position, liquidity: "1" },
+    });
+    const result = await auditionHeyAnonV3LpJob(alteredRequest, positionId, { fetchImpl });
+    expect(result.checks.find((check) => check.code === "EXACT_POSITION_BINDING")?.status).toBe("FAIL");
+    expect(result.eligibleForLpRebalance).toBe(false);
+  });
+
+  it("does not promote an expired normalized refusal", async () => {
+    const result = await auditionHeyAnonV3LpJob(request, positionId, {
+      fetchImpl,
+      now: new Date("2026-08-30T12:03:00.000Z"),
+    });
+    expect(result.normalizedDeliverable.status).toBe("REFUSED_EXPIRED");
+    expect(result.checks.find((check) => check.code === "NORMALIZED_EVIDENCE_GATE")?.status).toBe("FAIL");
+    expect(result.eligibleForLpRebalance).toBe(false);
   });
 });
