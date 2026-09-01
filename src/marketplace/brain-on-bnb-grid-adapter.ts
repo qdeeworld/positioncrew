@@ -202,6 +202,26 @@ function rawUnsignedIntegerLexemeMatches(source: string | null, value: number): 
     BigInt(source) === BigInt(value);
 }
 
+function compareSignedDecimalLexemes(left: string, right: string): number | null {
+  const parse = (source: string): { units: bigint; power: number } | null => {
+    if (source.length > 256) return null;
+    const match = source.toLowerCase().match(/^(-?)(0|[1-9]\d*)(?:\.(\d+))?(?:e([+-]?\d+))?$/);
+    if (!match?.[2]) return null;
+    const fraction = match[3] ?? "";
+    const exponent = Number(match[4] ?? "0");
+    if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 1000) return null;
+    const sign = match[1] === "-" ? -1n : 1n;
+    return { units: sign * BigInt(`${match[2]}${fraction}`), power: exponent - fraction.length };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return null;
+  const sharedPower = Math.min(a.power, b.power);
+  const leftUnits = a.units * 10n ** BigInt(a.power - sharedPower);
+  const rightUnits = b.units * 10n ** BigInt(b.power - sharedPower);
+  return leftUnits < rightUnits ? -1 : leftUnits > rightUnits ? 1 : 0;
+}
+
 function scanJsonNumericFields(source: string): {
   hasDuplicateKeys: boolean;
   fields: Map<string, Array<string | null>>;
@@ -389,7 +409,7 @@ function recenteredRange(
 export async function auditionBrainOnBnbGrid(
   request: BoundedGridRequest,
   firstParty: BoundedGridDeliverable,
-  options: { fetchImpl?: typeof fetch; now?: Date } = {},
+  options: { fetchImpl?: typeof fetch; now?: Date; completionNow?: () => Date } = {},
 ): Promise<BrainOnBnbGridComparison> {
   const now = options.now ?? new Date();
   const boundary = "Brain on BNB independently replayed live PancakeSwap swaps and supplied a range thesis. PositionCrew bound that evidence to the requested pool and market window, then applied the unchanged capital, liquidity, volatility, fee, slippage, gas, inventory, loss, expiry, and output-contract rules through a disclosed adapter. No payment, authority grant, order placement, swap, or protocol transaction occurred.";
@@ -400,7 +420,11 @@ export async function auditionBrainOnBnbGrid(
     positionCrewDecision: firstParty.decision,
     exactRequestAccepted: false as const,
   };
-  const firstPartyEligible = firstParty.status === "ACTIONABLE" && firstParty.decision === "BUILD_GRID";
+  const actionableAt = (deliverable: BoundedGridDeliverable, at: Date) =>
+    deliverable.status === "ACTIONABLE" &&
+    deliverable.decision === "BUILD_GRID" &&
+    Date.parse(deliverable.expiresAt) > at.getTime() &&
+    Date.parse(request.deadline) > at.getTime();
 
   try {
     const url = new URL(BRAIN_ON_BNB_GRID.endpoint);
@@ -424,6 +448,7 @@ export async function auditionBrainOnBnbGrid(
     }
     const rawResponse = await readResponseTextLimited(response);
     const parsed = BrainGridResponseSchema.parse(JSON.parse(rawResponse));
+    const completedAt = options.completionNow?.() ?? options.now ?? new Date();
     const rawStructure = scanJsonNumericFields(rawResponse);
     const rawJsonKeySafe = !rawStructure.hasDuplicateKeys;
     const rawLexemes = (key: string) => rawStructure.fields.get(key) ?? [];
@@ -522,6 +547,13 @@ export async function auditionBrainOnBnbGrid(
     const declaredCandidateRow = declaredCandidates[0];
     const declaredCandidate = declaredCandidateRow?.candidate;
     const unambiguousDeclaredCandidate = declaredCandidates.length === 1;
+    const declaredBestEconomics = unambiguousDeclaredCandidate && declaredCandidateRow?.netLexeme !== null &&
+      rangeRows.length === parsed.ranges.length &&
+      rangeRows.every(({ netLexeme }) => {
+        if (netLexeme === null || declaredCandidateRow?.netLexeme === null || declaredCandidateRow?.netLexeme === undefined) return false;
+        const comparison = compareSignedDecimalLexemes(declaredCandidateRow.netLexeme, netLexeme);
+        return comparison !== null && comparison >= 0;
+      });
     const providerRangeBinding = unambiguousDeclaredCandidate && declaredCandidate
       ? rawRangeBindsProviderAndBuyer(declaredCandidate)
       : false;
@@ -538,6 +570,7 @@ export async function auditionBrainOnBnbGrid(
       ) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
       if (
+        !declaredBestEconomics ||
         !rawUnsignedIntegerLexemeMatches(inRangeSwapLexeme, candidate.swaps_in_range) ||
         !rawUnsignedIntegerLexemeMatches(totalSwapLexeme, candidate.swaps_total) ||
         !replayActivityIsConsistent(candidate, parsed.measured_window, feesLexeme, windowFeeLexeme) ||
@@ -564,7 +597,7 @@ export async function auditionBrainOnBnbGrid(
               lowerPrice: normalizedRange.lowerPrice,
               upperPrice: normalizedRange.upperPrice,
             },
-          }, now);
+          }, completedAt);
         } catch {
           deliverable = undefined;
         }
@@ -590,11 +623,11 @@ export async function auditionBrainOnBnbGrid(
         declaredCostLexeme,
       );
     const normalizedDeliverable = selected?.deliverable;
-    const exactOutputContract = normalizedDeliverable?.status === "ACTIONABLE" &&
-      normalizedDeliverable.decision === "BUILD_GRID";
+    const exactOutputContract = normalizedDeliverable !== undefined && actionableAt(normalizedDeliverable, completedAt);
     const externalEligible = rawJsonKeySafe && exactChain && exactPool && exactPair && exactCapital && exactFeeTier &&
       exactWindowBlockCount && windowBindsRequest &&
       priceCoherent && rangeInsideBuyerBounds && providerEvidenceSufficient && exactOutputContract;
+    const firstPartyEligible = actionableAt(firstParty, completedAt);
     const liveMatchEligible = externalEligible && firstPartyEligible;
     const checks: BrainOnBnbGridComparison["checks"] = [
       { code: "RAW_JSON_KEY_SAFETY", status: rawJsonKeySafe ? "PASS" : "FAIL", detail: rawJsonKeySafe ? "Every decoded object key is unique within its JSON object." : "At least one JSON object contains duplicate keys after escape decoding, so raw numeric evidence is untrustworthy." },
@@ -649,6 +682,8 @@ export async function auditionBrainOnBnbGrid(
       boundary,
     };
   } catch (error) {
+    const failedAt = options.completionNow?.() ?? options.now ?? new Date();
+    const firstPartyEligible = actionableAt(firstParty, failedAt);
     return {
       ...base,
       outcome: "UNAVAILABLE",

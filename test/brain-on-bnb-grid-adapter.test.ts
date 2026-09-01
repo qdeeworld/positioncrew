@@ -654,6 +654,34 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "EXACT_CAPITAL")?.status).toBe("FAIL");
   });
 
+  it("rejects a declared best range when another row has higher exact net value", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({
+      ranges: providerResponse().ranges.map((range, index) => index === 0
+        ? { ...range, net_after_rebalancing_usd_in_window: 100, fees_usd_in_window: 100.48 }
+        : range),
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
+  it("withholds Live Match when the provider response completes after expiry", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      completionNow: () => new Date("2026-09-01T14:03:07.000Z"),
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse()), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.eligibleForLiveMatch).toBe(false);
+    expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("FAIL");
+    expect(result.checks.find((check) => check.code === "FIRST_PARTY_ACTIONABLE_RESULT")?.status).toBe("FAIL");
+  });
+
   it("does not substitute an adapter-selected range for the provider's declared best range", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const result = await auditionBrainOnBnbGrid(request, firstParty, {
