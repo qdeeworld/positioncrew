@@ -138,6 +138,11 @@ function replayActivityIsConsistent(
     candidate.fees_usd_in_window <= window.fees_the_pool_paid_usd + 0.000001;
 }
 
+function declaredBestWidthPct(value: string): number | null {
+  const match = value.trim().match(/^±(\d+(?:\.\d+)?)%$/);
+  return match ? Number(match[1]) : null;
+}
+
 export async function auditionBrainOnBnbGrid(
   request: BoundedGridRequest,
   firstParty: BoundedGridDeliverable,
@@ -175,6 +180,9 @@ export async function auditionBrainOnBnbGrid(
       parsed.pair.token.address.toLowerCase() === request.baseAsset.address.toLowerCase() &&
       parsed.pair.quote.address.toLowerCase() === request.quoteAsset.address.toLowerCase();
     const exactCapital = Math.abs(parsed.capital_considered_usd - Number(request.constraints.capitalUsd)) < 0.000001;
+    const exactFeeTier = Math.abs(parsed.fee_pct * 100 - request.marketState.venueFeeBps) < 0.000001;
+    const exactWindowBlockCount = parsed.measured_window.blocks ===
+      parsed.measured_window.to_block - parsed.measured_window.from_block + 1;
     const pinnedBlock = requestBlock(request);
     const windowBindsRequest = pinnedBlock !== null &&
       pinnedBlock >= parsed.measured_window.from_block &&
@@ -195,8 +203,10 @@ export async function auditionBrainOnBnbGrid(
         candidate.price_range.high <= buyerUpper * (1 + 25 / 10_000);
     };
     const providerRangeBinding = parsed.ranges.some(rawRangeBindsProviderAndBuyer);
+    const bestWidthPct = declaredBestWidthPct(parsed.best_range_after_paying_to_put_it_back);
     const candidates = parsed.ranges.flatMap((candidate) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
+      if (bestWidthPct === null || Math.abs(candidate.width_pct - bestWidthPct) > 0.000001) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
       if (
         !replayActivityIsConsistent(candidate, parsed.measured_window) ||
@@ -233,17 +243,20 @@ export async function auditionBrainOnBnbGrid(
     const normalizedDeliverable = selected?.deliverable;
     const exactOutputContract = normalizedDeliverable?.status === "ACTIONABLE" &&
       normalizedDeliverable.decision === "BUILD_GRID";
-    const externalEligible = exactPool && exactPair && exactCapital && windowBindsRequest &&
+    const externalEligible = exactPool && exactPair && exactCapital && exactFeeTier &&
+      exactWindowBlockCount && windowBindsRequest &&
       priceCoherent && rangeInsideBuyerBounds && providerEvidenceSufficient && exactOutputContract;
     const firstPartyEligible = firstParty.status === "ACTIONABLE" && firstParty.decision === "BUILD_GRID";
     const liveMatchEligible = externalEligible && firstPartyEligible;
     const checks: BrainOnBnbGridComparison["checks"] = [
       { code: "EXACT_POOL_AND_PAIR", status: exactPool && exactPair ? "PASS" : "FAIL", detail: exactPool && exactPair ? "The provider measured the requested PancakeSwap WBNB/USDT pool." : "The provider result did not bind the requested pool and pair." },
       { code: "EXACT_CAPITAL", status: exactCapital ? "PASS" : "FAIL", detail: exactCapital ? "The replay used the buyer's exact capital amount." : "The replay used a different capital amount." },
+      { code: "EXACT_FEE_TIER", status: exactFeeTier ? "PASS" : "FAIL", detail: exactFeeTier ? "The replay used the same venue fee tier as the pinned buyer request." : "The provider replay and buyer request use different venue fee tiers." },
+      { code: "MEASURED_WINDOW_BLOCK_COUNT", status: exactWindowBlockCount ? "PASS" : "FAIL", detail: exactWindowBlockCount ? "The declared replay block count matches its inclusive endpoints." : "The replay block count is inconsistent with its disclosed endpoints." },
       { code: "MEASURED_WINDOW_BINDING", status: windowBindsRequest ? "PASS" : "FAIL", detail: windowBindsRequest ? "The request's pinned block is inside the provider's disclosed replay window." : "The provider replay window does not bind the request's pinned market observation." },
       { code: "CURRENT_PRICE_COHERENCE", status: priceCoherent ? "PASS" : "FAIL", detail: priceCoherent ? "Provider and PositionCrew prices differ by no more than 25 bps." : "Provider and PositionCrew prices diverge beyond the admitted tolerance." },
       { code: "PROVIDER_RANGE_BINDING", status: providerRangeBinding ? "PASS" : "FAIL", detail: providerRangeBinding ? "At least one returned low/high pair matches its declared width and unit, and remains inside the buyer boundary within the admitted price-coherence tolerance." : "No returned low/high pair binds its declared width, unit, and buyer boundary." },
-      { code: "PROVIDER_RANGE_INSIDE_BUYER_BOUND", status: rangeInsideBuyerBounds ? "PASS" : "FAIL", detail: rangeInsideBuyerBounds ? `A provider-replayed ±${widthPct}% width remains inside the buyer's maximum range after centering on the pinned request price.` : "No provider-replayed width remains inside the buyer boundary and survives the unchanged economics contract." },
+      { code: "PROVIDER_RANGE_INSIDE_BUYER_BOUND", status: rangeInsideBuyerBounds ? "PASS" : "FAIL", detail: rangeInsideBuyerBounds ? `The provider's declared best post-rebalance range, ±${widthPct}%, remains inside the buyer's maximum range after centering on the pinned request price.` : "The provider's declared best post-rebalance range is unavailable, outside the buyer boundary, or fails the unchanged economics contract." },
       { code: "ATTRIBUTABLE_REPLAY_EVIDENCE", status: providerEvidenceSufficient ? "PASS" : "FAIL", detail: providerEvidenceSufficient ? `The admitted width captured at least 100 of ${parsed.measured_window.swaps} replayed swaps, covered at least 10% of the window, earned fees, and preserved positive observed net value after the provider's rebalance-cost model.` : "The provider did not demonstrate meaningful in-range activity and positive replay economics for an admitted width." },
       { code: "EXACT_OUTPUT_CONTRACT", status: exactOutputContract ? "PASS" : "FAIL", detail: exactOutputContract ? "PositionCrew normalized the provider range through the unchanged bounded order, economics, inventory, loss, expiry, and refusal contract." : "The provider thesis did not survive the unchanged PositionCrew grid contract." },
       { code: "FIRST_PARTY_ACTIONABLE_RESULT", status: firstPartyEligible ? "PASS" : "FAIL", detail: firstPartyEligible ? "The first-party provider also returned an actionable grid under the same buyer contract." : "The first-party provider did not return an actionable grid, so PositionCrew cannot claim a two-provider live match." },

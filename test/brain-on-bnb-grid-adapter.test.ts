@@ -65,7 +65,7 @@ function providerResponse(overrides: Record<string, unknown> = {}) {
     capital_considered_usd: 1000,
     measured_window: {
       from_block: 119351000,
-      to_block: 119356000,
+      to_block: 119355999,
       blocks: 5000,
       minutes: 37.5,
       swaps: 10000,
@@ -85,7 +85,7 @@ function providerResponse(overrides: Record<string, unknown> = {}) {
       net_after_rebalancing_usd_in_window: 0.32,
     })),
     best_earning_range_in_this_window: "±0.25%",
-    best_range_after_paying_to_put_it_back: "±1%",
+    best_range_after_paying_to_put_it_back: "±2%",
     rebalance_cost_usd_assumed: 0.48,
     narrowest_range_that_held_the_whole_window: "±1%",
     times_better_than_full_range: 100,
@@ -201,6 +201,41 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.outcome).toBe("INCOMPATIBLE");
     expect(result.eligibleForRangeAssessmentActivation).toBe(false);
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
+  it("rejects a replay from a different fee tier", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse({ fee_pct: 0.05 })), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "EXACT_FEE_TIER")?.status).toBe("FAIL");
+  });
+
+  it("rejects a replay whose declared block count contradicts its endpoints", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse();
+    response.measured_window.blocks = 4000;
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "MEASURED_WINDOW_BLOCK_COUNT")?.status).toBe("FAIL");
+  });
+
+  it("does not substitute an adapter-selected range for the provider's declared best range", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse({
+        best_range_after_paying_to_put_it_back: "±0.75%",
+      })), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.externalRecommendation).toBe("NO_GRID");
+    expect(result.providerRange).toBeNull();
   });
 
   it("binds the replay window to the source used by the market state", async () => {
