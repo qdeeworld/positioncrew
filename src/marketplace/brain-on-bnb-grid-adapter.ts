@@ -250,6 +250,29 @@ function scanJsonNumericFields(source: string): {
   return { hasDuplicateKeys, fields };
 }
 
+async function readResponseTextLimited(response: Response, maximumBytes = 1_000_000): Promise<string> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength && Number(contentLength) > maximumBytes) {
+    throw new Error("Brain on BNB Grid response exceeds the admitted size");
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let result = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytesRead += value.byteLength;
+    if (bytesRead > maximumBytes) {
+      await reader.cancel();
+      throw new Error("Brain on BNB Grid response exceeds the admitted size");
+    }
+    result += decoder.decode(value, { stream: true });
+  }
+  return result + decoder.decode();
+}
+
 function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
   if (value.length > 256) throw new Error("Decimal precision exceeds the admitted bound");
   const [whole, fraction = ""] = value.split(".");
@@ -375,8 +398,7 @@ export async function auditionBrainOnBnbGrid(
       });
     }
     if (!response.ok) throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
-    const rawResponse = await response.text();
-    if (rawResponse.length > 1_000_000) throw new Error("Brain on BNB Grid response exceeds the admitted size");
+    const rawResponse = await readResponseTextLimited(response);
     const parsed = BrainGridResponseSchema.parse(JSON.parse(rawResponse));
     const rawStructure = scanJsonNumericFields(rawResponse);
     const rawJsonKeySafe = !rawStructure.hasDuplicateKeys;
