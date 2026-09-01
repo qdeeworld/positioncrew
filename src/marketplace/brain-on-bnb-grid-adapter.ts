@@ -117,18 +117,6 @@ function priceDifferenceBps(left: number, right: number): number {
   return Math.abs(left - right) / right * 10_000;
 }
 
-function replayEconomicsAreConsistent(
-  candidate: z.infer<typeof RangeSchema>,
-  declaredRebalanceCostUsd: number,
-): boolean {
-  const toleranceUsd = 0.000001;
-  const expectedNetUsd = candidate.fees_usd_in_window - candidate.assumed_rebalance_cost_usd;
-  return Math.abs(candidate.assumed_rebalance_cost_usd - declaredRebalanceCostUsd) <= toleranceUsd &&
-    expectedNetUsd > toleranceUsd &&
-    candidate.net_after_rebalancing_usd_in_window > toleranceUsd &&
-    Math.abs(candidate.net_after_rebalancing_usd_in_window - expectedNetUsd) <= toleranceUsd;
-}
-
 function replayActivityIsConsistent(
   candidate: z.infer<typeof RangeSchema>,
   window: z.infer<typeof BrainGridResponseSchema>["measured_window"],
@@ -202,6 +190,36 @@ function decimalLessThan(left: string, right: string): boolean {
   const a = parseUnsignedDecimal(left);
   const b = parseUnsignedDecimal(right);
   return a.units * b.scale < b.units * a.scale;
+}
+
+function decimalDifferenceEquals(minuend: string, subtrahend: string, result: string): boolean {
+  const a = parseUnsignedDecimal(minuend);
+  const b = parseUnsignedDecimal(subtrahend);
+  const c = parseUnsignedDecimal(result);
+  const differenceNumerator = a.units * b.scale - b.units * a.scale;
+  if (differenceNumerator <= 0n || c.units <= 0n) return false;
+  return differenceNumerator * c.scale === c.units * a.scale * b.scale;
+}
+
+function decimalTimesIntegerEquals(value: string, multiplier: bigint, expected: string): boolean {
+  const a = parseUnsignedDecimal(value);
+  const b = parseUnsignedDecimal(expected);
+  return a.units * multiplier * b.scale === b.units * a.scale;
+}
+
+function replayEconomicsAreConsistent(
+  feesLexeme: string | null,
+  costLexeme: string | null,
+  netLexeme: string | null,
+  declaredCostLexeme: string | null,
+): boolean {
+  if (!feesLexeme || !costLexeme || !netLexeme || !declaredCostLexeme) return false;
+  const fees = numericLexemeToPlainDecimal(feesLexeme);
+  const cost = numericLexemeToPlainDecimal(costLexeme);
+  const net = numericLexemeToPlainDecimal(netLexeme);
+  const declaredCost = numericLexemeToPlainDecimal(declaredCostLexeme);
+  return fees !== null && cost !== null && net !== null && declaredCost !== null &&
+    decimalsEqual(cost, declaredCost) && decimalDifferenceEquals(fees, cost, net);
 }
 
 function rationalDecimal(
@@ -279,7 +297,12 @@ export async function auditionBrainOnBnbGrid(
     const rawResponse = await response.text();
     const parsed = BrainGridResponseSchema.parse(JSON.parse(rawResponse));
     const capitalLexemes = numericFieldLexemes(rawResponse, "capital_considered_usd");
+    const feeTierLexemes = numericFieldLexemes(rawResponse, "fee_pct");
     const widthLexemes = numericFieldLexemes(rawResponse, "width_pct");
+    const rangeFeeLexemes = numericFieldLexemes(rawResponse, "fees_usd_in_window");
+    const rangeCostLexemes = numericFieldLexemes(rawResponse, "assumed_rebalance_cost_usd");
+    const rangeNetLexemes = numericFieldLexemes(rawResponse, "net_after_rebalancing_usd_in_window");
+    const declaredCostLexemes = numericFieldLexemes(rawResponse, "rebalance_cost_usd_assumed");
     const exactChain = request.chainId === 56;
     const exactPool = parsed.pool.toLowerCase() === request.venue.toLowerCase();
     const exactPair =
@@ -291,7 +314,11 @@ export async function auditionBrainOnBnbGrid(
       ? numericLexemeToPlainDecimal(capitalLexemes[0])
       : null;
     const exactCapital = providerCapital !== null && decimalsEqual(providerCapital, request.constraints.capitalUsd);
-    const exactFeeTier = Math.abs(parsed.fee_pct * 100 - request.marketState.venueFeeBps) < 0.000001;
+    const providerFeeTier = feeTierLexemes.length === 1 && feeTierLexemes[0]
+      ? numericLexemeToPlainDecimal(feeTierLexemes[0])
+      : null;
+    const exactFeeTier = providerFeeTier !== null &&
+      decimalTimesIntegerEquals(providerFeeTier, 100n, String(request.marketState.venueFeeBps));
     const exactWindowBlockCount = parsed.measured_window.blocks ===
       parsed.measured_window.to_block - parsed.measured_window.from_block + 1;
     const pinnedBlock = requestBlock(request);
@@ -319,7 +346,13 @@ export async function auditionBrainOnBnbGrid(
     const rangeRows = parsed.ranges.map((candidate, index) => ({
       candidate,
       widthLexeme: widthLexemes.length === parsed.ranges.length ? widthLexemes[index] ?? null : null,
+      feesLexeme: rangeFeeLexemes.length === parsed.ranges.length ? rangeFeeLexemes[index] ?? null : null,
+      costLexeme: rangeCostLexemes.length === parsed.ranges.length ? rangeCostLexemes[index] ?? null : null,
+      netLexeme: rangeNetLexemes.length === parsed.ranges.length ? rangeNetLexemes[index] ?? null : null,
     }));
+    const declaredCostLexeme = declaredCostLexemes.length === 1
+      ? declaredCostLexemes[0] ?? null
+      : null;
     const declaredCandidates = bestWidthPct === null
       ? []
       : rangeRows.filter(({ candidate, widthLexeme }) =>
@@ -337,7 +370,7 @@ export async function auditionBrainOnBnbGrid(
       : false;
     const candidates = !unambiguousDeclaredCandidate || !declaredCandidate
       ? []
-      : [declaredCandidateRow].flatMap(({ candidate, widthLexeme }) => {
+      : [declaredCandidateRow].flatMap(({ candidate, widthLexeme, feesLexeme, costLexeme, netLexeme }) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
       const candidateWidth = widthLexeme ? numericLexemeToPlainDecimal(widthLexeme) : null;
       if (bestWidthPct === null || candidateWidth === null || !decimalsEqual(candidateWidth, bestWidthPct)) return [];
@@ -347,8 +380,7 @@ export async function auditionBrainOnBnbGrid(
         candidate.swaps_in_range < 100 ||
         candidate.share_of_window_in_range_pct < 10 ||
         candidate.fees_usd_in_window <= 0 ||
-        !replayEconomicsAreConsistent(candidate, parsed.rebalance_cost_usd_assumed) ||
-        candidate.net_after_rebalancing_usd_in_window <= 0
+        !replayEconomicsAreConsistent(feesLexeme, costLexeme, netLexeme, declaredCostLexeme)
       ) return [];
       const normalizedRange = recenteredRange(
         request.marketState.midPrice,
@@ -358,17 +390,22 @@ export async function auditionBrainOnBnbGrid(
       );
       if (!normalizedRange) return [];
       const representableRange = decimalLessThan(normalizedRange.lowerPrice, normalizedRange.upperPrice);
-      const deliverable = normalizedRange.fitsBuyerBounds && representableRange
-        ? createBoundedGridDeliverable({
+      let deliverable: BoundedGridDeliverable | undefined;
+      if (normalizedRange.fitsBuyerBounds && representableRange) {
+        try {
+          deliverable = createBoundedGridDeliverable({
             ...request,
             constraints: {
               ...request.constraints,
               lowerPrice: normalizedRange.lowerPrice,
               upperPrice: normalizedRange.upperPrice,
             },
-          }, now)
-        : undefined;
-      return [{ candidate, normalizedRange, deliverable }];
+          }, now);
+        } catch {
+          deliverable = undefined;
+        }
+      }
+      return [{ candidate, normalizedRange, deliverable, feesLexeme, costLexeme, netLexeme }];
     });
     const selected = candidates[0];
     const selectedRange = selected?.candidate;
@@ -377,8 +414,12 @@ export async function auditionBrainOnBnbGrid(
     const providerEvidenceSufficient = Boolean(selectedRange) &&
       parsed.measured_window.swaps >= 100 &&
       replayActivityIsConsistent(selectedRange!, parsed.measured_window) &&
-      replayEconomicsAreConsistent(selectedRange!, parsed.rebalance_cost_usd_assumed) &&
-      selectedRange!.net_after_rebalancing_usd_in_window > 0;
+      replayEconomicsAreConsistent(
+        selected!.feesLexeme,
+        selected!.costLexeme,
+        selected!.netLexeme,
+        declaredCostLexeme,
+      );
     const normalizedDeliverable = selected?.deliverable;
     const exactOutputContract = normalizedDeliverable?.status === "ACTIONABLE" &&
       normalizedDeliverable.decision === "BUILD_GRID";
