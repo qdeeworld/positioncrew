@@ -192,6 +192,13 @@ function decimalLexemesEqualExact(left: string, right: string): boolean {
   return a !== null && b !== null && a.digits === b.digits && a.power === b.power;
 }
 
+function rawUnsignedIntegerLexemeMatches(source: string | null, value: number): boolean {
+  return source !== null &&
+    /^(?:0|[1-9]\d*)$/.test(source) &&
+    Number.isSafeInteger(value) &&
+    BigInt(source) === BigInt(value);
+}
+
 function scanJsonNumericFields(source: string): {
   hasDuplicateKeys: boolean;
   fields: Map<string, Array<string | null>>;
@@ -425,6 +432,12 @@ export async function auditionBrainOnBnbGrid(
     const rangeCostLexemes = rawLexemes("assumed_rebalance_cost_usd");
     const rangeNetLexemes = rawLexemes("net_after_rebalancing_usd_in_window");
     const declaredCostLexemes = rawLexemes("rebalance_cost_usd_assumed");
+    const fromBlockLexemes = rawLexemes("from_block");
+    const toBlockLexemes = rawLexemes("to_block");
+    const blockCountLexemes = rawLexemes("blocks");
+    const windowSwapLexemes = rawLexemes("swaps");
+    const inRangeSwapLexemes = rawLexemes("swaps_in_range");
+    const totalSwapLexemes = rawLexemes("swaps_total");
     const exactChain = request.chainId === 56;
     const exactPool = parsed.pool.toLowerCase() === request.venue.toLowerCase();
     const tokenDecimalLexeme = decimalLexemes[0] ?? null;
@@ -449,9 +462,14 @@ export async function auditionBrainOnBnbGrid(
       : null;
     const exactFeeTier = providerFeeTier !== null &&
       decimalTimesIntegerEquals(providerFeeTier, 100n, String(request.marketState.venueFeeBps));
-    const safeWindowBlocks = Number.isSafeInteger(parsed.measured_window.from_block) &&
-      Number.isSafeInteger(parsed.measured_window.to_block) &&
-      Number.isSafeInteger(parsed.measured_window.blocks);
+    const safeWindowBlocks = fromBlockLexemes.length === 1 &&
+      toBlockLexemes.length === 1 &&
+      blockCountLexemes.length === 1 &&
+      windowSwapLexemes.length === 1 &&
+      rawUnsignedIntegerLexemeMatches(fromBlockLexemes[0] ?? null, parsed.measured_window.from_block) &&
+      rawUnsignedIntegerLexemeMatches(toBlockLexemes[0] ?? null, parsed.measured_window.to_block) &&
+      rawUnsignedIntegerLexemeMatches(blockCountLexemes[0] ?? null, parsed.measured_window.blocks) &&
+      rawUnsignedIntegerLexemeMatches(windowSwapLexemes[0] ?? null, parsed.measured_window.swaps);
     const exactWindowBlockCount = safeWindowBlocks && parsed.measured_window.blocks ===
       parsed.measured_window.to_block - parsed.measured_window.from_block + 1;
     const pinnedBlock = requestBlock(request);
@@ -482,6 +500,8 @@ export async function auditionBrainOnBnbGrid(
       feesLexeme: rangeFeeLexemes.length === parsed.ranges.length ? rangeFeeLexemes[index] ?? null : null,
       costLexeme: rangeCostLexemes.length === parsed.ranges.length ? rangeCostLexemes[index] ?? null : null,
       netLexeme: rangeNetLexemes.length === parsed.ranges.length ? rangeNetLexemes[index] ?? null : null,
+      inRangeSwapLexeme: inRangeSwapLexemes.length === parsed.ranges.length ? inRangeSwapLexemes[index] ?? null : null,
+      totalSwapLexeme: totalSwapLexemes.length === parsed.ranges.length ? totalSwapLexemes[index] ?? null : null,
     }));
     const declaredCostLexeme = declaredCostLexemes.length === 1
       ? declaredCostLexemes[0] ?? null
@@ -503,7 +523,7 @@ export async function auditionBrainOnBnbGrid(
       : false;
     const candidates = !unambiguousDeclaredCandidate || !declaredCandidate
       ? []
-      : [declaredCandidateRow].flatMap(({ candidate, widthLexeme, feesLexeme, costLexeme, netLexeme }) => {
+      : [declaredCandidateRow].flatMap(({ candidate, widthLexeme, feesLexeme, costLexeme, netLexeme, inRangeSwapLexeme, totalSwapLexeme }) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
       const candidateWidth = widthLexeme ? numericLexemeToPlainDecimal(widthLexeme) : null;
       if (
@@ -514,6 +534,8 @@ export async function auditionBrainOnBnbGrid(
       ) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
       if (
+        !rawUnsignedIntegerLexemeMatches(inRangeSwapLexeme, candidate.swaps_in_range) ||
+        !rawUnsignedIntegerLexemeMatches(totalSwapLexeme, candidate.swaps_total) ||
         !replayActivityIsConsistent(candidate, parsed.measured_window, feesLexeme, windowFeeLexeme) ||
         candidate.swaps_in_range < 100 ||
         candidate.share_of_window_in_range_pct < 10 ||
@@ -549,7 +571,7 @@ export async function auditionBrainOnBnbGrid(
     const selectedRange = selected?.candidate;
     const widthPct = selectedRange?.width_pct ?? null;
     const rangeInsideBuyerBounds = selected?.normalizedRange.fitsBuyerBounds === true;
-    const providerEvidenceSufficient = Boolean(selectedRange) &&
+    const providerEvidenceSufficient = safeWindowBlocks && Boolean(selectedRange) &&
       parsed.measured_window.swaps >= 100 &&
       replayActivityIsConsistent(
         selectedRange!,

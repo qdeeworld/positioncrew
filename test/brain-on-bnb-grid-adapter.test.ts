@@ -589,6 +589,36 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.eligibleForLiveMatch).toBe(false);
   });
 
+  it("rejects fractional replay block lexemes that JSON rounds to integers", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse()).replace(
+      '"from_block":119351000',
+      '"from_block":119350999.999999999999',
+    );
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "MEASURED_WINDOW_BLOCK_COUNT")?.status).toBe("FAIL");
+    expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
+  it("rejects fractional swap-count lexemes that JSON rounds to integers", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const raw = JSON.stringify(providerResponse()).replaceAll(
+      '"swaps_in_range":10000',
+      '"swaps_in_range":99.999999999999999999',
+    );
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+    expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
   it("does not substitute an adapter-selected range for the provider's declared best range", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const result = await auditionBrainOnBnbGrid(request, firstParty, {
