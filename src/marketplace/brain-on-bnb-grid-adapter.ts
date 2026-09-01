@@ -154,6 +154,7 @@ function numberToPlainDecimal(value: number): string | null {
 }
 
 function numericLexemeToPlainDecimal(source: string): string | null {
+  if (source.length > 256) return null;
   const normalized = source.toLowerCase();
   if (!/^(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?$/.test(normalized)) return null;
   if (!normalized.includes("e")) return normalized;
@@ -166,6 +167,29 @@ function numericLexemeToPlainDecimal(source: string): string | null {
   if (decimalIndex <= 0) return `0.${"0".repeat(-decimalIndex)}${digits}`;
   if (decimalIndex >= digits.length) return `${digits}${"0".repeat(decimalIndex - digits.length)}`;
   return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+}
+
+function canonicalDecimalLexeme(source: string): { digits: string; power: number } | null {
+  if (source.length > 256) return null;
+  const match = source.toLowerCase().match(/^(0|[1-9]\d*)(?:\.(\d+))?(?:e([+-]?\d+))?$/);
+  if (!match?.[1]) return null;
+  const fraction = match[2] ?? "";
+  const exponent = Number(match[3] ?? "0");
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 1000) return null;
+  let digits = `${match[1]}${fraction}`.replace(/^0+/, "");
+  if (!digits) return { digits: "0", power: 0 };
+  let trailingZeros = 0;
+  while (digits.endsWith("0")) {
+    digits = digits.slice(0, -1);
+    trailingZeros += 1;
+  }
+  return { digits, power: exponent - fraction.length + trailingZeros };
+}
+
+function decimalLexemesEqualExact(left: string, right: string): boolean {
+  const a = canonicalDecimalLexeme(left);
+  const b = canonicalDecimalLexeme(right);
+  return a !== null && b !== null && a.digits === b.digits && a.power === b.power;
 }
 
 function scanJsonNumericFields(source: string): {
@@ -227,6 +251,7 @@ function scanJsonNumericFields(source: string): {
 }
 
 function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
+  if (value.length > 256) throw new Error("Decimal precision exceeds the admitted bound");
   const [whole, fraction = ""] = value.split(".");
   const scale = 10n ** BigInt(fraction.length);
   return { units: BigInt(`${whole}${fraction}`), scale };
@@ -351,6 +376,7 @@ export async function auditionBrainOnBnbGrid(
     }
     if (!response.ok) throw new Error(`Brain on BNB Grid returned HTTP ${response.status}`);
     const rawResponse = await response.text();
+    if (rawResponse.length > 1_000_000) throw new Error("Brain on BNB Grid response exceeds the admitted size");
     const parsed = BrainGridResponseSchema.parse(JSON.parse(rawResponse));
     const rawStructure = scanJsonNumericFields(rawResponse);
     const rawJsonKeySafe = !rawStructure.hasDuplicateKeys;
@@ -423,10 +449,7 @@ export async function auditionBrainOnBnbGrid(
       ? []
       : rangeRows.filter(({ candidate, widthLexeme }) => {
           if (candidate.width_pct === null || candidate.full_range || candidate.price_range === null || widthLexeme === null) return false;
-          const exactWidth = numericLexemeToPlainDecimal(widthLexeme);
-          return exactWidth !== null
-            ? decimalsEqual(exactWidth, bestWidthPct)
-            : Number(bestWidthPct) === candidate.width_pct;
+          return decimalLexemesEqualExact(widthLexeme, bestWidthPct);
         });
     const declaredCandidateRow = declaredCandidates[0];
     const declaredCandidate = declaredCandidateRow?.candidate;
@@ -439,7 +462,12 @@ export async function auditionBrainOnBnbGrid(
       : [declaredCandidateRow].flatMap(({ candidate, widthLexeme, feesLexeme, costLexeme, netLexeme }) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
       const candidateWidth = widthLexeme ? numericLexemeToPlainDecimal(widthLexeme) : null;
-      if (bestWidthPct === null || candidateWidth === null || !decimalsEqual(candidateWidth, bestWidthPct)) return [];
+      if (
+        bestWidthPct === null ||
+        widthLexeme === null ||
+        candidateWidth === null ||
+        !decimalLexemesEqualExact(widthLexeme, bestWidthPct)
+      ) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
       if (
         !replayActivityIsConsistent(candidate, parsed.measured_window, feesLexeme, windowFeeLexeme) ||

@@ -480,6 +480,41 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.eligibleForLiveMatch).toBe(false);
   });
 
+  it("does not associate a rounded exponent width with a different declared claim", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const bestWidth = `0.${"0".repeat(100)}1`;
+    const raw = JSON.stringify(providerResponse({
+      best_range_after_paying_to_put_it_back: `±${bestWidth}%`,
+      ranges: [{
+        ...providerResponse().ranges[0],
+        width_pct: 1e-101,
+        price_range: { low: 687.7, high: 687.7, unit: "USDT per WBNB" },
+      }],
+    })).replace('"width_pct":1e-101', '"width_pct":1.00000000000000001e-101');
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.externalRecommendation).toBe("NO_GRID");
+    expect(result.providerRange).toBeNull();
+  });
+
+  it("rejects oversized decimal mantissas before fixed-point conversion", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const oversized = `0.${"0".repeat(300)}1`;
+    const raw = JSON.stringify(providerResponse()).replace(
+      '"fees_the_pool_paid_usd":400',
+      `"fees_the_pool_paid_usd":${oversized}`,
+    );
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(raw, { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
+  });
+
   it("binds token decimals as part of the requested pair identity", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse();
