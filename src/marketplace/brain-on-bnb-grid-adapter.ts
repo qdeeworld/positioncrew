@@ -199,13 +199,24 @@ export async function auditionBrainOnBnbGrid(
       const expectedUpper = parsed.price_now * (1 + candidate.width_pct / 100);
       const expectedUnit = `${request.quoteAsset.symbol} per ${request.baseAsset.symbol}`.toLowerCase();
       return candidate.price_range.unit.toLowerCase() === expectedUnit &&
+        candidate.price_range.low < parsed.price_now &&
+        parsed.price_now < candidate.price_range.high &&
         priceDifferenceBps(candidate.price_range.low, expectedLower) <= 5 &&
         priceDifferenceBps(candidate.price_range.high, expectedUpper) <= 5 &&
         candidate.price_range.low >= buyerLower * (1 - 25 / 10_000) &&
         candidate.price_range.high <= buyerUpper * (1 + 25 / 10_000);
     };
-    const providerRangeBinding = parsed.ranges.some(rawRangeBindsProviderAndBuyer);
     const bestWidthPct = declaredBestWidthPct(parsed.best_range_after_paying_to_put_it_back);
+    const declaredCandidate = bestWidthPct === null
+      ? undefined
+      : parsed.ranges.find((candidate) =>
+          candidate.width_pct !== null &&
+          !candidate.full_range &&
+          candidate.price_range !== null &&
+          Math.abs(candidate.width_pct - bestWidthPct) <= 0.000001);
+    const providerRangeBinding = declaredCandidate
+      ? rawRangeBindsProviderAndBuyer(declaredCandidate)
+      : false;
     const candidates = parsed.ranges.flatMap((candidate) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
       if (bestWidthPct === null || Math.abs(candidate.width_pct - bestWidthPct) > 0.000001) return [];
@@ -267,19 +278,19 @@ export async function auditionBrainOnBnbGrid(
     return {
       ...base,
       outcome: liveMatchEligible ? "SEMANTICALLY_COMPARABLE" : "INCOMPATIBLE",
-      externalRecommendation: selectedRange ? "BUILD_GRID" : "NO_GRID",
+      externalRecommendation: declaredCandidate ? "BUILD_GRID" : "NO_GRID",
       externalState: "RANGE_REPLAY_READY",
       eligibleForRangeAssessmentActivation: externalEligible,
       eligibleForGridSelection: liveMatchEligible,
       eligibleForLiveMatch: liveMatchEligible,
       attributable: exactPool && exactPair,
       adapterNormalized: Boolean(normalizedDeliverable),
-      providerRange: selected && widthPct !== null
+      providerRange: declaredCandidate && declaredCandidate.width_pct !== null && declaredCandidate.price_range
         ? {
-            widthPct,
-            lowerPrice: selected.candidate.price_range!.low,
-            upperPrice: selected.candidate.price_range!.high,
-            netAfterRebalancingUsdInWindow: selected.candidate.net_after_rebalancing_usd_in_window,
+            widthPct: declaredCandidate.width_pct,
+            lowerPrice: declaredCandidate.price_range.low,
+            upperPrice: declaredCandidate.price_range.high,
+            netAfterRebalancingUsdInWindow: declaredCandidate.net_after_rebalancing_usd_in_window,
           }
         : null,
       measuredWindow: {

@@ -145,6 +145,28 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.checks.find((check) => check.code === "PROVIDER_RANGE_BINDING")?.status).toBe("FAIL");
   });
 
+  it("rejects crossed raw bounds before normalization", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse({
+      best_range_after_paying_to_put_it_back: "±0.01%",
+      ranges: [{
+        ...providerResponse().ranges[0],
+        width_pct: 0.01,
+        price_range: { low: 687.71, high: 687.69, unit: "USDT per WBNB" },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.externalRecommendation).toBe("BUILD_GRID");
+    expect(result.providerRange?.lowerPrice).toBe(687.71);
+    expect(result.providerRange?.upperPrice).toBe(687.69);
+    expect(result.checks.find((check) => check.code === "PROVIDER_RANGE_BINDING")?.status).toBe("FAIL");
+    expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
   it("rejects replay ranges with no demonstrated in-range activity", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse({
@@ -179,6 +201,8 @@ describe("Brain on BNB Grid adapter", () => {
       fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
     });
     expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.externalRecommendation).toBe("BUILD_GRID");
+    expect(result.providerRange).not.toBeNull();
     expect(result.eligibleForRangeAssessmentActivation).toBe(false);
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_REPLAY_EVIDENCE")?.status).toBe("FAIL");
   });
