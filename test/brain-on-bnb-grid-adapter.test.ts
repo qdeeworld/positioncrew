@@ -187,6 +187,53 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.eligibleForLiveMatch).toBe(false);
   });
 
+  it("requires an exact decimal match for the provider's declared best width", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const width = 0.0000019;
+    const response = providerResponse({
+      best_range_after_paying_to_put_it_back: "±0.000001%",
+      ranges: [{
+        ...providerResponse().ranges[0],
+        width_pct: width,
+        price_range: {
+          low: 687.7 * (1 - width / 100),
+          high: 687.7 * (1 + width / 100),
+          unit: "USDT per WBNB",
+        },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.providerRange).toBeNull();
+    expect(result.eligibleForLiveMatch).toBe(false);
+  });
+
+  it("handles exponent-form provider widths without classifying the provider unavailable", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const width = 1e-7;
+    const response = providerResponse({
+      best_range_after_paying_to_put_it_back: "±0.0000001%",
+      ranges: [{
+        ...providerResponse().ranges[0],
+        width_pct: width,
+        price_range: {
+          low: 687.7 * (1 - width / 100),
+          high: 687.7 * (1 + width / 100),
+          unit: "USDT per WBNB",
+        },
+      }],
+    });
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).not.toBe("UNAVAILABLE");
+    expect(result.providerRange?.widthPct).toBe(width);
+  });
+
   it("rejects replay ranges with no demonstrated in-range activity", async () => {
     const firstParty = createBoundedGridDeliverable(request, now);
     const response = providerResponse({
@@ -274,6 +321,34 @@ describe("Brain on BNB Grid adapter", () => {
     });
     expect(result.outcome).toBe("INCOMPATIBLE");
     expect(result.checks.find((check) => check.code === "EXACT_FEE_TIER")?.status).toBe("FAIL");
+  });
+
+  it("requires exact fixed-point replay capital", async () => {
+    const smallCapitalRequest: BoundedGridRequest = {
+      ...request,
+      constraints: { ...request.constraints, capitalUsd: "0.0000100" },
+    };
+    const firstParty = createBoundedGridDeliverable(smallCapitalRequest, now);
+    const result = await auditionBrainOnBnbGrid(smallCapitalRequest, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(providerResponse({
+        capital_considered_usd: 0.0000109,
+      })), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "EXACT_CAPITAL")?.status).toBe("FAIL");
+  });
+
+  it("binds token decimals as part of the requested pair identity", async () => {
+    const firstParty = createBoundedGridDeliverable(request, now);
+    const response = providerResponse();
+    response.pair.token.decimals = 8;
+    const result = await auditionBrainOnBnbGrid(request, firstParty, {
+      now,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
+    });
+    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.checks.find((check) => check.code === "EXACT_POOL_AND_PAIR")?.status).toBe("FAIL");
   });
 
   it("rejects raw price deviations just beyond the declared tolerance", async () => {

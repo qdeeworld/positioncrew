@@ -141,15 +141,36 @@ function replayActivityIsConsistent(
     candidate.fees_usd_in_window <= window.fees_the_pool_paid_usd + 0.000001;
 }
 
-function declaredBestWidthPct(value: string): number | null {
+function declaredBestWidthPct(value: string): string | null {
   const match = value.trim().match(/^±(\d+(?:\.\d+)?)%$/);
-  return match ? Number(match[1]) : null;
+  return match?.[1] ?? null;
+}
+
+function numberToPlainDecimal(value: number): string | null {
+  if (!Number.isFinite(value) || value < 0) return null;
+  const source = String(value).toLowerCase();
+  if (!source.includes("e")) return source;
+  const [coefficient, exponentText] = source.split("e");
+  const exponent = Number(exponentText);
+  if (!coefficient || !Number.isInteger(exponent)) return null;
+  const [whole = "", fraction = ""] = coefficient.split(".");
+  const digits = `${whole}${fraction}`;
+  const decimalIndex = whole.length + exponent;
+  if (decimalIndex <= 0) return `0.${"0".repeat(-decimalIndex)}${digits}`;
+  if (decimalIndex >= digits.length) return `${digits}${"0".repeat(decimalIndex - digits.length)}`;
+  return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
 }
 
 function parseUnsignedDecimal(value: string): { units: bigint; scale: bigint } {
   const [whole, fraction = ""] = value.split(".");
   const scale = 10n ** BigInt(fraction.length);
   return { units: BigInt(`${whole}${fraction}`), scale };
+}
+
+function decimalsEqual(left: string, right: string): boolean {
+  const a = parseUnsignedDecimal(left);
+  const b = parseUnsignedDecimal(right);
+  return a.units * b.scale === b.units * a.scale;
 }
 
 function rationalDecimal(
@@ -174,7 +195,9 @@ function recenteredRange(
   buyerUpper: string,
 ): { fitsBuyerBounds: boolean; lowerPrice: string; upperPrice: string } | null {
   const mid = parseUnsignedDecimal(midPrice);
-  const width = parseUnsignedDecimal(String(widthPct));
+  const widthText = numberToPlainDecimal(widthPct);
+  if (!widthText) return null;
+  const width = parseUnsignedDecimal(widthText);
   const lower = parseUnsignedDecimal(buyerLower);
   const upper = parseUnsignedDecimal(buyerUpper);
   const hundredAtWidthScale = 100n * width.scale;
@@ -227,8 +250,12 @@ export async function auditionBrainOnBnbGrid(
     const exactPool = parsed.pool.toLowerCase() === request.venue.toLowerCase();
     const exactPair =
       parsed.pair.token.address.toLowerCase() === request.baseAsset.address.toLowerCase() &&
-      parsed.pair.quote.address.toLowerCase() === request.quoteAsset.address.toLowerCase();
-    const exactCapital = Math.abs(parsed.capital_considered_usd - Number(request.constraints.capitalUsd)) < 0.000001;
+      parsed.pair.token.decimals === request.baseAsset.decimals &&
+      parsed.pair.quote.address.toLowerCase() === request.quoteAsset.address.toLowerCase() &&
+      parsed.pair.quote.decimals === request.quoteAsset.decimals;
+    const providerCapital = numberToPlainDecimal(parsed.capital_considered_usd);
+    const exactCapital = providerCapital !== null &&
+      decimalsEqual(providerCapital, request.constraints.capitalUsd);
     const exactFeeTier = Math.abs(parsed.fee_pct * 100 - request.marketState.venueFeeBps) < 0.000001;
     const exactWindowBlockCount = parsed.measured_window.blocks ===
       parsed.measured_window.to_block - parsed.measured_window.from_block + 1;
@@ -260,7 +287,8 @@ export async function auditionBrainOnBnbGrid(
           candidate.width_pct !== null &&
           !candidate.full_range &&
           candidate.price_range !== null &&
-          Math.abs(candidate.width_pct - bestWidthPct) <= 0.000001);
+          numberToPlainDecimal(candidate.width_pct) !== null &&
+          decimalsEqual(numberToPlainDecimal(candidate.width_pct)!, bestWidthPct));
     const declaredCandidate = declaredCandidates[0];
     const unambiguousDeclaredCandidate = declaredCandidates.length === 1;
     const providerRangeBinding = unambiguousDeclaredCandidate && declaredCandidate
@@ -270,7 +298,8 @@ export async function auditionBrainOnBnbGrid(
       ? []
       : [declaredCandidate].flatMap((candidate) => {
       if (candidate.width_pct === null || candidate.full_range || !candidate.price_range) return [];
-      if (bestWidthPct === null || Math.abs(candidate.width_pct - bestWidthPct) > 0.000001) return [];
+      const candidateWidth = numberToPlainDecimal(candidate.width_pct);
+      if (bestWidthPct === null || candidateWidth === null || !decimalsEqual(candidateWidth, bestWidthPct)) return [];
       if (!rawRangeBindsProviderAndBuyer(candidate)) return [];
       if (
         !replayActivityIsConsistent(candidate, parsed.measured_window) ||
