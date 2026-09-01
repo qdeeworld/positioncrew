@@ -1510,6 +1510,7 @@ async function createFreshMarketplaceHire(
           const firstParty = createBoundedGridDeliverable(parsed.request, new Date(createdAt));
           const comparison = await auditionBrainOnBnbGrid(parsed.request, firstParty, {
             now: new Date(createdAt),
+            completionNow: () => new Date(),
           });
           return {
             schemaVersion: "positioncrew.external-grid-comparison-summary.v1" as const,
