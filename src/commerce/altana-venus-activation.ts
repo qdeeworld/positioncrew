@@ -66,10 +66,26 @@ export interface AltanaVenusExecutionEvidence {
   };
 }
 
+export type AltanaVenusSubmittedExecution = Omit<
+  AltanaVenusExecutionEvidence,
+  "confirmedBlockNumber" | "vTokenBalanceAfter" | "vTokenDelta"
+>;
+
 export type AltanaVenusConfirmedExecution = Omit<
   AltanaVenusExecutionEvidence,
   "vTokenBalanceAfter" | "vTokenDelta"
 >;
+
+export class AltanaSubmissionPersistenceError extends Error {
+  readonly code = "ALTANA_SUBMISSION_PERSISTENCE_FAILED";
+  constructor(
+    readonly submission: AltanaVenusSubmittedExecution,
+    options?: ErrorOptions,
+  ) {
+    super("A submitted transaction could not yet be persisted", options);
+    this.name = "AltanaSubmissionPersistenceError";
+  }
+}
 
 export class AltanaConfirmationPersistenceError extends Error {
   readonly code = "ALTANA_CONFIRMATION_PERSISTENCE_FAILED";
@@ -138,6 +154,7 @@ export function publicAltanaVenusSession(serialized: string, now = Date.now()) {
 
 export async function executeAltanaVenusActivation(
   serializedSession: string,
+  onSubmitted: (evidence: AltanaVenusSubmittedExecution) => Promise<void>,
   onConfirmed: (evidence: AltanaVenusConfirmedExecution) => Promise<void>,
 ): Promise<AltanaVenusExecutionEvidence> {
   const { session, grantTransactionHash } = parseAltanaVenusSessionSecret(serializedSession);
@@ -158,9 +175,7 @@ export async function executeAltanaVenusActivation(
   if (execution.status !== "CONFIRMED" || !execution.transactionHash) {
     throw new Error(`ALTANA_EXECUTION_NOT_CONFIRMED:${execution.status}`);
   }
-  const receipt = await rpc.waitForTransactionReceipt({ hash: execution.transactionHash, timeout: 60_000 });
-  if (receipt.status !== "success") throw new Error("ALTANA_EXECUTION_REVERTED");
-  const confirmed: AltanaVenusConfirmedExecution = {
+  const submitted: AltanaVenusSubmittedExecution = {
     chainId: 97,
     actor: ALTANA_VENUS_ACTOR,
     target: ALTANA_VENUS_VBNB,
@@ -169,7 +184,6 @@ export async function executeAltanaVenusActivation(
     transactionHash: execution.transactionHash,
     callsId: execution.callsId,
     beforeBlockNumber: beforeBlockNumber.toString(),
-    confirmedBlockNumber: receipt.blockNumber.toString(),
     vTokenBalanceBefore: before.toString(),
     session: {
       publicKey: session.publicKey,
@@ -182,11 +196,26 @@ export async function executeAltanaVenusActivation(
     },
   };
   try {
+    await onSubmitted(submitted);
+  } catch (cause) {
+    throw new AltanaSubmissionPersistenceError(submitted, { cause });
+  }
+  const confirmed = await confirmAltanaVenusSubmittedExecution(submitted);
+  try {
     await onConfirmed(confirmed);
   } catch (cause) {
     throw new AltanaConfirmationPersistenceError(confirmed, { cause });
   }
   return completeAltanaVenusExecutionEvidence(confirmed);
+}
+
+export async function confirmAltanaVenusSubmittedExecution(
+  submitted: AltanaVenusSubmittedExecution,
+): Promise<AltanaVenusConfirmedExecution> {
+  const rpc = createPublicClient({ chain: bscTestnet, transport: http(BNB_TESTNET.publicRpcUrl) });
+  const receipt = await rpc.waitForTransactionReceipt({ hash: submitted.transactionHash, timeout: 60_000 });
+  if (receipt.status !== "success") throw new Error("ALTANA_EXECUTION_REVERTED");
+  return { ...submitted, confirmedBlockNumber: receipt.blockNumber.toString() };
 }
 
 export async function completeAltanaVenusExecutionEvidence(

@@ -39,7 +39,9 @@ import {
   ALTANA_VENUS_DAILY_ACTIVATION_LIMIT,
   AltanaVenusActivationRequestSchema,
   AltanaConfirmationPersistenceError,
+  AltanaSubmissionPersistenceError,
   completeAltanaVenusExecutionEvidence,
+  confirmAltanaVenusSubmittedExecution,
   executeAltanaVenusActivation,
   publicAltanaVenusSession,
 } from "../src/commerce/altana-venus-activation.js";
@@ -2048,16 +2050,32 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
   let claimed = existing;
   let evidence: Awaited<ReturnType<typeof executeAltanaVenusActivation>>;
   try {
-    if (!env.ALTANA_VENUS_SESSION) throw new Error("ALTANA_SESSION_UNAVAILABLE");
     if (existing?.state === "CHAIN_CONFIRMED" && existing.confirmedExecution) {
       evidence = await completeAltanaVenusExecutionEvidence(
         existing.confirmedExecution as Parameters<typeof completeAltanaVenusExecutionEvidence>[0],
       );
+    } else if (existing?.state === "CHAIN_SUBMITTED" && existing.confirmedExecution) {
+      const confirmation = await confirmAltanaVenusSubmittedExecution(
+        existing.confirmedExecution as Parameters<typeof confirmAltanaVenusSubmittedExecution>[0],
+      );
+      await store.persistChainConfirmed({
+        activationId,
+        executionJson: canonicalJson(confirmation),
+        executionHash: await sha256Commitment(confirmation),
+      });
+      evidence = await completeAltanaVenusExecutionEvidence(confirmation);
     } else {
+      if (!env.ALTANA_VENUS_SESSION) throw new Error("ALTANA_SESSION_UNAVAILABLE");
       const claim = await store.claim(activationId, new Date().toISOString());
       if (!claim.claimed || !claim.activation) return;
       claimed = claim.activation;
-      evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION, async (confirmation) => {
+      evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION, async (submission) => {
+        await store.persistChainSubmitted({
+          activationId,
+          executionJson: canonicalJson(submission),
+          executionHash: await sha256Commitment(submission),
+        });
+      }, async (confirmation) => {
         await store.persistChainConfirmed({
           activationId,
           executionJson: canonicalJson(confirmation),
@@ -2066,7 +2084,24 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
       });
     }
   } catch (error) {
-    if (error instanceof AltanaConfirmationPersistenceError) {
+    if (error instanceof AltanaSubmissionPersistenceError) {
+      try {
+        await store.persistChainSubmitted({
+          activationId,
+          executionJson: canonicalJson(error.submission),
+          executionHash: await sha256Commitment(error.submission),
+        });
+      } catch (persistenceError) {
+        console.error(JSON.stringify({
+          level: "error",
+          event: "positioncrew.altana.chain_submission_persistence_deferred",
+          activationId,
+          transactionHash: error.submission.transactionHash,
+          errorMessage: persistenceError instanceof Error ? persistenceError.message : "Unknown persistence failure",
+        }));
+      }
+      return;
+    } else if (error instanceof AltanaConfirmationPersistenceError) {
       try {
         await store.persistChainConfirmed({
           activationId,
@@ -2086,7 +2121,7 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
       }
     } else {
     const current = await store.get(activationId);
-    if (current?.state === "CHAIN_CONFIRMED") return;
+    if (current?.state === "CHAIN_SUBMITTED" || current?.state === "CHAIN_CONFIRMED") return;
     const code = activationErrorCode(error);
     const message = error instanceof Error ? error.message : "The bounded action failed closed";
     await store.fail(activationId, code, message, new Date().toISOString());
@@ -2218,7 +2253,7 @@ async function createAltanaVenusActivation(
   const store = altanaActivationStore(env);
   const prior = await store.getBySourceReceipt(parsed.sourceReceiptId);
   if (prior) {
-    if (prior.state === "CREATED" || prior.state === "CHAIN_CONFIRMED" || prior.state === "CONFIRMED") {
+    if (prior.state === "CREATED" || prior.state === "CHAIN_SUBMITTED" || prior.state === "CHAIN_CONFIRMED" || prior.state === "CONFIRMED") {
       context.waitUntil(finishAltanaVenusActivation(env, prior.activationId));
       return json(prior, 202);
     }
@@ -2253,7 +2288,7 @@ async function getAltanaVenusActivation(
   const store = altanaActivationStore(env);
   let activation = await store.get(activationId);
   if (!activation) return apiError(404, "ACTIVATION_NOT_FOUND", ["Unknown activation ID."]);
-  if (activation.state === "CREATED" || activation.state === "CHAIN_CONFIRMED" || activation.state === "CONFIRMED") {
+  if (activation.state === "CREATED" || activation.state === "CHAIN_SUBMITTED" || activation.state === "CHAIN_CONFIRMED" || activation.state === "CONFIRMED") {
     context.waitUntil(finishAltanaVenusActivation(env, activationId));
   } else if (activation.state === "RUNNING") {
     const cutoff = new Date(Date.now() - 5 * 60_000).toISOString();

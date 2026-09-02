@@ -1,6 +1,6 @@
 import type { D1Database } from "./d1-marketplace-store.js";
 
-export type AltanaActivationState = "CREATED" | "RUNNING" | "CHAIN_CONFIRMED" | "CONFIRMED" | "COMPLETED" | "FAILED";
+export type AltanaActivationState = "CREATED" | "RUNNING" | "CHAIN_SUBMITTED" | "CHAIN_CONFIRMED" | "CONFIRMED" | "COMPLETED" | "FAILED";
 
 export interface AltanaActivationRecord {
   schemaVersion: "positioncrew.altana-venus-activation.v1";
@@ -190,9 +190,21 @@ export class AltanaVenusActivationStore {
   }): Promise<void> {
     const result = await this.db.prepare(`UPDATE altana_venus_activations
       SET state = 'CHAIN_CONFIRMED', confirmed_execution_json = ?, confirmed_execution_hash = ?
-      WHERE activation_id = ? AND state = 'RUNNING'`)
+      WHERE activation_id = ? AND state = 'CHAIN_SUBMITTED'`)
       .bind(input.executionJson, input.executionHash, input.activationId).run();
     if ((result.meta.changes ?? 0) !== 1) throw new Error("ACTIVATION_CHAIN_CONFIRMATION_PERSISTENCE_RACE");
+  }
+
+  async persistChainSubmitted(input: {
+    activationId: string;
+    executionJson: string;
+    executionHash: string;
+  }): Promise<void> {
+    const result = await this.db.prepare(`UPDATE altana_venus_activations
+      SET state = 'CHAIN_SUBMITTED', confirmed_execution_json = ?, confirmed_execution_hash = ?
+      WHERE activation_id = ? AND state = 'RUNNING'`)
+      .bind(input.executionJson, input.executionHash, input.activationId).run();
+    if ((result.meta.changes ?? 0) !== 1) throw new Error("ACTIVATION_CHAIN_SUBMISSION_PERSISTENCE_RACE");
   }
 
   async finalizeConfirmed(activationId: string, completedAt: string): Promise<void> {
