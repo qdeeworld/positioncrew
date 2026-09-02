@@ -273,7 +273,7 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
       <div className="capital-check-intro">
         <span className="page-kicker">Position first · provider second</span>
         <h2 id="capital-check-title">Find the job. Then prove who can handle it.</h2>
-        <p>Enter a public address once. PositionCrew finds current capital jobs and shows the providers available to audition. Opening a job performs a fresh read, pins that exact request, and then compares providers. Nothing is signed or moved.</p>
+        <p>Enter a public address once. PositionCrew finds current capital jobs and shows the providers available to audition. The job workflow then guides you to load and pin fresh evidence before comparison; LP requires Inspect, then Use live position. Nothing is signed or moved.</p>
         <div className="capital-check-trust"><ShieldCheck size={15} aria-hidden="true" /> Public reads only · no wallet connection · no transaction</div>
       </div>
 
@@ -301,7 +301,7 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
       {scanning && <div className="capital-check-progress" role="status"><span /><p><strong>Reading current BSC state</strong>Venus account, stable-yield markets, PancakeSwap market{positionId.trim() ? ", and the supplied LP NFT" : ""}.</p></div>}
       {cards && (
         <div className="capital-check-results" aria-live="polite">
-          <div className="capital-check-results-head"><div>{readyCount > 0 ? <CheckCircle2 size={17} aria-hidden="true" /> : <AlertTriangle size={17} aria-hidden="true" />}<span><strong>{readyCount > 0 ? "Jobs found. Now choose who handles them." : "No current jobs could be determined."}</strong><small>{readyCount > 0 ? "Each route performs a fresh pinned read before auditioning implemented providers." : "Every current read failed or returned no routable input. Retry before choosing a provider."}</small></span></div><span>{readyCount}/4 ready</span></div>
+          <div className="capital-check-results-head"><div>{readyCount > 0 ? <CheckCircle2 size={17} aria-hidden="true" /> : <AlertTriangle size={17} aria-hidden="true" />}<span><strong>{readyCount > 0 ? "Jobs found. Now choose who handles them." : "No current jobs could be determined."}</strong><small>{readyCount > 0 ? "Each job shows the steps required to load and pin fresh evidence before provider audition." : "Every current read failed or returned no routable input. Retry before choosing a provider."}</small></span></div><span>{readyCount}/4 ready</span></div>
           <div className="capital-check-grid">
             {cards.map((card) => {
               const task = TASKS.find((candidate) => candidate.id === card.service);
