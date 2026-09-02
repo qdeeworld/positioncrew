@@ -516,7 +516,7 @@ export async function verifyLiveAltanaVenusSession(
     wildcardCallCheckerInfosRaw,
     wildcardExecuteInfosRaw,
     wildcardSpendInfosRaw,
-  ].reduce((count, value) => count + (Array.isArray(value) ? value.length : 0), 0);
+  ].reduce<number>((count, value) => count + (Array.isArray(value) ? value.length : 0), 0);
   if (wildcardRuleCount !== 0) throw new Error("ALTANA_SESSION_WILDCARD_SCOPE_MISMATCH");
   const spendInfos = Array.isArray(spendInfosRaw) ? spendInfosRaw : [];
   if (spendInfos.length !== 1) throw new Error("ALTANA_SESSION_SPEND_SCOPE_MISMATCH");
