@@ -949,7 +949,7 @@ test("capital check turns current positions into truthful provider routes", asyn
   await page.locator(".capital-check-form").getByRole("button", { name: "Check my BSC capital" }).click();
 
   await expect(page.getByText("Your capital desk is ready.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Position found", { exact: true })).toBeVisible();
+  await expect(page.getByText("Current state loaded", { exact: true })).toBeVisible();
   await expect(page.getByText("Check providers next", { exact: true })).toBeVisible();
   await expect(page.getByText("Preserve the result", { exact: true })).toBeVisible();
   for (const summary of await page.locator(".capital-check-provider-proof summary").all()) await summary.click();
