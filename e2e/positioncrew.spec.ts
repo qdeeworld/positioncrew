@@ -950,8 +950,8 @@ test("capital check turns current positions into truthful provider routes", asyn
 
   await expect(page.getByText("Your capital desk is ready.", { exact: true })).toBeVisible();
   await expect(page.getByText("Position found", { exact: true })).toBeVisible();
-  await expect(page.getByText("Providers checked", { exact: true })).toBeVisible();
-  await expect(page.getByText("Result preserved", { exact: true })).toBeVisible();
+  await expect(page.getByText("Check providers next", { exact: true })).toBeVisible();
+  await expect(page.getByText("Preserve the result", { exact: true })).toBeVisible();
   for (const summary of await page.locator(".capital-check-provider-proof summary").all()) await summary.click();
   await expect(page.getByText("PositionCrew Rescue + AiKi Venus Guardian", { exact: true })).toBeVisible();
   await expect(page.getByText("1 rescue provider · 1 monitoring cross-check", { exact: true })).toBeVisible();

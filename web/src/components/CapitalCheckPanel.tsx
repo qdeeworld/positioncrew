@@ -308,10 +308,10 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
         <div className="capital-check-results" aria-live="polite">
           <div className="capital-check-results-head"><div>{readyCount > 0 ? <CheckCircle2 size={17} aria-hidden="true" /> : <AlertTriangle size={17} aria-hidden="true" />}<span><strong>{readyCount > 0 ? "Your capital desk is ready." : "No current jobs could be determined."}</strong><small>{readyCount > 0 ? "Start with the position that needs attention, then review the provider decision before hiring." : "Every current read failed or returned no routable input. Retry before choosing a provider."}</small></span></div><span>{readyCount}/4 ready</span></div>
           {readyCount > 0 && (
-            <ol className="capital-check-journey" aria-label="How PositionCrew handles a capital job">
-              <li><span>1</span><strong>Position found</strong><small>Current BSC state</small></li>
-              <li><span>2</span><strong>Providers checked</strong><small>Same exact job</small></li>
-              <li><span>3</span><strong>Result preserved</strong><small>Plan or refusal</small></li>
+            <ol className="capital-check-journey" aria-label="What happens after this capital scan">
+              <li data-state="complete"><span>1</span><strong>Position found</strong><small>Current BSC state loaded</small></li>
+              <li data-state="upcoming"><span>2</span><strong>Check providers next</strong><small>After you open a job</small></li>
+              <li data-state="upcoming"><span>3</span><strong>Preserve the result</strong><small>After a provider runs</small></li>
             </ol>
           )}
           <div className="capital-check-grid">

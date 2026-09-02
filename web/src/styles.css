@@ -338,6 +338,8 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .capital-check-journey li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 1px 8px; align-items: center; min-width: 0; padding: 11px 13px; border-right: 1px solid #d8e2dc; }
 .capital-check-journey li:last-child { border-right: 0; }
 .capital-check-journey li > span { grid-row: 1 / 3; display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: white; background: var(--green); font-size: 9px; font-weight: 850; }
+.capital-check-journey li[data-state="upcoming"] > span { border: 1px solid #aebbb5; color: var(--muted); background: white; }
+.capital-check-journey li[data-state="upcoming"] strong { color: var(--ink-soft); }
 .capital-check-journey strong { font-size: 10px; }
 .capital-check-journey small { color: var(--muted); font-size: 8px; }
 .capital-check-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
