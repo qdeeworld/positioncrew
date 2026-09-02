@@ -343,7 +343,7 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .capital-check-journey strong { font-size: 10px; }
 .capital-check-journey small { color: var(--muted); font-size: 8px; }
 .capital-check-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.capital-check-card { display: grid; grid-template-rows: auto auto auto auto auto auto 1fr; gap: 10px; min-width: 0; padding: 15px; border: 1px solid var(--line); border-top: 3px solid var(--green); border-radius: 7px; background: rgba(255,255,255,.86); }
+.capital-check-card { display: grid; grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto; gap: 10px; min-width: 0; padding: 15px; border: 1px solid var(--line); border-top: 3px solid var(--green); border-radius: 7px; background: rgba(255,255,255,.86); }
 .capital-check-card.tone-urgent { border-top-color: var(--red); }
 .capital-check-card.tone-watch { border-top-color: var(--amber); }
 .capital-check-card.tone-clear { border-top-color: #638477; }
@@ -375,7 +375,7 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .capital-check-provider-proof > div > strong { margin-top: 9px; color: var(--ink); font-size: 10px; line-height: 1.35; }
 .capital-check-provider-proof > div > b { color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
 .capital-check-provider-proof > div > small { color: var(--muted); font-size: 8px; line-height: 1.5; }
-.capital-check-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 2px; }
+.capital-check-card-foot { display: flex; grid-row: -2 / -1; align-items: center; justify-content: space-between; gap: 8px; padding-top: 2px; }
 .capital-check-card-foot > span, .capital-check-card-foot a { color: var(--muted); font-size: 8px; text-decoration: none; }
 .capital-check-card-foot a { display: inline-flex; align-items: center; gap: 3px; }
 .capital-check-card-foot button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 5px; padding-inline: 10px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--ink); background: white; font-size: 9px; font-weight: 850; cursor: pointer; }
