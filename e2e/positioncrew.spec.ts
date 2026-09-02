@@ -948,7 +948,11 @@ test("capital check turns current positions into truthful provider routes", asyn
   await page.getByPlaceholder("Position token ID").fill(live.lpTokenId);
   await page.locator(".capital-check-form").getByRole("button", { name: "Check my BSC capital" }).click();
 
-  await expect(page.getByText("Jobs found. Now choose who handles them.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Your capital desk is ready.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Current state loaded", { exact: true })).toBeVisible();
+  await expect(page.getByText("Check providers next", { exact: true })).toBeVisible();
+  await expect(page.getByText("Preserve the result", { exact: true })).toBeVisible();
+  for (const summary of await page.locator(".capital-check-provider-proof summary").all()) await summary.click();
   await expect(page.getByText("PositionCrew Rescue + AiKi Venus Guardian", { exact: true })).toBeVisible();
   await expect(page.getByText("1 rescue provider · 1 monitoring cross-check", { exact: true })).toBeVisible();
   await expect(page.getByText("PositionCrew LP + V3 Pools powered by HeyAnon", { exact: true })).toBeVisible();
@@ -973,7 +977,9 @@ test("capital check does not claim jobs were found when every current read fails
 
   await expect(page.getByText("No current jobs could be determined.", { exact: true })).toBeVisible();
   await expect(page.getByText("0/4 ready", { exact: true })).toBeVisible();
-  await expect(page.getByText("Jobs found. Now choose who handles them.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Retry this capital check before choosing a provider.", { exact: true })).toHaveCount(3);
+  await expect(page.getByText("Add the PancakeSwap V3 NFT ID, then scan again.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Your capital desk is ready.", { exact: true })).toHaveCount(0);
 });
 
 test("BSC telemetry and Venus wallet risk are independently inspectable", async ({ page }) => {
