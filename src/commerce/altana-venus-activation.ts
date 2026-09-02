@@ -150,6 +150,13 @@ const ACCOUNT_GET_KEYS_ABI = [{
 const ACCOUNT_PERMISSION_ABI = [
   {
     type: "function",
+    name: "approvedSignatureCheckers",
+    stateMutability: "view",
+    inputs: [{ name: "keyHash", type: "bytes32" }],
+    outputs: [{ name: "", type: "address[]" }],
+  },
+  {
+    type: "function",
     name: "callCheckerInfos",
     stateMutability: "view",
     inputs: [{ name: "keyHash", type: "bytes32" }],
@@ -344,6 +351,7 @@ export async function verifyLiveAltanaVenusSession(
   const [
     registryValid,
     accountKeysRaw,
+    approvedSignatureCheckersRaw,
     callCheckerInfosRaw,
     executeInfosRaw,
     exactCallAllowed,
@@ -361,6 +369,12 @@ export async function verifyLiveAltanaVenusSession(
       address: ALTANA_VENUS_ACTOR,
       abi: ACCOUNT_GET_KEYS_ABI,
       functionName: "getKeys",
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "approvedSignatureCheckers",
+      args: [accountKeyHash],
     }),
     read({
       address: ALTANA_VENUS_ACTOR,
@@ -437,6 +451,12 @@ export async function verifyLiveAltanaVenusSession(
   if (callCheckerInfos.length !== 0) {
     throw new Error("ALTANA_SESSION_CALL_CHECKER_SCOPE_MISMATCH");
   }
+  const approvedSignatureCheckers = Array.isArray(approvedSignatureCheckersRaw)
+    ? approvedSignatureCheckersRaw
+    : [];
+  if (approvedSignatureCheckers.length !== 0) {
+    throw new Error("ALTANA_SESSION_SIGNATURE_CHECKER_SCOPE_MISMATCH");
+  }
   const spendInfos = Array.isArray(spendInfosRaw) ? spendInfosRaw : [];
   if (spendInfos.length !== 1) throw new Error("ALTANA_SESSION_SPEND_SCOPE_MISMATCH");
   const spendInfo = parseAltanaSpendInfo(spendInfos[0]);
@@ -462,6 +482,7 @@ export async function verifyLiveAltanaVenusSession(
       liveExecutionRuleCount: executeInfos.length,
       liveCallScopeVerified: true as const,
       liveCallCheckerRuleCount: callCheckerInfos.length,
+      liveSignatureCheckerRuleCount: approvedSignatureCheckers.length,
       liveSpendRuleCount: spendInfos.length,
       liveSpendToken: spendInfo.token,
       liveSpendPeriod: "minute" as const,

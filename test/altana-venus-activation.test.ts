@@ -75,6 +75,7 @@ describe("Altana Venus session boundary", () => {
       }
       if (typed.functionName === "canExecutePackedInfos") return [`0x${"55".repeat(32)}`];
       if (typed.functionName === "callCheckerInfos") return [];
+      if (typed.functionName === "approvedSignatureCheckers") return [];
       if (typed.functionName === "canExecute") {
         return typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR;
       }
@@ -101,6 +102,7 @@ describe("Altana Venus session boundary", () => {
     expect(verified.verification.liveExecutionRuleCount).toBe(1);
     expect(verified.verification.liveCallScopeVerified).toBe(true);
     expect(verified.verification.liveCallCheckerRuleCount).toBe(0);
+    expect(verified.verification.liveSignatureCheckerRuleCount).toBe(0);
     expect(verified.verification.liveSpendRuleCount).toBe(1);
     expect(verified.verification.liveSpendLimit).toBe(ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI.toString());
     expect(verified.verification.registryKeyId).not.toBe(accountKeyHash);
@@ -134,6 +136,7 @@ describe("Altana Venus session boundary", () => {
   it.each([
     ["canExecutePackedInfos", [`0x${"55".repeat(32)}`, `0x${"66".repeat(32)}`], "ALTANA_SESSION_EXECUTION_SCOPE_MISMATCH"],
     ["callCheckerInfos", [{ target: ALTANA_VENUS_VBNB, checker: "0x0000000000000000000000000000000000000002" }], "ALTANA_SESSION_CALL_CHECKER_SCOPE_MISMATCH"],
+    ["approvedSignatureCheckers", ["0x0000000000000000000000000000000000000002"], "ALTANA_SESSION_SIGNATURE_CHECKER_SCOPE_MISMATCH"],
     ["spendInfos", [], "ALTANA_SESSION_SPEND_SCOPE_MISMATCH"],
     ["spendInfos", [{ token: "0x0000000000000000000000000000000000000000", period: 1, limit: ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI }], "ALTANA_SESSION_SPEND_SCOPE_MISMATCH"],
   ])("rejects broadened or replaced live %s records", async (overriddenFunction, overriddenValue, expectedError) => {
@@ -155,6 +158,7 @@ describe("Altana Venus session boundary", () => {
       if (typed.functionName === overriddenFunction) return overriddenValue;
       if (typed.functionName === "canExecutePackedInfos") return [`0x${"55".repeat(32)}`];
       if (typed.functionName === "callCheckerInfos") return [];
+      if (typed.functionName === "approvedSignatureCheckers") return [];
       if (typed.functionName === "canExecute") {
         return typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR;
       }
