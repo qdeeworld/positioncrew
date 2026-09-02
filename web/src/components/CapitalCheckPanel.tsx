@@ -326,18 +326,27 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
                   <h3>{card.title}</h3>
                   <p>{card.detail}</p>
                   <div className="capital-check-metric"><span>{card.metricLabel}</span><strong>{card.metric}</strong></div>
-                  <div className="capital-check-next-step">
-                    <span>What happens next</span>
-                    <strong>{route.outcome}</strong>
-                  </div>
-                  <details className="capital-check-provider-proof">
-                    <summary><ShieldCheck size={13} aria-hidden="true" /> How providers are checked</summary>
-                    <div>
-                      <strong>{route.status}</strong>
-                      <b>{route.providers}</b>
-                      <small>{route.detail}</small>
+                  {canOpen ? (
+                    <>
+                      <div className="capital-check-next-step">
+                        <span>What happens next</span>
+                        <strong>{route.outcome}</strong>
+                      </div>
+                      <details className="capital-check-provider-proof">
+                        <summary><ShieldCheck size={13} aria-hidden="true" /> How providers are checked</summary>
+                        <div>
+                          <strong>{route.status}</strong>
+                          <b>{route.providers}</b>
+                          <small>{route.detail}</small>
+                        </div>
+                      </details>
+                    </>
+                  ) : (
+                    <div className="capital-check-next-step prerequisite">
+                      <span>Required before provider check</span>
+                      <strong>{card.tone === "input" ? "Add the PancakeSwap V3 NFT ID, then scan again." : "Retry this capital check before choosing a provider."}</strong>
                     </div>
-                  </details>
+                  )}
                   <div className="capital-check-card-foot">
                     {card.blockNumber && card.explorerUrl ? <a href={card.explorerUrl} target="_blank" rel="noreferrer">Block {Number(card.blockNumber).toLocaleString("en-US")} <ExternalLink size={11} aria-hidden="true" /></a> : <span>Current evidence required</span>}
                     {canOpen ? <button type="button" onClick={() => onOpenJob(card.service)}>{route.action} <ArrowRight size={13} aria-hidden="true" /></button> : card.tone === "input" ? <button type="button" onClick={() => document.querySelector<HTMLInputElement>(".capital-check-form input[inputmode='numeric']")?.focus()}>Add NFT ID</button> : <button type="button" onClick={() => void scanCapital()}>Retry</button>}

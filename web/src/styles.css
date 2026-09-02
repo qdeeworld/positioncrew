@@ -364,6 +364,8 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .capital-check-next-step { display: grid; gap: 4px; padding: 10px; border-left: 3px solid var(--yellow-dark); border-radius: 3px; background: var(--yellow-soft); }
 .capital-check-next-step > span { color: #705700; font-size: 8px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
 .capital-check-next-step > strong { color: var(--ink); font-size: 10px; line-height: 1.45; }
+.capital-check-next-step.prerequisite { border-left-color: #8b9691; background: #f1f4f1; }
+.capital-check-next-step.prerequisite > span { color: var(--muted); }
 .capital-check-provider-proof { align-self: start; border: 1px solid #d8e2dc; border-radius: 5px; background: #f4f8f5; }
 .capital-check-provider-proof summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px; color: var(--green-dark); font-size: 9px; font-weight: 850; cursor: pointer; list-style: none; }
 .capital-check-provider-proof summary::-webkit-details-marker { display: none; }

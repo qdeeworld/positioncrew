@@ -977,6 +977,8 @@ test("capital check does not claim jobs were found when every current read fails
 
   await expect(page.getByText("No current jobs could be determined.", { exact: true })).toBeVisible();
   await expect(page.getByText("0/4 ready", { exact: true })).toBeVisible();
+  await expect(page.getByText("Retry this capital check before choosing a provider.", { exact: true })).toHaveCount(3);
+  await expect(page.getByText("Add the PancakeSwap V3 NFT ID, then scan again.", { exact: true })).toBeVisible();
   await expect(page.getByText("Your capital desk is ready.", { exact: true })).toHaveCount(0);
 });
 
