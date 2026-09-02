@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   AltanaVenusActivationCapacityExceeded,
   AltanaVenusActivationStore,
+  isAltanaVenusActivationCapacityExceeded,
+  isAltanaVenusActivationIdempotencyConflict,
 } from "../src/commerce/d1-altana-activation-store.js";
 import type { D1Database } from "../src/commerce/d1-marketplace-store.js";
 
@@ -45,6 +47,21 @@ function creation(index: number, createdAt: string) {
 }
 
 describe("Altana activation D1 leases", () => {
+  it("recognizes serialized activation errors without constructor identity", () => {
+    expect(isAltanaVenusActivationCapacityExceeded({
+      code: "ACTIVATION_CAPACITY_EXCEEDED",
+      message: "capacity reached",
+    })).toBe(true);
+    expect(isAltanaVenusActivationIdempotencyConflict({
+      code: "ACTIVATION_IDEMPOTENCY_CONFLICT",
+      message: "key conflict",
+    })).toBe(true);
+    expect(isAltanaVenusActivationCapacityExceeded({
+      code: "ACTIVATION_IDEMPOTENCY_CONFLICT",
+      message: "wrong code",
+    })).toBe(false);
+  });
+
   it("rejects a different idempotency key racing for an existing source receipt", async () => {
     const store = new AltanaVenusActivationStore(database());
     const original = creation(1, "2026-09-02T00:00:00.000Z");

@@ -84,6 +84,24 @@ export class AltanaVenusActivationIdempotencyConflict extends Error {
   }
 }
 
+function hasAltanaActivationErrorCode(error: unknown, code: string): error is Error & { code: string } {
+  return typeof error === "object" && error !== null &&
+    "code" in error && error.code === code &&
+    "message" in error && typeof error.message === "string";
+}
+
+export function isAltanaVenusActivationCapacityExceeded(
+  error: unknown,
+): error is Error & { code: "ACTIVATION_CAPACITY_EXCEEDED" } {
+  return hasAltanaActivationErrorCode(error, "ACTIVATION_CAPACITY_EXCEEDED");
+}
+
+export function isAltanaVenusActivationIdempotencyConflict(
+  error: unknown,
+): error is Error & { code: "ACTIVATION_IDEMPOTENCY_CONFLICT" } {
+  return hasAltanaActivationErrorCode(error, "ACTIVATION_IDEMPOTENCY_CONFLICT");
+}
+
 export class AltanaVenusActivationStore {
   constructor(private readonly db: D1Database) {}
 

@@ -30,9 +30,9 @@ import {
   type D1Database,
 } from "../src/commerce/d1-marketplace-store.js";
 import {
-  AltanaVenusActivationCapacityExceeded,
-  AltanaVenusActivationIdempotencyConflict,
   AltanaVenusActivationStore,
+  isAltanaVenusActivationCapacityExceeded,
+  isAltanaVenusActivationIdempotencyConflict,
 } from "../src/commerce/d1-altana-activation-store.js";
 import {
   ALTANA_VENUS_CLAIM_BOUNDARY,
@@ -2641,10 +2641,10 @@ async function api(
     if (isFreshMarketplaceCapacityExceeded(error)) {
       return apiError(429, "HIRE_CAPACITY_EXCEEDED", [error.message]);
     }
-    if (error instanceof AltanaVenusActivationCapacityExceeded) {
+    if (isAltanaVenusActivationCapacityExceeded(error)) {
       return apiError(429, error.code, [error.message]);
     }
-    if (error instanceof AltanaVenusActivationIdempotencyConflict) {
+    if (isAltanaVenusActivationIdempotencyConflict(error)) {
       return apiError(409, error.code, [error.message]);
     }
     if (error instanceof FreshMarketplaceRequestError) {
