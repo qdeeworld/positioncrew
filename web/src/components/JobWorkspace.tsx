@@ -1553,14 +1553,21 @@ function LpPositionProbe({
   onUseRequest: (request: JobRequest, observation: CurrentMarketplaceObservation) => void;
   onClearRequest: () => void;
 }) {
-  const [tokenId, setTokenId] = useState(() => readCapitalCheckSeed()?.pancakePositionId ?? REFERENCE_PANCAKE_POSITION_ID);
+  const seededTokenId = useRef(readCapitalCheckSeed()?.pancakePositionId ?? "");
+  const [tokenId, setTokenId] = useState(() => seededTokenId.current || REFERENCE_PANCAKE_POSITION_ID);
   const [probe, setProbe] = useState<PancakePositionProbe | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeProbeController = useRef<AbortController | null>(null);
+  const probeOperation = useRef(0);
   const validTokenId = /^[1-9][0-9]{0,77}$/.test(tokenId.trim());
 
-  async function inspect() {
+  async function inspect(useImmediately = false) {
     if (!validTokenId) return;
+    activeProbeController.current?.abort();
+    const controller = new AbortController();
+    const operation = ++probeOperation.current;
+    activeProbeController.current = controller;
     onClearRequest();
     setLoading(true);
     setError(null);
@@ -1568,19 +1575,51 @@ function LpPositionProbe({
     try {
       const response = await fetch(`/api/positions/pancake/${tokenId.trim()}`, {
         headers: { Accept: "application/json" },
+        signal: controller.signal,
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { details?: unknown } | null;
         throw new Error(Array.isArray(body?.details) ? String(body.details[0]) : `Position probe failed (${response.status})`);
       }
-      setProbe(await response.json() as PancakePositionProbe);
+      const next = await response.json() as PancakePositionProbe;
+      if (controller.signal.aborted || operation !== probeOperation.current) return;
+      setProbe(next);
+      if (useImmediately) {
+        onUseRequest(next.lpRequest, {
+          blockNumber: next.source.blockNumber,
+          observedAt: next.source.blockTimestamp,
+          explorerUrl: next.source.explorerUrl,
+        });
+      }
       clearCapitalCheckSeed();
+      seededTokenId.current = "";
     } catch (probeError) {
+      if (controller.signal.aborted || operation !== probeOperation.current) return;
       setError(probeError instanceof Error ? probeError.message : "Position probe failed");
     } finally {
-      setLoading(false);
+      if (operation === probeOperation.current) {
+        setLoading(false);
+        activeProbeController.current = null;
+      }
     }
   }
+
+  useEffect(() => {
+    return () => {
+      probeOperation.current += 1;
+      activeProbeController.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!seededTokenId.current) return;
+    const timeout = window.setTimeout(() => {
+      seededTokenId.current = "";
+      clearCapitalCheckSeed();
+      void inspect(true);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   return (
     <section className="wallet-risk-probe lp-position-probe" aria-labelledby="lp-position-probe-title">
@@ -1614,7 +1653,7 @@ function LpPositionProbe({
             }}
           />
         </label>
-        <button type="button" onClick={() => void inspect()} disabled={loading || !validTokenId}>
+        <button type="button" onClick={() => void inspect(false)} disabled={loading || !validTokenId}>
           {loading ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}
           {loading ? "Reading" : "Inspect"}
         </button>

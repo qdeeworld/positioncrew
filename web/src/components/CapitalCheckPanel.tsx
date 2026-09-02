@@ -273,7 +273,7 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
       <div className="capital-check-intro">
         <span className="page-kicker">Position first · provider second</span>
         <h2 id="capital-check-title">Find the job. Then prove who can handle it.</h2>
-        <p>Enter a public address once. PositionCrew finds current capital jobs and shows the providers available to audition. The job workflow then guides you to load and pin fresh evidence before comparison; LP requires Inspect, then Use live position. Nothing is signed or moved.</p>
+        <p>Enter a public address once. PositionCrew finds current capital jobs and shows the providers available to audition. Choosing a route reloads and pins fresh evidence inside that job before comparison. Nothing is signed or moved.</p>
         <div className="capital-check-trust"><ShieldCheck size={15} aria-hidden="true" /> Public reads only · no wallet connection · no transaction</div>
       </div>
 
