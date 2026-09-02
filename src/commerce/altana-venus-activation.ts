@@ -14,6 +14,7 @@ import { z } from "zod";
 
 export const ALTANA_VENUS_ACTOR = "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d" as Address;
 export const ALTANA_VENUS_VBNB = "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c" as Address;
+export const ALTANA_TESTNET_ORCHESTRATOR = "0xcb5cef3c54aa90e9a7ad602a258d3d360cc862b9" as Address;
 export const ALTANA_VENUS_MINT_SELECTOR = "0x1249c58b" as Hex;
 export const ALTANA_VENUS_SUPPLY_WEI = 100_000_000_000_000n;
 // Altana's native-token rule is one aggregate ceiling for the payable call and
@@ -358,6 +359,9 @@ export async function verifyLiveAltanaVenusSession(
     exactCallAllowed,
     alternateTargetAllowed,
     alternateSelectorAllowed,
+    alternateTargetSelectorAllowed,
+    orchestratorMintSelectorAllowed,
+    orchestratorProbeSelectorAllowed,
     spendInfosRaw,
     wildcardApprovedSignatureCheckersRaw,
     wildcardCallCheckerInfosRaw,
@@ -410,6 +414,24 @@ export async function verifyLiveAltanaVenusSession(
       abi: ACCOUNT_PERMISSION_ABI,
       functionName: "canExecute",
       args: [accountKeyHash, ALTANA_VENUS_VBNB, ALTANA_SCOPE_PROBE_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_SCOPE_PROBE_TARGET, ALTANA_SCOPE_PROBE_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_TESTNET_ORCHESTRATOR, ALTANA_VENUS_MINT_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_TESTNET_ORCHESTRATOR, ALTANA_SCOPE_PROBE_SELECTOR],
     }),
     read({
       address: ALTANA_VENUS_ACTOR,
@@ -469,10 +491,13 @@ export async function verifyLiveAltanaVenusSession(
     ? executeInfosRaw.filter((value): value is string => typeof value === "string")
     : [];
   if (
-    executeInfos.length !== 1 ||
+    executeInfos.length !== 2 ||
     exactCallAllowed !== true ||
     alternateTargetAllowed !== false ||
-    alternateSelectorAllowed !== false
+    alternateSelectorAllowed !== false ||
+    alternateTargetSelectorAllowed !== false ||
+    orchestratorMintSelectorAllowed !== true ||
+    orchestratorProbeSelectorAllowed !== true
   ) {
     throw new Error("ALTANA_SESSION_EXECUTION_SCOPE_MISMATCH");
   }
@@ -517,6 +542,7 @@ export async function verifyLiveAltanaVenusSession(
       accountKeyPublicKey: matchingKey.publicKey,
       liveExecutionRuleCount: executeInfos.length,
       liveCallScopeVerified: true as const,
+      liveOrchestrator: ALTANA_TESTNET_ORCHESTRATOR,
       liveCallCheckerRuleCount: callCheckerInfos.length,
       liveSignatureCheckerRuleCount: approvedSignatureCheckers.length,
       liveWildcardRuleCount: wildcardRuleCount,

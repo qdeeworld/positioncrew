@@ -1141,8 +1141,9 @@ try {
       boundedActivationStatus.session.verification?.accountKeyType === 2 &&
       boundedActivationStatus.session.verification?.accountKeyIsSuperAdmin === false &&
       /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.accountKeyPublicKey ?? "") &&
-      boundedActivationStatus.session.verification?.liveExecutionRuleCount === 1 &&
+      boundedActivationStatus.session.verification?.liveExecutionRuleCount === 2 &&
       boundedActivationStatus.session.verification?.liveCallScopeVerified === true &&
+      boundedActivationStatus.session.verification?.liveOrchestrator?.toLowerCase() === "0xcb5cef3c54aa90e9a7ad602a258d3d360cc862b9" &&
       boundedActivationStatus.session.verification?.liveCallCheckerRuleCount === 0 &&
       boundedActivationStatus.session.verification?.liveSignatureCheckerRuleCount === 0 &&
       boundedActivationStatus.session.verification?.liveWildcardRuleCount === 0 &&

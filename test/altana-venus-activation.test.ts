@@ -3,6 +3,7 @@ import { signerFromPrivateKey } from "@altananetwork/sdk";
 import { encodeAbiParameters, keccak256, padHex } from "viem";
 import {
   ALTANA_VENUS_ACTOR,
+  ALTANA_TESTNET_ORCHESTRATOR,
   ALTANA_VENUS_MINT_SELECTOR,
   ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI,
   ALTANA_VENUS_SUPPLY_WEI,
@@ -74,12 +75,15 @@ describe("Altana Venus session boundary", () => {
         }], [accountKeyHash]];
       }
       if (typed.functionName === "canExecutePackedInfos") {
-        return typed.args?.[0] === accountKeyHash ? [`0x${"55".repeat(32)}`] : [];
+        return typed.args?.[0] === accountKeyHash
+          ? [`0x${"55".repeat(32)}`, `0x${"66".repeat(32)}`]
+          : [];
       }
       if (typed.functionName === "callCheckerInfos") return [];
       if (typed.functionName === "approvedSignatureCheckers") return [];
       if (typed.functionName === "canExecute") {
-        return typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR;
+        return (typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR) ||
+          typed.args?.[1] === ALTANA_TESTNET_ORCHESTRATOR;
       }
       if (typed.functionName === "spendInfos" && typed.args?.[0] === accountKeyHash) {
         return [{
@@ -102,7 +106,7 @@ describe("Altana Venus session boundary", () => {
     expect(verified.verification.accountKeyType).toBe(2);
     expect(verified.verification.accountKeyIsSuperAdmin).toBe(false);
     expect(verified.verification.accountKeyPublicKey).toBe(accountPublicKey);
-    expect(verified.verification.liveExecutionRuleCount).toBe(1);
+    expect(verified.verification.liveExecutionRuleCount).toBe(2);
     expect(verified.verification.liveCallScopeVerified).toBe(true);
     expect(verified.verification.liveCallCheckerRuleCount).toBe(0);
     expect(verified.verification.liveSignatureCheckerRuleCount).toBe(0);
@@ -138,7 +142,7 @@ describe("Altana Venus session boundary", () => {
   });
 
   it.each([
-    ["canExecutePackedInfos", [`0x${"55".repeat(32)}`, `0x${"66".repeat(32)}`], "ALTANA_SESSION_EXECUTION_SCOPE_MISMATCH"],
+    ["canExecutePackedInfos", [`0x${"55".repeat(32)}`, `0x${"66".repeat(32)}`, `0x${"77".repeat(32)}`], "ALTANA_SESSION_EXECUTION_SCOPE_MISMATCH"],
     ["callCheckerInfos", [{ target: ALTANA_VENUS_VBNB, checker: "0x0000000000000000000000000000000000000002" }], "ALTANA_SESSION_CALL_CHECKER_SCOPE_MISMATCH"],
     ["approvedSignatureCheckers", ["0x0000000000000000000000000000000000000002"], "ALTANA_SESSION_SIGNATURE_CHECKER_SCOPE_MISMATCH"],
     ["spendInfos", [], "ALTANA_SESSION_SPEND_SCOPE_MISMATCH"],
@@ -163,12 +167,15 @@ describe("Altana Venus session boundary", () => {
         return overriddenValue;
       }
       if (typed.functionName === "canExecutePackedInfos") {
-        return typed.args?.[0] === accountKeyHash ? [`0x${"55".repeat(32)}`] : [];
+        return typed.args?.[0] === accountKeyHash
+          ? [`0x${"55".repeat(32)}`, `0x${"66".repeat(32)}`]
+          : [];
       }
       if (typed.functionName === "callCheckerInfos") return [];
       if (typed.functionName === "approvedSignatureCheckers") return [];
       if (typed.functionName === "canExecute") {
-        return typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR;
+        return (typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR) ||
+          typed.args?.[1] === ALTANA_TESTNET_ORCHESTRATOR;
       }
       if (typed.functionName === "spendInfos") return typed.args?.[0] === accountKeyHash
         ? [{
@@ -198,10 +205,13 @@ describe("Altana Venus session boundary", () => {
         publicKey: accountPublicKey,
       }], [accountKeyHash]];
       if (typed.functionName === "canExecutePackedInfos") {
-        return typed.args?.[0] === anyKeyHash ? [`0x${"77".repeat(32)}`] : [`0x${"55".repeat(32)}`];
+        return typed.args?.[0] === anyKeyHash
+          ? [`0x${"77".repeat(32)}`]
+          : [`0x${"55".repeat(32)}`, `0x${"66".repeat(32)}`];
       }
       if (typed.functionName === "canExecute") {
-        return typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR;
+        return (typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR) ||
+          typed.args?.[1] === ALTANA_TESTNET_ORCHESTRATOR;
       }
       if (typed.functionName === "callCheckerInfos" || typed.functionName === "approvedSignatureCheckers") return [];
       if (typed.functionName === "spendInfos") return typed.args?.[0] === accountKeyHash
