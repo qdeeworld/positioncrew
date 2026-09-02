@@ -127,7 +127,7 @@ export class AltanaVenusActivationStore {
       WHERE (SELECT COUNT(*) FROM altana_venus_activations WHERE day_bucket = ?) < ?
       AND NOT EXISTS (
         SELECT 1 FROM altana_venus_activations
-        WHERE state IN ('CREATED', 'RUNNING')
+        WHERE state IN ('CREATED', 'RUNNING', 'CHAIN_SUBMITTED', 'CHAIN_CONFIRMED', 'CONFIRMED')
       )`)
       .bind(
         input.activationId, input.idempotencyKey, input.sourceHireId, input.sourceReceiptId,
@@ -234,7 +234,7 @@ export class AltanaVenusActivationStore {
   async fail(activationId: string, code: string, message: string, completedAt: string): Promise<void> {
     await this.db.prepare(`UPDATE altana_venus_activations
       SET state = 'FAILED', completed_at = ?, error_code = ?, error_message = ?
-      WHERE activation_id = ? AND state = 'RUNNING'`)
+      WHERE activation_id = ? AND state IN ('RUNNING', 'CHAIN_SUBMITTED', 'CHAIN_CONFIRMED')`)
       .bind(completedAt, code, message.slice(0, 500), activationId).run();
   }
 

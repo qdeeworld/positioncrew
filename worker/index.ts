@@ -2040,6 +2040,10 @@ function activationErrorCode(error: unknown): string {
   return /^[A-Z0-9_]+$/.test(code) ? code : "ACTIVATION_EXECUTION_FAILED";
 }
 
+function isTerminalAltanaEvidenceFailure(code: string): boolean {
+  return code === "ALTANA_EXECUTION_REVERTED" || code === "ALTANA_VTOKEN_DELTA_NOT_POSITIVE";
+}
+
 async function finishAltanaVenusActivation(env: Env, activationId: string): Promise<void> {
   const store = altanaActivationStore(env);
   const existing = await store.get(activationId);
@@ -2121,8 +2125,9 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
       }
     } else {
     const current = await store.get(activationId);
-    if (current?.state === "CHAIN_SUBMITTED" || current?.state === "CHAIN_CONFIRMED") return;
     const code = activationErrorCode(error);
+    if ((current?.state === "CHAIN_SUBMITTED" || current?.state === "CHAIN_CONFIRMED") &&
+      !isTerminalAltanaEvidenceFailure(code)) return;
     const message = error instanceof Error ? error.message : "The bounded action failed closed";
     await store.fail(activationId, code, message, new Date().toISOString());
     return;
