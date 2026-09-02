@@ -2117,7 +2117,6 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
           executionJson: canonicalJson(error.confirmation),
           executionHash: await sha256Commitment(error.confirmation),
         });
-        evidence = await completeAltanaVenusExecutionEvidence(error.confirmation);
       } catch (persistenceError) {
         console.error(JSON.stringify({
           level: "error",
@@ -2126,6 +2125,24 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
           transactionHash: error.confirmation.transactionHash,
           errorMessage: persistenceError instanceof Error ? persistenceError.message : "Unknown persistence failure",
         }));
+        return;
+      }
+      try {
+        evidence = await completeAltanaVenusExecutionEvidence(error.confirmation);
+      } catch (evidenceError) {
+        const code = activationErrorCode(evidenceError);
+        if (isTerminalAltanaEvidenceFailure(code)) {
+          const message = evidenceError instanceof Error ? evidenceError.message : "Confirmed evidence failed validation";
+          await store.fail(activationId, code, message, new Date().toISOString());
+        } else {
+          console.error(JSON.stringify({
+            level: "error",
+            event: "positioncrew.altana.confirmed_evidence_enrichment_deferred",
+            activationId,
+            transactionHash: error.confirmation.transactionHash,
+            errorMessage: evidenceError instanceof Error ? evidenceError.message : "Unknown evidence failure",
+          }));
+        }
         return;
       }
     } else {
