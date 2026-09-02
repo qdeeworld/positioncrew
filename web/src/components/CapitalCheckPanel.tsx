@@ -32,6 +32,40 @@ interface ScanCard {
   explorerUrl?: string;
 }
 
+interface ProviderRoute {
+  providers: string;
+  status: string;
+  detail: string;
+  action: string;
+}
+
+const PROVIDER_ROUTES: Record<ServiceId, ProviderRoute> = {
+  LENDING_RESCUE: {
+    providers: "PositionCrew Rescue + AiKi Venus Guardian",
+    status: "1 rescue provider · 1 monitoring cross-check",
+    detail: "Both inspect the same account. Only PositionCrew currently returns the bounded rescue contract; AiKi independently checks the risk diagnosis.",
+    action: "Check providers and hire",
+  },
+  LP_REBALANCE: {
+    providers: "PositionCrew LP + V3 Pools powered by HeyAnon",
+    status: "Two-provider exact-job audition",
+    detail: "Both providers receive the same current LP position. PositionCrew normalizes the external range and applies your unchanged limits before selection.",
+    action: "Compare providers for this job",
+  },
+  YIELD_OPTIMIZATION: {
+    providers: "PositionCrew Yield + AiKi Venus Yield",
+    status: "Two-provider exact-job audition",
+    detail: "Both providers inspect the same current Venus markets. Rate evidence, liquidity, costs, risk limits, and horizon decide eligibility.",
+    action: "Compare providers for this job",
+  },
+  BOUNDED_GRID: {
+    providers: "PositionCrew Grid + Brain on BNB Grid Planner",
+    status: "Two-provider exact-job audition",
+    detail: "Both providers evaluate the same live pool. The external range is admitted only when it passes the buyer's economics and loss limits.",
+    action: "Compare providers for this job",
+  },
+};
+
 interface VenusScan {
   state: string;
   source: { blockNumber: string; explorerUrl: string };
@@ -235,9 +269,9 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
   return (
     <section className="capital-check" id="capital-check" aria-labelledby="capital-check-title">
       <div className="capital-check-intro">
-        <span className="page-kicker">One read-only starting point</span>
-        <h2 id="capital-check-title">What needs attention in your BSC capital?</h2>
-        <p>Enter a public address once. PositionCrew checks current Venus risk and current opportunity conditions, then routes you to the exact bounded job. Nothing is signed or moved.</p>
+        <span className="page-kicker">Position first · provider second</span>
+        <h2 id="capital-check-title">Find the job. Then prove who can handle it.</h2>
+        <p>Enter a public address once. PositionCrew finds current capital jobs, shows the providers available to audition, and carries the exact block-pinned request into comparison. Nothing is signed or moved.</p>
         <div className="capital-check-trust"><ShieldCheck size={15} aria-hidden="true" /> Public reads only · no wallet connection · no transaction</div>
       </div>
 
@@ -265,27 +299,34 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
       {scanning && <div className="capital-check-progress" role="status"><span /><p><strong>Reading current BSC state</strong>Venus account, stable-yield markets, PancakeSwap market{positionId.trim() ? ", and the supplied LP NFT" : ""}.</p></div>}
       {cards && (
         <div className="capital-check-results" aria-live="polite">
-          <div className="capital-check-results-head"><div><CheckCircle2 size={17} aria-hidden="true" /><span><strong>Capital check complete</strong><small>Choose one result to continue with its current request.</small></span></div><span>{cards.filter((card) => card.tone !== "unavailable" && card.tone !== "input").length}/4 ready</span></div>
+          <div className="capital-check-results-head"><div><CheckCircle2 size={17} aria-hidden="true" /><span><strong>Jobs found. Now choose who handles them.</strong><small>Each route auditions only providers implemented for that exact current request.</small></span></div><span>{cards.filter((card) => card.tone !== "unavailable" && card.tone !== "input").length}/4 ready</span></div>
           <div className="capital-check-grid">
             {cards.map((card) => {
               const task = TASKS.find((candidate) => candidate.id === card.service);
               const Icon = task?.icon;
               const canOpen = card.tone !== "unavailable" && card.tone !== "input";
+              const route = PROVIDER_ROUTES[card.service];
               return (
                 <article className={`capital-check-card tone-${card.tone}`} key={card.service}>
                   <div className="capital-check-card-head"><span>{Icon && <Icon size={18} aria-hidden="true" />}</span><div><small>{task?.shortTitle}</small><strong>{card.state}</strong></div></div>
                   <h3>{card.title}</h3>
                   <p>{card.detail}</p>
                   <div className="capital-check-metric"><span>{card.metricLabel}</span><strong>{card.metric}</strong></div>
+                  <div className="capital-check-provider-route">
+                    <span>Provider route</span>
+                    <strong>{route.status}</strong>
+                    <b>{route.providers}</b>
+                    <small>{route.detail}</small>
+                  </div>
                   <div className="capital-check-card-foot">
                     {card.blockNumber && card.explorerUrl ? <a href={card.explorerUrl} target="_blank" rel="noreferrer">Block {Number(card.blockNumber).toLocaleString("en-US")} <ExternalLink size={11} aria-hidden="true" /></a> : <span>Current evidence required</span>}
-                    {canOpen ? <button type="button" onClick={() => onOpenJob(card.service)}>Open current job <ArrowRight size={13} aria-hidden="true" /></button> : card.tone === "input" ? <button type="button" onClick={() => document.querySelector<HTMLInputElement>(".capital-check-form input[inputmode='numeric']")?.focus()}>Add NFT ID</button> : <button type="button" onClick={() => void scanCapital()}>Retry</button>}
+                    {canOpen ? <button type="button" onClick={() => onOpenJob(card.service)}>{route.action} <ArrowRight size={13} aria-hidden="true" /></button> : card.tone === "input" ? <button type="button" onClick={() => document.querySelector<HTMLInputElement>(".capital-check-form input[inputmode='numeric']")?.focus()}>Add NFT ID</button> : <button type="button" onClick={() => void scanCapital()}>Retry</button>}
                   </div>
                 </article>
               );
             })}
           </div>
-          <p className="capital-check-boundary">This scan identifies current inputs and routes work. Provider hiring still performs exact-contract admission and may return no action or refusal. No wallet ownership, balance entitlement, trade, yield, or performance is inferred.</p>
+          <p className="capital-check-boundary">Provider names describe implemented audition routes, not guaranteed availability or superiority. The hire performs current liveness and exact-contract checks, preserves every rejection, and may return no action or refusal. No wallet ownership, balance entitlement, trade, yield, or performance is inferred.</p>
         </div>
       )}
     </section>
