@@ -159,7 +159,9 @@ describe("Altana Venus session boundary", () => {
         isSuperAdmin: false,
         publicKey: accountPublicKey,
       }], [accountKeyHash]];
-      if (typed.functionName === overriddenFunction) return overriddenValue;
+      if (typed.functionName === overriddenFunction && typed.args?.[0] === accountKeyHash) {
+        return overriddenValue;
+      }
       if (typed.functionName === "canExecutePackedInfos") {
         return typed.args?.[0] === accountKeyHash ? [`0x${"55".repeat(32)}`] : [];
       }
