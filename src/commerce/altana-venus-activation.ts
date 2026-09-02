@@ -66,6 +66,11 @@ export interface AltanaVenusExecutionEvidence {
   };
 }
 
+export type AltanaVenusConfirmedExecution = Omit<
+  AltanaVenusExecutionEvidence,
+  "vTokenBalanceAfter" | "vTokenDelta"
+>;
+
 const BALANCE_OF_ABI = [{
   type: "function",
   name: "balanceOf",
@@ -122,6 +127,7 @@ export function publicAltanaVenusSession(serialized: string, now = Date.now()) {
 
 export async function executeAltanaVenusActivation(
   serializedSession: string,
+  onConfirmed: (evidence: AltanaVenusConfirmedExecution) => Promise<void>,
 ): Promise<AltanaVenusExecutionEvidence> {
   const { session, grantTransactionHash } = parseAltanaVenusSessionSecret(serializedSession);
   const rpc = createPublicClient({ chain: bscTestnet, transport: http(BNB_TESTNET.publicRpcUrl) });
@@ -143,16 +149,7 @@ export async function executeAltanaVenusActivation(
   }
   const receipt = await rpc.waitForTransactionReceipt({ hash: execution.transactionHash, timeout: 60_000 });
   if (receipt.status !== "success") throw new Error("ALTANA_EXECUTION_REVERTED");
-  const after = await rpc.readContract({
-    address: ALTANA_VENUS_VBNB,
-    abi: BALANCE_OF_ABI,
-    functionName: "balanceOf",
-    args: [ALTANA_VENUS_ACTOR],
-    blockNumber: receipt.blockNumber,
-  });
-  const delta = after - before;
-  if (delta <= 0n) throw new Error("ALTANA_VTOKEN_DELTA_NOT_POSITIVE");
-  return {
+  const confirmed: AltanaVenusConfirmedExecution = {
     chainId: 97,
     actor: ALTANA_VENUS_ACTOR,
     target: ALTANA_VENUS_VBNB,
@@ -163,8 +160,6 @@ export async function executeAltanaVenusActivation(
     beforeBlockNumber: beforeBlockNumber.toString(),
     confirmedBlockNumber: receipt.blockNumber.toString(),
     vTokenBalanceBefore: before.toString(),
-    vTokenBalanceAfter: after.toString(),
-    vTokenDelta: delta.toString(),
     session: {
       publicKey: session.publicKey,
       expiry: session.expiry,
@@ -174,5 +169,27 @@ export async function executeAltanaVenusActivation(
         spend: [{ limit: ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI.toString(), period: "minute" }],
       },
     },
+  };
+  await onConfirmed(confirmed);
+  return completeAltanaVenusExecutionEvidence(confirmed);
+}
+
+export async function completeAltanaVenusExecutionEvidence(
+  confirmed: AltanaVenusConfirmedExecution,
+): Promise<AltanaVenusExecutionEvidence> {
+  const rpc = createPublicClient({ chain: bscTestnet, transport: http(BNB_TESTNET.publicRpcUrl) });
+  const after = await rpc.readContract({
+    address: ALTANA_VENUS_VBNB,
+    abi: BALANCE_OF_ABI,
+    functionName: "balanceOf",
+    args: [ALTANA_VENUS_ACTOR],
+    blockNumber: BigInt(confirmed.confirmedBlockNumber),
+  });
+  const delta = after - BigInt(confirmed.vTokenBalanceBefore);
+  if (delta <= 0n) throw new Error("ALTANA_VTOKEN_DELTA_NOT_POSITIVE");
+  return {
+    ...confirmed,
+    vTokenBalanceAfter: after.toString(),
+    vTokenDelta: delta.toString(),
   };
 }

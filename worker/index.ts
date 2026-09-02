@@ -31,12 +31,14 @@ import {
 } from "../src/commerce/d1-marketplace-store.js";
 import {
   AltanaVenusActivationCapacityExceeded,
+  AltanaVenusActivationIdempotencyConflict,
   AltanaVenusActivationStore,
 } from "../src/commerce/d1-altana-activation-store.js";
 import {
   ALTANA_VENUS_CLAIM_BOUNDARY,
   ALTANA_VENUS_DAILY_ACTIVATION_LIMIT,
   AltanaVenusActivationRequestSchema,
+  completeAltanaVenusExecutionEvidence,
   executeAltanaVenusActivation,
   publicAltanaVenusSession,
 } from "../src/commerce/altana-venus-activation.js";
@@ -2042,19 +2044,35 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
     await store.finalizeConfirmed(activationId, new Date().toISOString());
     return;
   }
-  const claim = await store.claim(activationId, new Date().toISOString());
-  if (!claim.claimed || !claim.activation) return;
-  const claimed = claim.activation;
+  let claimed = existing;
   let evidence: Awaited<ReturnType<typeof executeAltanaVenusActivation>>;
   try {
     if (!env.ALTANA_VENUS_SESSION) throw new Error("ALTANA_SESSION_UNAVAILABLE");
-    evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION);
+    if (existing?.state === "CHAIN_CONFIRMED" && existing.confirmedExecution) {
+      evidence = await completeAltanaVenusExecutionEvidence(
+        existing.confirmedExecution as Parameters<typeof completeAltanaVenusExecutionEvidence>[0],
+      );
+    } else {
+      const claim = await store.claim(activationId, new Date().toISOString());
+      if (!claim.claimed || !claim.activation) return;
+      claimed = claim.activation;
+      evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION, async (confirmation) => {
+        await store.persistChainConfirmed({
+          activationId,
+          executionJson: canonicalJson(confirmation),
+          executionHash: await sha256Commitment(confirmation),
+        });
+      });
+    }
   } catch (error) {
+    const current = await store.get(activationId);
+    if (current?.state === "CHAIN_CONFIRMED") return;
     const code = activationErrorCode(error);
     const message = error instanceof Error ? error.message : "The bounded action failed closed";
     await store.fail(activationId, code, message, new Date().toISOString());
     return;
   }
+  if (!claimed) return;
   const completedAt = new Date().toISOString();
   const receiptId = crypto.randomUUID();
   const receipt = {
@@ -2179,7 +2197,7 @@ async function createAltanaVenusActivation(
   const store = altanaActivationStore(env);
   const prior = await store.getBySourceReceipt(parsed.sourceReceiptId);
   if (prior) {
-    if (prior.state === "CREATED" || prior.state === "CONFIRMED") {
+    if (prior.state === "CREATED" || prior.state === "CHAIN_CONFIRMED" || prior.state === "CONFIRMED") {
       context.waitUntil(finishAltanaVenusActivation(env, prior.activationId));
       return json(prior, 202);
     }
@@ -2214,7 +2232,7 @@ async function getAltanaVenusActivation(
   const store = altanaActivationStore(env);
   let activation = await store.get(activationId);
   if (!activation) return apiError(404, "ACTIVATION_NOT_FOUND", ["Unknown activation ID."]);
-  if (activation.state === "CREATED" || activation.state === "CONFIRMED") {
+  if (activation.state === "CREATED" || activation.state === "CHAIN_CONFIRMED" || activation.state === "CONFIRMED") {
     context.waitUntil(finishAltanaVenusActivation(env, activationId));
   } else if (activation.state === "RUNNING") {
     const cutoff = new Date(Date.now() - 5 * 60_000).toISOString();
@@ -2538,6 +2556,9 @@ async function api(
     }
     if (error instanceof AltanaVenusActivationCapacityExceeded) {
       return apiError(429, error.code, [error.message]);
+    }
+    if (error instanceof AltanaVenusActivationIdempotencyConflict) {
+      return apiError(409, error.code, [error.message]);
     }
     if (error instanceof FreshMarketplaceRequestError) {
       return apiError(error.status, error.code, [error.message]);

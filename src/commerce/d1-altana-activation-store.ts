@@ -1,6 +1,6 @@
 import type { D1Database } from "./d1-marketplace-store.js";
 
-export type AltanaActivationState = "CREATED" | "RUNNING" | "CONFIRMED" | "COMPLETED" | "FAILED";
+export type AltanaActivationState = "CREATED" | "RUNNING" | "CHAIN_CONFIRMED" | "CONFIRMED" | "COMPLETED" | "FAILED";
 
 export interface AltanaActivationRecord {
   schemaVersion: "positioncrew.altana-venus-activation.v1";
@@ -16,6 +16,7 @@ export interface AltanaActivationRecord {
   receipt: unknown | null;
   receiptHash: string | null;
   error: { code: string; message: string } | null;
+  confirmedExecution: unknown | null;
 }
 
 interface ActivationRow extends Record<string, unknown> {
@@ -35,6 +36,8 @@ interface ActivationRow extends Record<string, unknown> {
   confirmed_receipt_id: string | null;
   confirmed_receipt_json: string | null;
   confirmed_receipt_hash: string | null;
+  confirmed_execution_json: string | null;
+  confirmed_execution_hash: string | null;
 }
 
 function record(row: ActivationRow): AltanaActivationRecord {
@@ -54,12 +57,14 @@ function record(row: ActivationRow): AltanaActivationRecord {
     error: row.error_code && row.error_message
       ? { code: row.error_code, message: row.error_message }
       : null,
+    confirmedExecution: row.confirmed_execution_json ? JSON.parse(row.confirmed_execution_json) : null,
   };
 }
 
 const SELECT = `SELECT activation_id, idempotency_key, source_hire_id, source_receipt_id,
  state, created_at, started_at, completed_at, receipt_id, receipt_json, receipt_hash,
- error_code, error_message, confirmed_receipt_id, confirmed_receipt_json, confirmed_receipt_hash
+ error_code, error_message, confirmed_receipt_id, confirmed_receipt_json, confirmed_receipt_hash,
+ confirmed_execution_json, confirmed_execution_hash
  FROM altana_venus_activations`;
 
 export class AltanaVenusActivationCapacityExceeded extends Error {
@@ -67,6 +72,14 @@ export class AltanaVenusActivationCapacityExceeded extends Error {
   constructor() {
     super("The bounded testnet activation budget is unavailable for this client or day");
     this.name = "AltanaVenusActivationCapacityExceeded";
+  }
+}
+
+export class AltanaVenusActivationIdempotencyConflict extends Error {
+  readonly code = "ACTIVATION_IDEMPOTENCY_CONFLICT";
+  constructor() {
+    super("The activation idempotency key is already bound to another source receipt");
+    this.name = "AltanaVenusActivationIdempotencyConflict";
   }
 }
 
@@ -103,7 +116,7 @@ export class AltanaVenusActivationStore {
       .bind(input.idempotencyKey).first<ActivationRow>();
     if (existing) {
       if (existing.source_hire_id !== input.sourceHireId || existing.source_receipt_id !== input.sourceReceiptId) {
-        throw new Error("ACTIVATION_IDEMPOTENCY_CONFLICT");
+        throw new AltanaVenusActivationIdempotencyConflict();
       }
       return record(existing);
     }
@@ -127,7 +140,7 @@ export class AltanaVenusActivationStore {
       if (replay) {
         if (replay.idempotency_key === input.idempotencyKey &&
           (replay.source_hire_id !== input.sourceHireId || replay.source_receipt_id !== input.sourceReceiptId)) {
-          throw new Error("ACTIVATION_IDEMPOTENCY_CONFLICT");
+          throw new AltanaVenusActivationIdempotencyConflict();
         }
         return record(replay);
       }
@@ -165,9 +178,21 @@ export class AltanaVenusActivationStore {
   }): Promise<void> {
     const result = await this.db.prepare(`UPDATE altana_venus_activations
       SET state = 'CONFIRMED', confirmed_receipt_id = ?, confirmed_receipt_json = ?, confirmed_receipt_hash = ?
-      WHERE activation_id = ? AND state = 'RUNNING'`)
+      WHERE activation_id = ? AND state = 'CHAIN_CONFIRMED'`)
       .bind(input.receiptId, input.receiptJson, input.receiptHash, input.activationId).run();
     if ((result.meta.changes ?? 0) !== 1) throw new Error("ACTIVATION_CONFIRMATION_PERSISTENCE_RACE");
+  }
+
+  async persistChainConfirmed(input: {
+    activationId: string;
+    executionJson: string;
+    executionHash: string;
+  }): Promise<void> {
+    const result = await this.db.prepare(`UPDATE altana_venus_activations
+      SET state = 'CHAIN_CONFIRMED', confirmed_execution_json = ?, confirmed_execution_hash = ?
+      WHERE activation_id = ? AND state = 'RUNNING'`)
+      .bind(input.executionJson, input.executionHash, input.activationId).run();
+    if ((result.meta.changes ?? 0) !== 1) throw new Error("ACTIVATION_CHAIN_CONFIRMATION_PERSISTENCE_RACE");
   }
 
   async finalizeConfirmed(activationId: string, completedAt: string): Promise<void> {
