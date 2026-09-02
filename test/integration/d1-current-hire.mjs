@@ -497,6 +497,9 @@ async function main() {
     const baseUrl = `http://127.0.0.1:${port}`;
     worker = startWorker(port, stateDirectory);
     await waitForWorker(baseUrl, worker);
+    const localActivationStatus = await requestJson(baseUrl, "/api/activations/venus-testnet-supply/status");
+    assert.equal(localActivationStatus.response.status, 200);
+    assert.equal(localActivationStatus.body.status, "UNAVAILABLE");
     const persisted = await runLifecycle(baseUrl);
     const additionalLifecycles = [];
     for (const [ordinal, definition] of ADDITIONAL_CURRENT_HIRE_CASES.entries()) {

@@ -31,6 +31,10 @@ import {
   VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
 } from "../commerce/venus-testnet-native-supply-publication.js";
 import { VenusTestnetNativeSupplyEvidenceSchema } from "../commerce/venus-testnet-native-supply-evidence.js";
+import {
+  ALTANA_VENUS_CLAIM_BOUNDARY,
+  AltanaVenusActivationRequestSchema,
+} from "../commerce/altana-venus-activation.js";
 
 type ServiceId = PositionCrewRequest["service"];
 
@@ -166,6 +170,8 @@ export function buildMarketplaceManifest(
     externalComparisonSnapshotUrl: absolute(origin, EXTERNAL_COMPARISON_SNAPSHOT_ROUTE),
     providerContractPreflightUrl: absolute(origin, PROVIDER_CONTRACT_PREFLIGHT_ROUTE),
     venusTestnetNativeSupplyEvidenceUrl: absolute(origin, VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE),
+    boundedActivationUrl: absolute(origin, "/api/activations/venus-testnet-supply"),
+    boundedActivationStatusUrl: absolute(origin, "/api/activations/venus-testnet-supply/status"),
     aacpReadinessUrl: absolute(origin, "/api/commerce/aacp"),
     freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
     freshCurrentHireUrl: absolute(origin, "/api/benchmark-hires"),
@@ -187,6 +193,7 @@ export function buildMarketplaceManifest(
       externalComparisons: "FOUR_THIRD_PARTY_EVIDENCE_ONLY_NON_ACTIVATABLE",
       providerContractPreflight: "CALLER_SUPPLIED_JSON_CONTRACT_ONLY",
       venusTestnetNativeSupply: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
+      boundedActivation: ALTANA_VENUS_CLAIM_BOUNDARY,
       agentAdvantage: "PENDING_INDEPENDENT_BLIND_EVALUATION",
     },
   };
@@ -225,6 +232,10 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
   );
   schemas.VenusTestnetNativeSupplyEvidence = z.toJSONSchema(
     VenusTestnetNativeSupplyEvidenceSchema,
+    { target: "draft-2020-12" },
+  );
+  schemas.AltanaVenusActivationRequest = z.toJSONSchema(
+    AltanaVenusActivationRequestSchema,
     { target: "draft-2020-12" },
   );
   const providerPaths = Object.fromEntries(
@@ -337,6 +348,48 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
             },
           },
         },
+      },
+    },
+    "/api/activations/venus-testnet-supply/status": {
+      get: {
+        summary: "Read bounded Venus activation capacity and public session authority",
+        operationId: "getAltanaVenusActivationStatus",
+        description: ALTANA_VENUS_CLAIM_BOUNDARY,
+        responses: { "200": { description: "Availability, remaining daily capacity, and public authority scope" } },
+      },
+    },
+    "/api/activations/venus-testnet-supply": {
+      post: {
+        summary: "Bind a completed current Lending receipt to one founder-funded testnet supply",
+        operationId: "createAltanaVenusActivation",
+        description: ALTANA_VENUS_CLAIM_BOUNDARY,
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/AltanaVenusActivationRequest" } } },
+        },
+        responses: {
+          "202": { description: "Bounded activation admitted and queued" },
+          "200": { description: "Idempotent terminal activation replay" },
+          "409": { description: "Source receipt is not an exact eligible Lending decision" },
+          "429": { description: "Per-client or global bounded budget is exhausted" },
+          "503": { description: "The selector-bound session is unavailable" },
+        },
+      },
+    },
+    "/api/activations/{activationId}": {
+      get: {
+        summary: "Poll one durable bounded activation",
+        operationId: "getAltanaVenusActivation",
+        parameters: [{ name: "activationId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": { description: "Current activation state" }, "404": { description: "Unknown activation" } },
+      },
+    },
+    "/api/activation-receipts/{receiptId}": {
+      get: {
+        summary: "Read one immutable selector-bound testnet activation receipt",
+        operationId: "getAltanaVenusActivationReceipt",
+        parameters: [{ name: "receiptId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: { "200": { description: "Durable before/after receipt and claim boundary" }, "404": { description: "Unknown receipt" } },
       },
     },
     "/api/benchmark-hires": {
