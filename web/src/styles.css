@@ -335,7 +335,7 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .capital-check-results-head small { color: var(--muted); font-size: 10px; }
 .capital-check-results-head > span { padding: 6px 9px; border-radius: 999px; color: var(--green-dark); background: var(--green-soft); font-size: 9px; font-weight: 850; }
 .capital-check-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.capital-check-card { display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 10px; min-width: 0; padding: 15px; border: 1px solid var(--line); border-top: 3px solid var(--green); border-radius: 7px; background: rgba(255,255,255,.86); }
+.capital-check-card { display: grid; grid-template-rows: auto auto auto auto 1fr auto; gap: 10px; min-width: 0; padding: 15px; border: 1px solid var(--line); border-top: 3px solid var(--green); border-radius: 7px; background: rgba(255,255,255,.86); }
 .capital-check-card.tone-urgent { border-top-color: var(--red); }
 .capital-check-card.tone-watch { border-top-color: var(--amber); }
 .capital-check-card.tone-clear { border-top-color: #638477; }
@@ -353,6 +353,11 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
 .capital-check-metric { display: grid; gap: 3px; padding: 9px 10px; border: 1px solid #e2e7e3; border-radius: 5px; background: var(--surface-soft); }
 .capital-check-metric span { color: var(--muted); font-size: 8px; text-transform: uppercase; }
 .capital-check-metric strong { font-size: 13px; overflow-wrap: anywhere; }
+.capital-check-provider-route { display: grid; align-content: start; gap: 4px; padding: 10px; border: 1px solid #d8e2dc; border-radius: 5px; background: #f4f8f5; }
+.capital-check-provider-route > span { color: var(--green-dark); font-size: 8px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.capital-check-provider-route > strong { color: var(--ink); font-size: 10px; line-height: 1.35; }
+.capital-check-provider-route > b { color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
+.capital-check-provider-route > small { color: var(--muted); font-size: 8px; line-height: 1.5; }
 .capital-check-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 2px; }
 .capital-check-card-foot > span, .capital-check-card-foot a { color: var(--muted); font-size: 8px; text-decoration: none; }
 .capital-check-card-foot a { display: inline-flex; align-items: center; gap: 3px; }
@@ -372,7 +377,8 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .capital-check-results-head { align-items: flex-start; flex-direction: column; }
   .capital-check-card h3 { font-size: 17px; }
   .capital-check-card > p, .capital-check-form label, .capital-check-form input, .capital-check-form > button, .capital-check-card-foot button { font-size: 14px; }
-  .capital-check-card-head small, .capital-check-card-head strong, .capital-check-metric span, .capital-check-card-foot > span, .capital-check-card-foot a, .capital-check-boundary, .capital-check-form small { font-size: 12px; }
+  .capital-check-card-head small, .capital-check-card-head strong, .capital-check-metric span, .capital-check-provider-route > span, .capital-check-provider-route > b, .capital-check-provider-route > small, .capital-check-card-foot > span, .capital-check-card-foot a, .capital-check-boundary, .capital-check-form small { font-size: 12px; }
+  .capital-check-provider-route > strong { font-size: 14px; }
   .capital-check-card-foot { align-items: stretch; flex-direction: column; }
   .capital-check-card-foot button { width: 100%; }
 }
