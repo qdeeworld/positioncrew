@@ -45,6 +45,17 @@ function creation(index: number, createdAt: string) {
 }
 
 describe("Altana activation D1 leases", () => {
+  it("rejects a different idempotency key racing for an existing source receipt", async () => {
+    const store = new AltanaVenusActivationStore(database());
+    const original = creation(1, "2026-09-02T00:00:00.000Z");
+    await store.create(original);
+    await expect(store.create({
+      ...creation(2, "2026-09-02T00:00:01.000Z"),
+      sourceHireId: original.sourceHireId,
+      sourceReceiptId: original.sourceReceiptId,
+    })).rejects.toMatchObject({ code: "ACTIVATION_IDEMPOTENCY_CONFLICT" });
+  });
+
   it("terminally expires CREATED work before a delayed claim can broadcast", async () => {
     const store = new AltanaVenusActivationStore(database());
     const created = await store.create(creation(1, "2026-09-02T00:00:00.000Z"));

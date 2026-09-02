@@ -154,8 +154,8 @@ export class AltanaVenusActivationStore {
       const replay = await this.db.prepare(`${SELECT} WHERE idempotency_key = ? OR source_receipt_id = ?`)
         .bind(input.idempotencyKey, input.sourceReceiptId).first<ActivationRow>();
       if (replay) {
-        if (replay.idempotency_key === input.idempotencyKey &&
-          (replay.source_hire_id !== input.sourceHireId || replay.source_receipt_id !== input.sourceReceiptId)) {
+        if (replay.idempotency_key !== input.idempotencyKey ||
+          replay.source_hire_id !== input.sourceHireId || replay.source_receipt_id !== input.sourceReceiptId) {
           throw new AltanaVenusActivationIdempotencyConflict();
         }
         return record(replay);

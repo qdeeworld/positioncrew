@@ -1125,8 +1125,16 @@ try {
     boundedActivationStatus.schemaVersion === "positioncrew.altana-venus-activation-status.v1" &&
       ["AVAILABLE", "DAILY_CAP_REACHED"].includes(boundedActivationStatus.status) &&
       boundedActivationStatus.fixedSupplyWei === "100000000000000" &&
+      boundedActivationStatus.session?.actor?.toLowerCase() === "0x50da554f1bf6a86469db201c56bfe967d2e7c43d" &&
+      /^0x[0-9a-f]{130}$/iu.test(boundedActivationStatus.session.publicKey ?? "") &&
+      Number(boundedActivationStatus.session.expiry) * 1_000 > Date.now() &&
+      /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.grantTransactionHash ?? "") &&
       boundedActivationStatus.session?.permissions?.calls?.length === 1 &&
-      boundedActivationStatus.session.permissions.calls[0]?.signature === "mint()",
+      boundedActivationStatus.session.permissions.calls[0]?.signature === "mint()" &&
+      boundedActivationStatus.session.permissions.calls[0]?.to?.toLowerCase() === "0x2e7222e51c0f6e98610a1543aa3836e092cde62c" &&
+      boundedActivationStatus.session.permissions.spend?.length === 1 &&
+      boundedActivationStatus.session.permissions.spend[0]?.limit === "100000000000000" &&
+      boundedActivationStatus.session.permissions.spend[0]?.period === "minute",
     "Bounded Altana Venus activation is unavailable or broader than the published authority",
   );
   report.boundedActivation = boundedActivationStatus;
