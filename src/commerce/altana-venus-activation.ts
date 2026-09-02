@@ -209,6 +209,7 @@ const ACCOUNT_PERMISSION_ABI = [
 ] as const;
 
 const ALTANA_NATIVE_TOKEN = "0x0000000000000000000000000000000000000000" as Address;
+const ALTANA_ANY_KEY_HASH = "0x3232323232323232323232323232323232323232323232323232323232323232" as Hex;
 const ALTANA_SCOPE_PROBE_TARGET = "0x0000000000000000000000000000000000000001" as Address;
 const ALTANA_SCOPE_PROBE_SELECTOR = "0xffffffff" as Hex;
 
@@ -358,6 +359,10 @@ export async function verifyLiveAltanaVenusSession(
     alternateTargetAllowed,
     alternateSelectorAllowed,
     spendInfosRaw,
+    wildcardApprovedSignatureCheckersRaw,
+    wildcardCallCheckerInfosRaw,
+    wildcardExecuteInfosRaw,
+    wildcardSpendInfosRaw,
   ] = await Promise.all([
     read({
       address: BNB_TESTNET.keyStore,
@@ -412,6 +417,30 @@ export async function verifyLiveAltanaVenusSession(
       functionName: "spendInfos",
       args: [accountKeyHash],
     }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "approvedSignatureCheckers",
+      args: [ALTANA_ANY_KEY_HASH],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "callCheckerInfos",
+      args: [ALTANA_ANY_KEY_HASH],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecutePackedInfos",
+      args: [ALTANA_ANY_KEY_HASH],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "spendInfos",
+      args: [ALTANA_ANY_KEY_HASH],
+    }),
   ]);
   if (registryValid !== true) throw new Error("ALTANA_SESSION_KEYSTORE_INVALID");
   const accountKeys = Array.isArray(accountKeysRaw) && Array.isArray(accountKeysRaw[0])
@@ -457,6 +486,13 @@ export async function verifyLiveAltanaVenusSession(
   if (approvedSignatureCheckers.length !== 0) {
     throw new Error("ALTANA_SESSION_SIGNATURE_CHECKER_SCOPE_MISMATCH");
   }
+  const wildcardRuleCount = [
+    wildcardApprovedSignatureCheckersRaw,
+    wildcardCallCheckerInfosRaw,
+    wildcardExecuteInfosRaw,
+    wildcardSpendInfosRaw,
+  ].reduce((count, value) => count + (Array.isArray(value) ? value.length : 0), 0);
+  if (wildcardRuleCount !== 0) throw new Error("ALTANA_SESSION_WILDCARD_SCOPE_MISMATCH");
   const spendInfos = Array.isArray(spendInfosRaw) ? spendInfosRaw : [];
   if (spendInfos.length !== 1) throw new Error("ALTANA_SESSION_SPEND_SCOPE_MISMATCH");
   const spendInfo = parseAltanaSpendInfo(spendInfos[0]);
@@ -483,6 +519,7 @@ export async function verifyLiveAltanaVenusSession(
       liveCallScopeVerified: true as const,
       liveCallCheckerRuleCount: callCheckerInfos.length,
       liveSignatureCheckerRuleCount: approvedSignatureCheckers.length,
+      liveWildcardRuleCount: wildcardRuleCount,
       liveSpendRuleCount: spendInfos.length,
       liveSpendToken: spendInfo.token,
       liveSpendPeriod: "minute" as const,

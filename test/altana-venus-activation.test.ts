@@ -73,13 +73,15 @@ describe("Altana Venus session boundary", () => {
           publicKey: accountPublicKey,
         }], [accountKeyHash]];
       }
-      if (typed.functionName === "canExecutePackedInfos") return [`0x${"55".repeat(32)}`];
+      if (typed.functionName === "canExecutePackedInfos") {
+        return typed.args?.[0] === accountKeyHash ? [`0x${"55".repeat(32)}`] : [];
+      }
       if (typed.functionName === "callCheckerInfos") return [];
       if (typed.functionName === "approvedSignatureCheckers") return [];
       if (typed.functionName === "canExecute") {
         return typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR;
       }
-      if (typed.functionName === "spendInfos") {
+      if (typed.functionName === "spendInfos" && typed.args?.[0] === accountKeyHash) {
         return [{
           token: "0x0000000000000000000000000000000000000000",
           period: 0,
@@ -90,6 +92,7 @@ describe("Altana Venus session boundary", () => {
           current: 0n,
         }];
       }
+      if (typed.functionName === "spendInfos") return [];
       throw new Error(`Unexpected function ${typed.functionName}`);
     });
     expect(verified.verification.registryValid).toBe(true);
@@ -103,6 +106,7 @@ describe("Altana Venus session boundary", () => {
     expect(verified.verification.liveCallScopeVerified).toBe(true);
     expect(verified.verification.liveCallCheckerRuleCount).toBe(0);
     expect(verified.verification.liveSignatureCheckerRuleCount).toBe(0);
+    expect(verified.verification.liveWildcardRuleCount).toBe(0);
     expect(verified.verification.liveSpendRuleCount).toBe(1);
     expect(verified.verification.liveSpendLimit).toBe(ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI.toString());
     expect(verified.verification.registryKeyId).not.toBe(accountKeyHash);
@@ -156,19 +160,53 @@ describe("Altana Venus session boundary", () => {
         publicKey: accountPublicKey,
       }], [accountKeyHash]];
       if (typed.functionName === overriddenFunction) return overriddenValue;
-      if (typed.functionName === "canExecutePackedInfos") return [`0x${"55".repeat(32)}`];
+      if (typed.functionName === "canExecutePackedInfos") {
+        return typed.args?.[0] === accountKeyHash ? [`0x${"55".repeat(32)}`] : [];
+      }
       if (typed.functionName === "callCheckerInfos") return [];
       if (typed.functionName === "approvedSignatureCheckers") return [];
       if (typed.functionName === "canExecute") {
         return typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR;
       }
-      if (typed.functionName === "spendInfos") return [{
-        token: "0x0000000000000000000000000000000000000000",
-        period: 0,
-        limit: ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI,
-      }];
+      if (typed.functionName === "spendInfos") return typed.args?.[0] === accountKeyHash
+        ? [{
+            token: "0x0000000000000000000000000000000000000000",
+            period: 0,
+            limit: ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI,
+          }]
+        : [];
       throw new Error(`Unexpected function ${typed.functionName}`);
     })).rejects.toThrow(expectedError);
+  });
+
+  it("rejects account-wide wildcard authority", async () => {
+    const accountPublicKey = padHex(signer.address, { size: 32 });
+    const accountKeyHash = keccak256(encodeAbiParameters(
+      [{ type: "uint256" }, { type: "bytes32" }],
+      [2n, keccak256(accountPublicKey)],
+    ));
+    const anyKeyHash = `0x${"32".repeat(32)}`;
+    await expect(verifyLiveAltanaVenusSession(secret(), 1_900_000_000_000, async (request) => {
+      const typed = request as { functionName?: string; args?: unknown[] };
+      if (typed.functionName === "isValidKey") return true;
+      if (typed.functionName === "getKeys") return [[{
+        expiry: 2_000_000_000n,
+        keyType: 2,
+        isSuperAdmin: false,
+        publicKey: accountPublicKey,
+      }], [accountKeyHash]];
+      if (typed.functionName === "canExecutePackedInfos") {
+        return typed.args?.[0] === anyKeyHash ? [`0x${"77".repeat(32)}`] : [`0x${"55".repeat(32)}`];
+      }
+      if (typed.functionName === "canExecute") {
+        return typed.args?.[1] === ALTANA_VENUS_VBNB && typed.args?.[2] === ALTANA_VENUS_MINT_SELECTOR;
+      }
+      if (typed.functionName === "callCheckerInfos" || typed.functionName === "approvedSignatureCheckers") return [];
+      if (typed.functionName === "spendInfos") return typed.args?.[0] === accountKeyHash
+        ? [{ token: "0x0000000000000000000000000000000000000000", period: 0, limit: ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI }]
+        : [];
+      throw new Error(`Unexpected function ${typed.functionName}`);
+    })).rejects.toThrow("ALTANA_SESSION_WILDCARD_SCOPE_MISMATCH");
   });
 });
 
