@@ -27,6 +27,7 @@ interface ActivationRow extends Record<string, unknown> {
   state: string;
   created_at: string;
   started_at: string | null;
+  submitted_at: string | null;
   completed_at: string | null;
   receipt_id: string | null;
   receipt_json: string | null;
@@ -62,7 +63,7 @@ function record(row: ActivationRow): AltanaActivationRecord {
 }
 
 const SELECT = `SELECT activation_id, idempotency_key, source_hire_id, source_receipt_id,
- state, created_at, started_at, completed_at, receipt_id, receipt_json, receipt_hash,
+ state, created_at, started_at, submitted_at, completed_at, receipt_id, receipt_json, receipt_hash,
  error_code, error_message, confirmed_receipt_id, confirmed_receipt_json, confirmed_receipt_hash,
  confirmed_execution_json, confirmed_execution_hash
  FROM altana_venus_activations`;
@@ -124,6 +125,11 @@ export class AltanaVenusActivationStore {
     if (!Number.isFinite(createdAtMs)) throw new Error("ACTIVATION_CREATED_AT_INVALID");
     const activeLeaseCutoff = new Date(createdAtMs - 5 * 60_000).toISOString();
     const spendCooldownCutoff = new Date(createdAtMs - 65_000).toISOString();
+    await this.db.prepare(`UPDATE altana_venus_activations
+      SET state = 'FAILED', completed_at = ?, error_code = 'ACTIVATION_EXECUTION_UNCERTAIN',
+          error_message = 'The pre-submission execution lease expired without a durable relay calls ID; no retry was broadcast.'
+      WHERE state = 'RUNNING' AND started_at < ?`)
+      .bind(input.createdAt, activeLeaseCutoff).run();
     const result = await this.db.prepare(`INSERT OR IGNORE INTO altana_venus_activations (
       activation_id, idempotency_key, source_hire_id, source_receipt_id,
       client_key_hash, day_bucket, state, created_at
@@ -136,7 +142,7 @@ export class AltanaVenusActivationStore {
       )
       AND NOT EXISTS (
         SELECT 1 FROM altana_venus_activations
-        WHERE COALESCE(started_at, created_at) >= ?
+        WHERE COALESCE(submitted_at, started_at, created_at) >= ?
       )`)
       .bind(
         input.activationId, input.idempotencyKey, input.sourceHireId, input.sourceReceiptId,
@@ -190,6 +196,17 @@ export class AltanaVenusActivationStore {
     return this.get(activationId);
   }
 
+  async authorizeSubmission(activationId: string, authorizedAt: string): Promise<void> {
+    const authorizedAtMs = Date.parse(authorizedAt);
+    if (!Number.isFinite(authorizedAtMs)) throw new Error("ACTIVATION_AUTHORIZED_AT_INVALID");
+    const cutoff = new Date(authorizedAtMs - 5 * 60_000).toISOString();
+    const result = await this.db.prepare(`UPDATE altana_venus_activations
+      SET started_at = ?
+      WHERE activation_id = ? AND state = 'RUNNING' AND started_at >= ?`)
+      .bind(authorizedAt, activationId, cutoff).run();
+    if ((result.meta.changes ?? 0) !== 1) throw new Error("ACTIVATION_EXECUTION_LEASE_LOST");
+  }
+
   async persistConfirmed(input: {
     activationId: string;
     receiptId: string;
@@ -219,11 +236,12 @@ export class AltanaVenusActivationStore {
     activationId: string;
     executionJson: string;
     executionHash: string;
+    submittedAt: string;
   }): Promise<void> {
     const result = await this.db.prepare(`UPDATE altana_venus_activations
-      SET state = 'CHAIN_SUBMITTED', confirmed_execution_json = ?, confirmed_execution_hash = ?
+      SET state = 'CHAIN_SUBMITTED', submitted_at = ?, confirmed_execution_json = ?, confirmed_execution_hash = ?
       WHERE activation_id = ? AND state = 'RUNNING'`)
-      .bind(input.executionJson, input.executionHash, input.activationId).run();
+      .bind(input.submittedAt, input.executionJson, input.executionHash, input.activationId).run();
     if ((result.meta.changes ?? 0) !== 1) throw new Error("ACTIVATION_CHAIN_SUBMISSION_PERSISTENCE_RACE");
   }
 

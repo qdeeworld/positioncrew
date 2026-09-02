@@ -8,6 +8,7 @@ CREATE TABLE altana_venus_activations (
   state TEXT NOT NULL CHECK (state IN ('CREATED', 'RUNNING', 'CHAIN_SUBMITTED', 'CHAIN_CONFIRMED', 'CONFIRMED', 'COMPLETED', 'FAILED')),
   created_at TEXT NOT NULL,
   started_at TEXT,
+  submitted_at TEXT,
   completed_at TEXT,
   receipt_id TEXT UNIQUE,
   receipt_json TEXT,

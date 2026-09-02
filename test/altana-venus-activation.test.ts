@@ -4,6 +4,7 @@ import {
   ALTANA_VENUS_ACTOR,
   ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI,
   ALTANA_VENUS_VBNB,
+  confirmedAltanaRelayTransaction,
   parseAltanaVenusSessionSecret,
   publicAltanaVenusSession,
 } from "../src/commerce/altana-venus-activation.js";
@@ -47,5 +48,25 @@ describe("Altana Venus session boundary", () => {
         spend: [{ limit: "300000000000000", period: "minute" }],
       },
     }), 1_900_000_000_000)).toThrow("ALTANA_SESSION_SPEND_SCOPE_MISMATCH");
+  });
+});
+
+describe("Altana relay outbox", () => {
+  it("extracts a confirmed transaction hash", () => {
+    const transactionHash = `0x${"33".repeat(32)}`;
+    expect(confirmedAltanaRelayTransaction({
+      status: 200,
+      receipts: [{ transactionHash }],
+    })).toBe(transactionHash);
+  });
+
+  it("keeps pending relay calls recoverable", () => {
+    expect(() => confirmedAltanaRelayTransaction({ status: 100, receipts: [] }))
+      .toThrow("ALTANA_RELAY_PENDING");
+  });
+
+  it("marks an explicit relay failure terminal", () => {
+    expect(() => confirmedAltanaRelayTransaction({ status: 500, receipts: [] }))
+      .toThrow("ALTANA_EXECUTION_FAILED");
   });
 });

@@ -62,13 +62,14 @@ describe("Altana activation D1 leases", () => {
     expect((await store.claim(first.activationId, "2026-09-02T00:00:01.000Z")).claimed).toBe(true);
     await store.persistChainSubmitted({
       activationId: first.activationId,
+      submittedAt: "2026-09-02T00:02:00.000Z",
       executionJson: JSON.stringify({ transactionHash: `0x${"1".repeat(64)}` }),
       executionHash: `sha256:${"2".repeat(64)}`,
     });
 
-    await expect(store.create(creation(2, "2026-09-02T00:01:00.000Z")))
+    await expect(store.create(creation(2, "2026-09-02T00:02:30.000Z")))
       .rejects.toBeInstanceOf(AltanaVenusActivationCapacityExceeded);
-    await expect(store.create(creation(2, "2026-09-02T00:01:07.000Z")))
+    await expect(store.create(creation(2, "2026-09-02T00:03:06.000Z")))
       .resolves.toMatchObject({ state: "CREATED" });
   });
 
@@ -81,5 +82,11 @@ describe("Altana activation D1 leases", () => {
       .rejects.toBeInstanceOf(AltanaVenusActivationCapacityExceeded);
     await expect(store.create(creation(2, "2026-09-02T00:10:00.000Z")))
       .resolves.toMatchObject({ state: "CREATED" });
+    await expect(store.get(first.activationId)).resolves.toMatchObject({
+      state: "FAILED",
+      error: { code: "ACTIVATION_EXECUTION_UNCERTAIN" },
+    });
+    await expect(store.authorizeSubmission(first.activationId, "2026-09-02T00:10:01.000Z"))
+      .rejects.toThrow("ACTIVATION_EXECUTION_LEASE_LOST");
   });
 });

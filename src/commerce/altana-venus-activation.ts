@@ -50,6 +50,7 @@ export interface AltanaVenusExecutionEvidence {
   suppliedWei: string;
   transactionHash: Hex;
   callsId: Hex;
+  submittedAt: string;
   beforeBlockNumber: string;
   confirmedBlockNumber: string;
   vTokenBalanceBefore: string;
@@ -68,7 +69,7 @@ export interface AltanaVenusExecutionEvidence {
 
 export type AltanaVenusSubmittedExecution = Omit<
   AltanaVenusExecutionEvidence,
-  "confirmedBlockNumber" | "vTokenBalanceAfter" | "vTokenDelta"
+  "transactionHash" | "confirmedBlockNumber" | "vTokenBalanceAfter" | "vTokenDelta"
 >;
 
 export type AltanaVenusConfirmedExecution = Omit<
@@ -105,6 +106,23 @@ const BALANCE_OF_ABI = [{
   inputs: [{ name: "account", type: "address" }],
   outputs: [{ name: "balance", type: "uint256" }],
 }] as const;
+
+const AltanaRelayStatusSchema = z.object({
+  status: z.union([z.number(), z.string()]),
+  receipts: z.array(z.object({
+    transactionHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional(),
+  }).passthrough()).optional(),
+}).passthrough();
+
+export function confirmedAltanaRelayTransaction(raw: unknown): Hex {
+  const status = AltanaRelayStatusSchema.parse(raw);
+  if (status.status === 500 || status.status === "FAILED") throw new Error("ALTANA_EXECUTION_FAILED");
+  const transactionHash = status.receipts?.[0]?.transactionHash;
+  if ((status.status !== 200 && status.status !== "CONFIRMED") || !transactionHash) {
+    throw new Error("ALTANA_RELAY_PENDING");
+  }
+  return transactionHash as Hex;
+}
 
 export function parseAltanaVenusSessionSecret(serialized: string, now = Date.now()): {
   session: Session;
@@ -154,6 +172,7 @@ export function publicAltanaVenusSession(serialized: string, now = Date.now()) {
 
 export async function executeAltanaVenusActivation(
   serializedSession: string,
+  authorizeSubmission: () => Promise<void>,
   onSubmitted: (evidence: AltanaVenusSubmittedExecution) => Promise<void>,
   onConfirmed: (evidence: AltanaVenusConfirmedExecution) => Promise<void>,
 ): Promise<AltanaVenusExecutionEvidence> {
@@ -167,22 +186,21 @@ export async function executeAltanaVenusActivation(
     args: [ALTANA_VENUS_ACTOR],
     blockNumber: beforeBlockNumber,
   });
+  await authorizeSubmission();
   const execution = await createClient({ chains: [BNB_TESTNET], defaultChainId: 97 }).execute({
     session,
     chainId: 97,
+    noWait: true,
     calls: [{ to: ALTANA_VENUS_VBNB, value: ALTANA_VENUS_SUPPLY_WEI, data: ALTANA_VENUS_MINT_SELECTOR }],
   });
-  if (execution.status !== "CONFIRMED" || !execution.transactionHash) {
-    throw new Error(`ALTANA_EXECUTION_NOT_CONFIRMED:${execution.status}`);
-  }
   const submitted: AltanaVenusSubmittedExecution = {
     chainId: 97,
     actor: ALTANA_VENUS_ACTOR,
     target: ALTANA_VENUS_VBNB,
     selector: ALTANA_VENUS_MINT_SELECTOR,
     suppliedWei: ALTANA_VENUS_SUPPLY_WEI.toString(),
-    transactionHash: execution.transactionHash,
     callsId: execution.callsId,
+    submittedAt: new Date().toISOString(),
     beforeBlockNumber: beforeBlockNumber.toString(),
     vTokenBalanceBefore: before.toString(),
     session: {
@@ -212,10 +230,17 @@ export async function executeAltanaVenusActivation(
 export async function confirmAltanaVenusSubmittedExecution(
   submitted: AltanaVenusSubmittedExecution,
 ): Promise<AltanaVenusConfirmedExecution> {
+  if (!BNB_TESTNET.relayUrl) throw new Error("ALTANA_RELAY_UNAVAILABLE");
+  const relay = createPublicClient({ chain: bscTestnet, transport: http(BNB_TESTNET.relayUrl, { timeout: 60_000 }) });
+  const rawStatus: unknown = await relay.request({
+    method: "wallet_getCallsStatus" as never,
+    params: [submitted.callsId] as never,
+  });
+  const transactionHash = confirmedAltanaRelayTransaction(rawStatus);
   const rpc = createPublicClient({ chain: bscTestnet, transport: http(BNB_TESTNET.publicRpcUrl) });
-  const receipt = await rpc.waitForTransactionReceipt({ hash: submitted.transactionHash, timeout: 60_000 });
+  const receipt = await rpc.waitForTransactionReceipt({ hash: transactionHash, timeout: 60_000 });
   if (receipt.status !== "success") throw new Error("ALTANA_EXECUTION_REVERTED");
-  return { ...submitted, confirmedBlockNumber: receipt.blockNumber.toString() };
+  return { ...submitted, transactionHash, confirmedBlockNumber: receipt.blockNumber.toString() };
 }
 
 export async function completeAltanaVenusExecutionEvidence(

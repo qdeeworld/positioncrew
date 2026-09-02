@@ -2041,7 +2041,8 @@ function activationErrorCode(error: unknown): string {
 }
 
 function isTerminalAltanaEvidenceFailure(code: string): boolean {
-  return code === "ALTANA_EXECUTION_REVERTED" || code === "ALTANA_VTOKEN_DELTA_NOT_POSITIVE";
+  return code === "ALTANA_EXECUTION_FAILED" || code === "ALTANA_EXECUTION_REVERTED" ||
+    code === "ALTANA_VTOKEN_DELTA_NOT_POSITIVE";
 }
 
 async function finishAltanaVenusActivation(env: Env, activationId: string): Promise<void> {
@@ -2073,9 +2074,12 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
       const claim = await store.claim(activationId, new Date().toISOString());
       if (!claim.claimed || !claim.activation) return;
       claimed = claim.activation;
-      evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION, async (submission) => {
+      evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION, async () => {
+        await store.authorizeSubmission(activationId, new Date().toISOString());
+      }, async (submission) => {
         await store.persistChainSubmitted({
           activationId,
+          submittedAt: submission.submittedAt,
           executionJson: canonicalJson(submission),
           executionHash: await sha256Commitment(submission),
         });
@@ -2092,6 +2096,7 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
       try {
         await store.persistChainSubmitted({
           activationId,
+          submittedAt: error.submission.submittedAt,
           executionJson: canonicalJson(error.submission),
           executionHash: await sha256Commitment(error.submission),
         });
@@ -2100,7 +2105,7 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
           level: "error",
           event: "positioncrew.altana.chain_submission_persistence_deferred",
           activationId,
-          transactionHash: error.submission.transactionHash,
+          callsId: error.submission.callsId,
           errorMessage: persistenceError instanceof Error ? persistenceError.message : "Unknown persistence failure",
         }));
       }
