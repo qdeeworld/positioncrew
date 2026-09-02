@@ -2030,7 +2030,6 @@ function altanaActivationStore(env: Env): AltanaVenusActivationStore {
 async function altanaActivationClientKey(request: Request): Promise<string> {
   return sha256Commitment({
     ip: request.headers.get("CF-Connecting-IP") ?? "unknown",
-    userAgent: (request.headers.get("User-Agent") ?? "unknown").slice(0, 240),
   });
 }
 
