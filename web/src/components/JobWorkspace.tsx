@@ -1594,6 +1594,8 @@ function LpPositionProbe({
 
   useEffect(() => {
     if (!seededTokenId.current) return;
+    seededTokenId.current = "";
+    clearCapitalCheckSeed();
     void inspect(true);
   }, []);
 
