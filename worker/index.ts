@@ -2204,10 +2204,23 @@ async function createAltanaVenusActivation(
   return json(created, 202);
 }
 
-async function getAltanaVenusActivation(request: Request, env: Env, activationId: string): Promise<Response> {
+async function getAltanaVenusActivation(
+  request: Request,
+  env: Env,
+  context: WorkerExecutionContext,
+  activationId: string,
+): Promise<Response> {
   if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
-  const activation = await altanaActivationStore(env).get(activationId);
-  return activation ? json(activation) : apiError(404, "ACTIVATION_NOT_FOUND", ["Unknown activation ID."]);
+  const store = altanaActivationStore(env);
+  let activation = await store.get(activationId);
+  if (!activation) return apiError(404, "ACTIVATION_NOT_FOUND", ["Unknown activation ID."]);
+  if (activation.state === "CREATED" || activation.state === "CONFIRMED") {
+    context.waitUntil(finishAltanaVenusActivation(env, activationId));
+  } else if (activation.state === "RUNNING") {
+    const cutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+    activation = await store.failStaleRunning(activationId, cutoff, new Date().toISOString()) ?? activation;
+  }
+  return json(activation);
 }
 
 async function getAltanaVenusActivationReceipt(request: Request, env: Env, receiptId: string): Promise<Response> {
@@ -2254,7 +2267,7 @@ async function api(
       return createAltanaVenusActivation(request, env, context);
     }
     const altanaActivationRoute = url.pathname.match(/^\/api\/activations\/([0-9a-f-]{36})$/);
-    if (altanaActivationRoute?.[1]) return getAltanaVenusActivation(request, env, altanaActivationRoute[1]);
+    if (altanaActivationRoute?.[1]) return getAltanaVenusActivation(request, env, context, altanaActivationRoute[1]);
     const altanaReceiptRoute = url.pathname.match(/^\/api\/activation-receipts\/([0-9a-f-]{36})$/);
     if (altanaReceiptRoute?.[1]) return getAltanaVenusActivationReceipt(request, env, altanaReceiptRoute[1]);
 

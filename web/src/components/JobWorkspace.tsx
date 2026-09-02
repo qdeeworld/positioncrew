@@ -2327,6 +2327,7 @@ export function JobWorkspace({
         marketplaceTrace.job.status === "COMPLETED" &&
         marketplaceTrace.receipt && (
           <VenusActivationSandbox
+            key={marketplaceTrace.receipt.receiptId}
             hireId={marketplaceTrace.hire.hireId}
             receiptId={marketplaceTrace.receipt.receiptId}
           />
