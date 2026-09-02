@@ -1558,10 +1558,16 @@ function LpPositionProbe({
   const [probe, setProbe] = useState<PancakePositionProbe | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeProbeController = useRef<AbortController | null>(null);
+  const probeOperation = useRef(0);
   const validTokenId = /^[1-9][0-9]{0,77}$/.test(tokenId.trim());
 
   async function inspect(useImmediately = false) {
     if (!validTokenId) return;
+    activeProbeController.current?.abort();
+    const controller = new AbortController();
+    const operation = ++probeOperation.current;
+    activeProbeController.current = controller;
     onClearRequest();
     setLoading(true);
     setError(null);
@@ -1569,12 +1575,14 @@ function LpPositionProbe({
     try {
       const response = await fetch(`/api/positions/pancake/${tokenId.trim()}`, {
         headers: { Accept: "application/json" },
+        signal: controller.signal,
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { details?: unknown } | null;
         throw new Error(Array.isArray(body?.details) ? String(body.details[0]) : `Position probe failed (${response.status})`);
       }
       const next = await response.json() as PancakePositionProbe;
+      if (controller.signal.aborted || operation !== probeOperation.current) return;
       setProbe(next);
       if (useImmediately) {
         onUseRequest(next.lpRequest, {
@@ -1586,17 +1594,31 @@ function LpPositionProbe({
       clearCapitalCheckSeed();
       seededTokenId.current = "";
     } catch (probeError) {
+      if (controller.signal.aborted || operation !== probeOperation.current) return;
       setError(probeError instanceof Error ? probeError.message : "Position probe failed");
     } finally {
-      setLoading(false);
+      if (operation === probeOperation.current) {
+        setLoading(false);
+        activeProbeController.current = null;
+      }
     }
   }
 
   useEffect(() => {
+    return () => {
+      probeOperation.current += 1;
+      activeProbeController.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!seededTokenId.current) return;
-    seededTokenId.current = "";
-    clearCapitalCheckSeed();
-    void inspect(true);
+    const timeout = window.setTimeout(() => {
+      seededTokenId.current = "";
+      clearCapitalCheckSeed();
+      void inspect(true);
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, []);
 
   return (
