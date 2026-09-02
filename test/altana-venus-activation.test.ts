@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { signerFromPrivateKey } from "@altananetwork/sdk";
+import { encodeAbiParameters, keccak256, padHex } from "viem";
 import {
   ALTANA_VENUS_ACTOR,
   ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI,
+  ALTANA_VENUS_SUPPLY_WEI,
   ALTANA_VENUS_VBNB,
   confirmedAltanaRelayTransaction,
   parseAltanaVenusSessionSecret,
   publicAltanaVenusSession,
+  verifyLiveAltanaVenusSession,
 } from "../src/commerce/altana-venus-activation.js";
 
 const privateKey = `0x${"11".repeat(32)}` as `0x${string}`;
@@ -34,6 +37,7 @@ describe("Altana Venus session boundary", () => {
     expect(parsed.session.walletAddress).toBe(ALTANA_VENUS_ACTOR);
     expect(parsed.session.permissions.calls).toEqual([{ to: ALTANA_VENUS_VBNB, signature: "mint()" }]);
     expect(publicAltanaVenusSession(secret(), 1_900_000_000_000)).not.toHaveProperty("privateKey");
+    expect(ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI).toBe(ALTANA_VENUS_SUPPLY_WEI * 2n);
   });
 
   it("fails closed for an expired session", () => {
@@ -48,6 +52,30 @@ describe("Altana Venus session boundary", () => {
         spend: [{ limit: "300000000000000", period: "minute" }],
       },
     }), 1_900_000_000_000)).toThrow("ALTANA_SESSION_SPEND_SCOPE_MISMATCH");
+  });
+
+  it("requires the session to remain live in both KeyStore and the account", async () => {
+    const accountPublicKeyHash = keccak256(padHex(signer.address, { size: 32 }));
+    const accountKeyHash = keccak256(encodeAbiParameters(
+      [{ type: "uint256" }, { type: "bytes32" }],
+      [2n, accountPublicKeyHash],
+    ));
+    const verified = await verifyLiveAltanaVenusSession(secret(), 1_900_000_000_000, async (request) => {
+      const typed = request as { functionName?: string; args?: unknown[] };
+      if (typed.functionName === "isValidKey") return true;
+      return [[], [accountKeyHash]];
+    });
+    expect(verified.verification.registryValid).toBe(true);
+    expect(verified.verification.accountAuthorized).toBe(true);
+    expect(verified.verification.accountKeyHash).toBe(accountKeyHash);
+    expect(verified.verification.registryKeyId).not.toBe(accountKeyHash);
+
+    await expect(verifyLiveAltanaVenusSession(secret(), 1_900_000_000_000, async (request) =>
+      (request as { functionName?: string }).functionName === "isValidKey" ? false : [[], []]
+    )).rejects.toThrow("ALTANA_SESSION_KEYSTORE_INVALID");
+    await expect(verifyLiveAltanaVenusSession(secret(), 1_900_000_000_000, async (request) =>
+      (request as { functionName?: string }).functionName === "isValidKey" ? true : [[], []]
+    )).rejects.toThrow("ALTANA_SESSION_ACCOUNT_UNAUTHORIZED");
   });
 });
 

@@ -1,5 +1,14 @@
 import { BNB_TESTNET, createClient, signerFromPrivateKey, type Session } from "@altananetwork/sdk";
-import { createPublicClient, getAddress, http, type Address, type Hex } from "viem";
+import {
+  createPublicClient,
+  encodeAbiParameters,
+  getAddress,
+  http,
+  keccak256,
+  padHex,
+  type Address,
+  type Hex,
+} from "viem";
 import { bscTestnet } from "viem/chains";
 import { z } from "zod";
 
@@ -7,7 +16,10 @@ export const ALTANA_VENUS_ACTOR = "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d" a
 export const ALTANA_VENUS_VBNB = "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c" as Address;
 export const ALTANA_VENUS_MINT_SELECTOR = "0x1249c58b" as Hex;
 export const ALTANA_VENUS_SUPPLY_WEI = 100_000_000_000_000n;
-export const ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI = 100_000_000_000_000n;
+// Native-token spend accounting includes the payable call and relay fee.
+// The product action stays fixed at 0.0001 tBNB; the additional 0.0001 tBNB
+// is explicit fee headroom, not an action-sizing allowance.
+export const ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI = 200_000_000_000_000n;
 export const ALTANA_VENUS_DAILY_ACTIVATION_LIMIT = 8;
 export const ALTANA_VENUS_CLAIM_BOUNDARY =
   "Founder-funded BSC Testnet sandbox action. It proves one selector-bound Altana session execution and durable before/after evidence; it is not a mainnet lending rescue, user custody, payment, revenue, yield, or investment-performance claim.";
@@ -107,6 +119,34 @@ const BALANCE_OF_ABI = [{
   outputs: [{ name: "balance", type: "uint256" }],
 }] as const;
 
+const KEYSTORE_IS_VALID_KEY_ABI = [{
+  type: "function",
+  name: "isValidKey",
+  stateMutability: "view",
+  inputs: [{ name: "user", type: "address" }, { name: "keyId", type: "bytes32" }],
+  outputs: [{ name: "valid", type: "bool" }],
+}] as const;
+
+const ACCOUNT_GET_KEYS_ABI = [{
+  type: "function",
+  name: "getKeys",
+  stateMutability: "view",
+  inputs: [],
+  outputs: [
+    {
+      name: "keys",
+      type: "tuple[]",
+      components: [
+        { name: "expiry", type: "uint40" },
+        { name: "keyType", type: "uint8" },
+        { name: "isSuperAdmin", type: "bool" },
+        { name: "publicKey", type: "bytes" },
+      ],
+    },
+    { name: "keyHashes", type: "bytes32[]" },
+  ],
+}] as const;
+
 const AltanaRelayStatusSchema = z.object({
   status: z.union([z.number(), z.string()]),
   receipts: z.array(z.object({
@@ -170,6 +210,54 @@ export function publicAltanaVenusSession(serialized: string, now = Date.now()) {
   };
 }
 
+export async function verifyLiveAltanaVenusSession(
+  serialized: string,
+  now = Date.now(),
+  readContract?: (request: unknown) => Promise<unknown>,
+) {
+  const parsed = parseAltanaVenusSessionSecret(serialized, now);
+  const session = publicAltanaVenusSession(serialized, now);
+  const registryKeyId = keccak256(session.publicKey as Hex);
+  const accountPublicKeyHash = keccak256(padHex(parsed.session.signer.address, { size: 32 }));
+  const accountKeyHash = keccak256(encodeAbiParameters(
+    [{ type: "uint256" }, { type: "bytes32" }],
+    [2n, accountPublicKeyHash],
+  ));
+  const rpc = createPublicClient({ chain: bscTestnet, transport: http(BNB_TESTNET.publicRpcUrl) });
+  const read = readContract ?? ((request: unknown) => rpc.readContract(request as never));
+  const [registryValid, accountKeysRaw] = await Promise.all([
+    read({
+      address: BNB_TESTNET.keyStore,
+      abi: KEYSTORE_IS_VALID_KEY_ABI,
+      functionName: "isValidKey",
+      args: [ALTANA_VENUS_ACTOR, registryKeyId],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_GET_KEYS_ABI,
+      functionName: "getKeys",
+    }),
+  ]);
+  if (registryValid !== true) throw new Error("ALTANA_SESSION_KEYSTORE_INVALID");
+  const keyHashes = Array.isArray(accountKeysRaw) && Array.isArray(accountKeysRaw[1])
+    ? accountKeysRaw[1].filter((value): value is string => typeof value === "string")
+    : [];
+  if (!keyHashes.some((value) => value.toLowerCase() === accountKeyHash.toLowerCase())) {
+    throw new Error("ALTANA_SESSION_ACCOUNT_UNAUTHORIZED");
+  }
+  return {
+    ...session,
+    verification: {
+      registryKeyId,
+      accountKeyHash,
+      keyStore: BNB_TESTNET.keyStore,
+      registryValid: true as const,
+      accountAuthorized: true as const,
+      checkedAt: new Date(now).toISOString(),
+    },
+  };
+}
+
 export async function executeAltanaVenusActivation(
   serializedSession: string,
   authorizeSubmission: () => Promise<void>,
@@ -186,6 +274,7 @@ export async function executeAltanaVenusActivation(
     args: [ALTANA_VENUS_ACTOR],
     blockNumber: beforeBlockNumber,
   });
+  await verifyLiveAltanaVenusSession(serializedSession);
   await authorizeSubmission();
   const execution = await createClient({ chains: [BNB_TESTNET], defaultChainId: 97 }).execute({
     session,

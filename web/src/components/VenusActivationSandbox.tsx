@@ -72,8 +72,8 @@ export function VenusActivationSandbox({ hireId, receiptId }: { hireId: string; 
         <span className="eyebrow"><TestTube2 size={15} /> Optional BSC Testnet proof</span>
         <h2 id="activation-sandbox-title">See bounded authority become an onchain action</h2>
         <p>
-          PositionCrew can now bind this completed decision to one founder-funded testnet supply. The delegated key can call only Venus
-          <code> mint()</code>, for exactly 0.0001 tBNB, before its published expiry.
+          PositionCrew can now bind this completed decision to one founder-funded testnet supply. Every product action is fixed at
+          0.0001 tBNB; the delegated key can call only Venus <code>mint()</code> before its published expiry.
         </p>
       </div>
       <div className="activation-sandbox__limits" aria-label="Authority limits">
@@ -82,7 +82,8 @@ export function VenusActivationSandbox({ hireId, receiptId }: { hireId: string; 
         <span><TestTube2 size={16} /><strong>Sandbox only</strong><small>No user wallet</small></span>
       </div>
       <p className="activation-sandbox__boundary">
-        This does not execute the mainnet recommendation or use your funds. Capacity is deliberately small; unavailable budget fails closed.
+        This does not execute the mainnet recommendation or use your funds. The session's 0.0002 tBNB/minute native-spend ceiling includes
+        the fixed action plus relay-fee headroom; unavailable budget fails closed.
       </p>
       {!activation && (
         <button className="primary-action" type="button" onClick={activate} disabled={pending}>
