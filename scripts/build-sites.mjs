@@ -85,7 +85,8 @@ const localWorkerConfig = {
       binding: hostingManifest.d1,
       database_name: "positioncrew-marketplace-local",
       database_id: "00000000-0000-0000-0000-000000000001",
-      migrations_dir: "../.openai/migrations",
+      // Exercise the same migration set Sites applies in production.
+      migrations_dir: "../.openai/drizzle",
     },
   ],
 };
