@@ -131,15 +131,18 @@ export class AltanaVenusActivationStore {
       WHERE (SELECT COUNT(*) FROM altana_venus_activations WHERE day_bucket = ?) < ?
       AND NOT EXISTS (
         SELECT 1 FROM altana_venus_activations
-        WHERE state IN ('CREATED', 'RUNNING') AND created_at >= ?
+        WHERE (state = 'CREATED' AND created_at >= ?)
+           OR (state = 'RUNNING' AND started_at >= ?)
       )
       AND NOT EXISTS (
-        SELECT 1 FROM altana_venus_activations WHERE created_at >= ?
+        SELECT 1 FROM altana_venus_activations
+        WHERE COALESCE(started_at, created_at) >= ?
       )`)
       .bind(
         input.activationId, input.idempotencyKey, input.sourceHireId, input.sourceReceiptId,
         input.clientKeyHash, input.dayBucket, input.createdAt,
-        input.dayBucket, input.globalDailyLimit, activeLeaseCutoff, spendCooldownCutoff,
+        input.dayBucket, input.globalDailyLimit,
+        activeLeaseCutoff, activeLeaseCutoff, spendCooldownCutoff,
       ).run();
     if ((result.meta.changes ?? 0) !== 1) {
       const replay = await this.db.prepare(`${SELECT} WHERE idempotency_key = ? OR source_receipt_id = ?`)
@@ -162,9 +165,19 @@ export class AltanaVenusActivationStore {
     claimed: boolean;
     activation: AltanaActivationRecord | null;
   }> {
+    const startedAtMs = Date.parse(startedAt);
+    if (!Number.isFinite(startedAtMs)) throw new Error("ACTIVATION_STARTED_AT_INVALID");
+    const cutoff = new Date(startedAtMs - 5 * 60_000).toISOString();
     const result = await this.db.prepare(
-      "UPDATE altana_venus_activations SET state = 'RUNNING', started_at = ? WHERE activation_id = ? AND state = 'CREATED'",
-    ).bind(startedAt, activationId).run();
+      "UPDATE altana_venus_activations SET state = 'RUNNING', started_at = ? WHERE activation_id = ? AND state = 'CREATED' AND created_at >= ?",
+    ).bind(startedAt, activationId, cutoff).run();
+    if ((result.meta.changes ?? 0) !== 1) {
+      await this.db.prepare(`UPDATE altana_venus_activations
+        SET state = 'FAILED', completed_at = ?, error_code = 'ACTIVATION_START_EXPIRED',
+            error_message = 'The activation was not started within its five-minute execution lease; no transaction was broadcast.'
+        WHERE activation_id = ? AND state = 'CREATED' AND created_at < ?`)
+        .bind(startedAt, activationId, cutoff).run();
+    }
     return { claimed: (result.meta.changes ?? 0) === 1, activation: await this.get(activationId) };
   }
 
