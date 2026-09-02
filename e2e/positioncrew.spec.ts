@@ -955,6 +955,12 @@ test("capital check turns current positions into truthful provider routes", asyn
   await expect(page.getByText("PositionCrew Yield + AiKi Venus Yield", { exact: true })).toBeVisible();
   await expect(page.getByText("PositionCrew Grid + Brain on BNB Grid Planner", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Compare providers for this job" })).toHaveCount(3);
+
+  const lpRoute = page.locator(".capital-check-card").filter({ hasText: "V3 Pools powered by HeyAnon" });
+  await lpRoute.getByRole("button", { name: "Compare providers for this job" }).click();
+  await expect(page.getByLabel("PancakeSwap position NFT ID")).toHaveValue(live.lpTokenId);
+  await expect(page.getByText(`Block-pinned PancakeSwap position from BSC block ${live.blockNumber}`, { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hire and run current request" })).toBeEnabled();
 });
 
 test("capital check does not claim jobs were found when every current read fails", async ({ page }) => {

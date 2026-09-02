@@ -1553,13 +1553,14 @@ function LpPositionProbe({
   onUseRequest: (request: JobRequest, observation: CurrentMarketplaceObservation) => void;
   onClearRequest: () => void;
 }) {
-  const [tokenId, setTokenId] = useState(() => readCapitalCheckSeed()?.pancakePositionId ?? REFERENCE_PANCAKE_POSITION_ID);
+  const seededTokenId = useRef(readCapitalCheckSeed()?.pancakePositionId ?? "");
+  const [tokenId, setTokenId] = useState(() => seededTokenId.current || REFERENCE_PANCAKE_POSITION_ID);
   const [probe, setProbe] = useState<PancakePositionProbe | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const validTokenId = /^[1-9][0-9]{0,77}$/.test(tokenId.trim());
 
-  async function inspect() {
+  async function inspect(useImmediately = false) {
     if (!validTokenId) return;
     onClearRequest();
     setLoading(true);
@@ -1573,14 +1574,28 @@ function LpPositionProbe({
         const body = await response.json().catch(() => null) as { details?: unknown } | null;
         throw new Error(Array.isArray(body?.details) ? String(body.details[0]) : `Position probe failed (${response.status})`);
       }
-      setProbe(await response.json() as PancakePositionProbe);
+      const next = await response.json() as PancakePositionProbe;
+      setProbe(next);
+      if (useImmediately) {
+        onUseRequest(next.lpRequest, {
+          blockNumber: next.source.blockNumber,
+          observedAt: next.source.blockTimestamp,
+          explorerUrl: next.source.explorerUrl,
+        });
+      }
       clearCapitalCheckSeed();
+      seededTokenId.current = "";
     } catch (probeError) {
       setError(probeError instanceof Error ? probeError.message : "Position probe failed");
     } finally {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!seededTokenId.current) return;
+    void inspect(true);
+  }, []);
 
   return (
     <section className="wallet-risk-probe lp-position-probe" aria-labelledby="lp-position-probe-title">
@@ -1614,7 +1629,7 @@ function LpPositionProbe({
             }}
           />
         </label>
-        <button type="button" onClick={() => void inspect()} disabled={loading || !validTokenId}>
+        <button type="button" onClick={() => void inspect(false)} disabled={loading || !validTokenId}>
           {loading ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}
           {loading ? "Reading" : "Inspect"}
         </button>
