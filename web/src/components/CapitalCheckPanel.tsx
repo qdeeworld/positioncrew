@@ -320,6 +320,9 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
               const Icon = task?.icon;
               const canOpen = card.tone !== "unavailable" && card.tone !== "input";
               const route = PROVIDER_ROUTES[card.service];
+              const routeOutcome = card.service === "LENDING_RESCUE" && card.state === "NO LOAN FOUND"
+                ? "Confirm the no-position result and preserve an explicit refusal."
+                : route.outcome;
               return (
                 <article className={`capital-check-card tone-${card.tone}`} key={card.service}>
                   <div className="capital-check-card-head"><span>{Icon && <Icon size={18} aria-hidden="true" />}</span><div><small>{task?.shortTitle}</small><strong>{card.state}</strong></div></div>
@@ -330,7 +333,7 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
                     <>
                       <div className="capital-check-next-step">
                         <span>What happens next</span>
-                        <strong>{route.outcome}</strong>
+                        <strong>{routeOutcome}</strong>
                       </div>
                       <details className="capital-check-provider-proof">
                         <summary><ShieldCheck size={13} aria-hidden="true" /> How providers are checked</summary>
