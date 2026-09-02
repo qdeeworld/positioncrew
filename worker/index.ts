@@ -2366,15 +2366,15 @@ async function api(
     }
 
     if (url.pathname === "/api/activations/venus-testnet-supply/status") {
-      return altanaActivationStatus(request, env);
+      return await altanaActivationStatus(request, env);
     }
     if (url.pathname === "/api/activations/venus-testnet-supply") {
-      return createAltanaVenusActivation(request, env, context);
+      return await createAltanaVenusActivation(request, env, context);
     }
     const altanaActivationRoute = url.pathname.match(/^\/api\/activations\/([0-9a-f-]{36})$/);
-    if (altanaActivationRoute?.[1]) return getAltanaVenusActivation(request, env, context, altanaActivationRoute[1]);
+    if (altanaActivationRoute?.[1]) return await getAltanaVenusActivation(request, env, context, altanaActivationRoute[1]);
     const altanaReceiptRoute = url.pathname.match(/^\/api\/activation-receipts\/([0-9a-f-]{36})$/);
-    if (altanaReceiptRoute?.[1]) return getAltanaVenusActivationReceipt(request, env, altanaReceiptRoute[1]);
+    if (altanaReceiptRoute?.[1]) return await getAltanaVenusActivationReceipt(request, env, altanaReceiptRoute[1]);
 
     if (url.pathname === "/api/providers") {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
