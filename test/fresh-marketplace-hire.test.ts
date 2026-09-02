@@ -1310,11 +1310,13 @@ describe("fresh marketplace hire contract", () => {
     const generatedCurrentMigrationName = "0001_current_block_pinned_hires.sql";
     const generatedFourCategoryMigrationName = "0002_four_category_current_hires.sql";
     const generatedShadowGridMigrationName = "0003_shadow_grid_events.sql";
+    const generatedAltanaActivationMigrationName = "0004_altana_venus_activations.sql";
     expect(readdirSync(drizzleRoot).sort()).toEqual([
       generatedMigrationName,
       generatedCurrentMigrationName,
       generatedFourCategoryMigrationName,
       generatedShadowGridMigrationName,
+      generatedAltanaActivationMigrationName,
       "meta",
     ]);
     expect(readdirSync(resolve(drizzleRoot, "meta")).sort()).toEqual([
@@ -1346,7 +1348,18 @@ describe("fresh marketplace hire contract", () => {
       { idx: 1, tag: "0001_current_block_pinned_hires" },
       { idx: 2, tag: "0002_four_category_current_hires" },
       { idx: 3, tag: "0003_shadow_grid_events" },
+      { idx: 4, tag: "0004_altana_venus_activations" },
     ]);
+
+    const altanaActivationMigration = readFileSync(
+      resolve(PROJECT_ROOT, "migrations", "0005_altana_venus_activations.sql"),
+      "utf8",
+    );
+    const generatedAltanaActivationMigration = readFileSync(
+      resolve(drizzleRoot, generatedAltanaActivationMigrationName),
+      "utf8",
+    );
+    expect(generatedAltanaActivationMigration).toBe(altanaActivationMigration);
 
     const currentMigration = readFileSync(
       resolve(PROJECT_ROOT, "migrations", "0002_current_block_pinned_hires.sql"),
