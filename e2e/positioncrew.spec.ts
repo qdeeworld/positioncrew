@@ -894,6 +894,60 @@ test("a current lending hire does not depend on historical fixtures or external 
   });
 });
 
+test("a bounded testnet activation keeps polling through durable chain states", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page);
+  const activationId = "50000000-0000-4000-8000-000000000005";
+  const activationReceiptId = "60000000-0000-4000-8000-000000000006";
+  let statusReads = 0;
+  const activation = (state: "CHAIN_SUBMITTED" | "CHAIN_CONFIRMED" | "COMPLETED") => ({
+    schemaVersion: "positioncrew.altana-venus-activation.v1",
+    activationId,
+    idempotencyKey: `venus-sandbox:${mockedHire.receiptId}`,
+    sourceHireId: mockedHire.hireId,
+    sourceReceiptId: mockedHire.receiptId,
+    state,
+    createdAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
+    completedAt: state === "COMPLETED" ? new Date().toISOString() : null,
+    receiptId: state === "COMPLETED" ? activationReceiptId : null,
+    receipt: state === "COMPLETED" ? {
+      transaction: {
+        hash: `0x${"7".repeat(64)}`,
+        explorerUrl: `https://testnet.bscscan.com/tx/0x${"7".repeat(64)}`,
+        vTokenDelta: "499000",
+      },
+      authority: { expiry: 1_790_208_000, selector: "0x1249c58b" },
+    } : null,
+    receiptHash: state === "COMPLETED" ? `sha256:${"8".repeat(64)}` : null,
+    error: null,
+    confirmedExecution: null,
+  });
+
+  await page.route("**/api/activations/venus-testnet-supply", async (route) => {
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(activation("CHAIN_SUBMITTED")) });
+  });
+  await page.route(new RegExp(`/api/activations/${activationId}$`), async (route) => {
+    statusReads += 1;
+    const state = statusReads === 1 ? "CHAIN_SUBMITTED" : statusReads === 2 ? "CHAIN_CONFIRMED" : "COMPLETED";
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(activation(state)) });
+  });
+
+  await page.goto("/#jobs");
+  await page.getByPlaceholder("0x account address").fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position" }).click();
+  await page.getByRole("button", { name: "Check eligibility and hire" }).click();
+  await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
+  await page.getByRole("button", { name: "Run 0.0001 tBNB sandbox action" }).click();
+  await expect(page.getByText("CHAIN SUBMITTED", { exact: true })).toBeVisible();
+  await expect(page.getByText("Onchain proof complete", { exact: true })).toBeVisible({ timeout: 8_000 });
+  expect(statusReads).toBeGreaterThanOrEqual(3);
+  await expect(page.getByRole("link", { name: "Inspect transaction" })).toHaveAttribute("href", /testnet\.bscscan\.com/);
+  await expect(page.getByRole("link", { name: "Open durable activation receipt" })).toHaveAttribute(
+    "href",
+    `/api/activation-receipts/${activationReceiptId}`,
+  );
+});
+
 test("a lost hire response reuses the unresolved idempotency key", async ({ page }) => {
   const mockedHire = await installCurrentLendingHireRoutes(page, { abortCreate: true });
   await page.goto("/#marketplace");

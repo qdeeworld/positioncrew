@@ -2242,8 +2242,6 @@ async function createAltanaVenusActivation(
   context: WorkerExecutionContext,
 ): Promise<Response> {
   if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
-  if (!env.ALTANA_VENUS_SESSION) return apiError(503, "ACTIVATION_UNAVAILABLE", ["Bounded session unavailable."]);
-  publicAltanaVenusSession(env.ALTANA_VENUS_SESSION);
   const parsed = AltanaVenusActivationRequestSchema.parse(await boundedJson(request));
   const source = await freshStore(env).getHire(parsed.sourceHireId);
   if (!source ||
@@ -2269,6 +2267,8 @@ async function createAltanaVenusActivation(
     }
     return json(prior, 200);
   }
+  if (!env.ALTANA_VENUS_SESSION) return apiError(503, "ACTIVATION_UNAVAILABLE", ["Bounded session unavailable."]);
+  publicAltanaVenusSession(env.ALTANA_VENUS_SESSION);
   const created = await store.create({
     activationId: crypto.randomUUID(),
     idempotencyKey: parsed.idempotencyKey,

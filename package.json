@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json && tsc -p tsconfig.worker.json",
     "test": "vitest run",
     "test:integration:d1": "npm run build && npm run test:integration:d1:built",
-    "test:integration:d1:built": "node test/integration/d1-current-hire.mjs && node test/integration/d1-shadow-grid-ledger.mjs",
+    "test:integration:d1:built": "node test/integration/d1-current-hire.mjs && node test/integration/d1-altana-activation.mjs && node test/integration/d1-shadow-grid-ledger.mjs",
     "test:e2e": "npm run build && node test/integration/run-playwright-with-d1.mjs",
     "benchmark:verify-lock": "tsx src/cli/verify-benchmark-lock.ts",
     "benchmark:verify-locks": "tsx src/cli/verify-benchmark-lock.ts",

@@ -120,6 +120,10 @@ export class AltanaVenusActivationStore {
       }
       return record(existing);
     }
+    const createdAtMs = Date.parse(input.createdAt);
+    if (!Number.isFinite(createdAtMs)) throw new Error("ACTIVATION_CREATED_AT_INVALID");
+    const activeLeaseCutoff = new Date(createdAtMs - 5 * 60_000).toISOString();
+    const spendCooldownCutoff = new Date(createdAtMs - 65_000).toISOString();
     const result = await this.db.prepare(`INSERT OR IGNORE INTO altana_venus_activations (
       activation_id, idempotency_key, source_hire_id, source_receipt_id,
       client_key_hash, day_bucket, state, created_at
@@ -127,12 +131,15 @@ export class AltanaVenusActivationStore {
       WHERE (SELECT COUNT(*) FROM altana_venus_activations WHERE day_bucket = ?) < ?
       AND NOT EXISTS (
         SELECT 1 FROM altana_venus_activations
-        WHERE state IN ('CREATED', 'RUNNING', 'CHAIN_SUBMITTED', 'CHAIN_CONFIRMED', 'CONFIRMED')
+        WHERE state IN ('CREATED', 'RUNNING') AND created_at >= ?
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM altana_venus_activations WHERE created_at >= ?
       )`)
       .bind(
         input.activationId, input.idempotencyKey, input.sourceHireId, input.sourceReceiptId,
         input.clientKeyHash, input.dayBucket, input.createdAt,
-        input.dayBucket, input.globalDailyLimit,
+        input.dayBucket, input.globalDailyLimit, activeLeaseCutoff, spendCooldownCutoff,
       ).run();
     if ((result.meta.changes ?? 0) !== 1) {
       const replay = await this.db.prepare(`${SELECT} WHERE idempotency_key = ? OR source_receipt_id = ?`)
@@ -234,7 +241,7 @@ export class AltanaVenusActivationStore {
   async fail(activationId: string, code: string, message: string, completedAt: string): Promise<void> {
     await this.db.prepare(`UPDATE altana_venus_activations
       SET state = 'FAILED', completed_at = ?, error_code = ?, error_message = ?
-      WHERE activation_id = ? AND state IN ('RUNNING', 'CHAIN_SUBMITTED', 'CHAIN_CONFIRMED')`)
+      WHERE activation_id = ? AND state IN ('CREATED', 'RUNNING', 'CHAIN_SUBMITTED', 'CHAIN_CONFIRMED')`)
       .bind(completedAt, code, message.slice(0, 500), activationId).run();
   }
 
