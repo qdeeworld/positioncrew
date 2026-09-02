@@ -3,7 +3,7 @@ import { ExternalLink, LoaderCircle, LockKeyhole, ShieldCheck, TestTube2 } from 
 
 interface ActivationRecord {
   activationId: string;
-  state: "CREATED" | "RUNNING" | "COMPLETED" | "FAILED";
+  state: "CREATED" | "RUNNING" | "CONFIRMED" | "COMPLETED" | "FAILED";
   receiptId: string | null;
   receipt: {
     transaction?: { hash?: string; explorerUrl?: string; vTokenDelta?: string };
@@ -22,7 +22,7 @@ export function VenusActivationSandbox({ hireId, receiptId }: { hireId: string; 
   );
 
   useEffect(() => {
-    if (!activation || (activation.state !== "CREATED" && activation.state !== "RUNNING")) return;
+    if (!activation || !["CREATED", "RUNNING", "CONFIRMED"].includes(activation.state)) return;
     const timer = window.setInterval(async () => {
       try {
         const response = await fetch(`/api/activations/${activation.activationId}`, { cache: "no-store" });
@@ -64,7 +64,7 @@ export function VenusActivationSandbox({ hireId, receiptId }: { hireId: string; 
     }
   }
 
-  const pending = starting || activation?.state === "CREATED" || activation?.state === "RUNNING";
+  const pending = starting || activation?.state === "CREATED" || activation?.state === "RUNNING" || activation?.state === "CONFIRMED";
   return (
     <section className="activation-sandbox" aria-labelledby="activation-sandbox-title">
       <div className="activation-sandbox__intro">

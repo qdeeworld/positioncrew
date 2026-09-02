@@ -1,6 +1,6 @@
 import type { D1Database } from "./d1-marketplace-store.js";
 
-export type AltanaActivationState = "CREATED" | "RUNNING" | "COMPLETED" | "FAILED";
+export type AltanaActivationState = "CREATED" | "RUNNING" | "CONFIRMED" | "COMPLETED" | "FAILED";
 
 export interface AltanaActivationRecord {
   schemaVersion: "positioncrew.altana-venus-activation.v1";
@@ -32,6 +32,9 @@ interface ActivationRow extends Record<string, unknown> {
   receipt_hash: string | null;
   error_code: string | null;
   error_message: string | null;
+  confirmed_receipt_id: string | null;
+  confirmed_receipt_json: string | null;
+  confirmed_receipt_hash: string | null;
 }
 
 function record(row: ActivationRow): AltanaActivationRecord {
@@ -56,7 +59,8 @@ function record(row: ActivationRow): AltanaActivationRecord {
 
 const SELECT = `SELECT activation_id, idempotency_key, source_hire_id, source_receipt_id,
  state, created_at, started_at, completed_at, receipt_id, receipt_json, receipt_hash,
- error_code, error_message FROM altana_venus_activations`;
+ error_code, error_message, confirmed_receipt_id, confirmed_receipt_json, confirmed_receipt_hash
+ FROM altana_venus_activations`;
 
 export class AltanaVenusActivationCapacityExceeded extends Error {
   readonly code = "ACTIVATION_CAPACITY_EXCEEDED";
@@ -94,7 +98,6 @@ export class AltanaVenusActivationStore {
     dayBucket: string;
     createdAt: string;
     globalDailyLimit: number;
-    runningLeaseCutoff: string;
   }): Promise<AltanaActivationRecord> {
     const existing = await this.db.prepare(`${SELECT} WHERE idempotency_key = ?`)
       .bind(input.idempotencyKey).first<ActivationRow>();
@@ -106,17 +109,17 @@ export class AltanaVenusActivationStore {
     }
     const result = await this.db.prepare(`INSERT OR IGNORE INTO altana_venus_activations (
       activation_id, idempotency_key, source_hire_id, source_receipt_id,
-      client_key_hash, day_bucket, state, created_at, started_at
-    ) SELECT ?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?
+      client_key_hash, day_bucket, state, created_at
+    ) SELECT ?, ?, ?, ?, ?, ?, 'CREATED', ?
       WHERE (SELECT COUNT(*) FROM altana_venus_activations WHERE day_bucket = ?) < ?
       AND NOT EXISTS (
         SELECT 1 FROM altana_venus_activations
-        WHERE state = 'RUNNING' AND started_at >= ?
+        WHERE state IN ('CREATED', 'RUNNING')
       )`)
       .bind(
         input.activationId, input.idempotencyKey, input.sourceHireId, input.sourceReceiptId,
-        input.clientKeyHash, input.dayBucket, input.createdAt, input.createdAt,
-        input.dayBucket, input.globalDailyLimit, input.runningLeaseCutoff,
+        input.clientKeyHash, input.dayBucket, input.createdAt,
+        input.dayBucket, input.globalDailyLimit,
       ).run();
     if ((result.meta.changes ?? 0) !== 1) {
       const replay = await this.db.prepare(`${SELECT} WHERE idempotency_key = ? OR source_receipt_id = ?`)
@@ -129,11 +132,46 @@ export class AltanaVenusActivationStore {
     return created;
   }
 
-  async claim(activationId: string, startedAt: string): Promise<AltanaActivationRecord | null> {
-    await this.db.prepare(
+  async claim(activationId: string, startedAt: string): Promise<{
+    claimed: boolean;
+    activation: AltanaActivationRecord | null;
+  }> {
+    const result = await this.db.prepare(
       "UPDATE altana_venus_activations SET state = 'RUNNING', started_at = ? WHERE activation_id = ? AND state = 'CREATED'",
     ).bind(startedAt, activationId).run();
+    return { claimed: (result.meta.changes ?? 0) === 1, activation: await this.get(activationId) };
+  }
+
+  async failStaleRunning(activationId: string, cutoff: string, completedAt: string): Promise<AltanaActivationRecord | null> {
+    await this.db.prepare(`UPDATE altana_venus_activations
+      SET state = 'FAILED', completed_at = ?, error_code = 'ACTIVATION_EXECUTION_UNCERTAIN',
+          error_message = 'The execution lease expired without durable confirmation; no retry was broadcast.'
+      WHERE activation_id = ? AND state = 'RUNNING' AND started_at < ?`)
+      .bind(completedAt, activationId, cutoff).run();
     return this.get(activationId);
+  }
+
+  async persistConfirmed(input: {
+    activationId: string;
+    receiptId: string;
+    receiptJson: string;
+    receiptHash: string;
+  }): Promise<void> {
+    const result = await this.db.prepare(`UPDATE altana_venus_activations
+      SET state = 'CONFIRMED', confirmed_receipt_id = ?, confirmed_receipt_json = ?, confirmed_receipt_hash = ?
+      WHERE activation_id = ? AND state = 'RUNNING'`)
+      .bind(input.receiptId, input.receiptJson, input.receiptHash, input.activationId).run();
+    if ((result.meta.changes ?? 0) !== 1) throw new Error("ACTIVATION_CONFIRMATION_PERSISTENCE_RACE");
+  }
+
+  async finalizeConfirmed(activationId: string, completedAt: string): Promise<void> {
+    const result = await this.db.prepare(`UPDATE altana_venus_activations
+      SET state = 'COMPLETED', completed_at = ?, receipt_id = confirmed_receipt_id,
+          receipt_json = confirmed_receipt_json, receipt_hash = confirmed_receipt_hash
+      WHERE activation_id = ? AND state = 'CONFIRMED'
+        AND confirmed_receipt_id IS NOT NULL AND confirmed_receipt_json IS NOT NULL AND confirmed_receipt_hash IS NOT NULL`)
+      .bind(completedAt, activationId).run();
+    if ((result.meta.changes ?? 0) !== 1) throw new Error("ACTIVATION_FINALIZATION_RACE");
   }
 
   async complete(input: {

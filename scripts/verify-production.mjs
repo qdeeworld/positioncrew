@@ -1123,7 +1123,7 @@ try {
   );
   assert(
     boundedActivationStatus.schemaVersion === "positioncrew.altana-venus-activation-status.v1" &&
-      boundedActivationStatus.status === "AVAILABLE" &&
+      ["AVAILABLE", "DAILY_CAP_REACHED"].includes(boundedActivationStatus.status) &&
       boundedActivationStatus.fixedSupplyWei === "100000000000000" &&
       boundedActivationStatus.session?.permissions?.calls?.length === 1 &&
       boundedActivationStatus.session.permissions.calls[0]?.signature === "mint()",

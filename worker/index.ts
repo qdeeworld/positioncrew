@@ -2037,14 +2037,27 @@ function activationErrorCode(error: unknown): string {
 
 async function finishAltanaVenusActivation(env: Env, activationId: string): Promise<void> {
   const store = altanaActivationStore(env);
-  const claimed = await store.claim(activationId, new Date().toISOString());
-  if (!claimed || claimed.state !== "RUNNING") return;
+  const existing = await store.get(activationId);
+  if (existing?.state === "CONFIRMED") {
+    await store.finalizeConfirmed(activationId, new Date().toISOString());
+    return;
+  }
+  const claim = await store.claim(activationId, new Date().toISOString());
+  if (!claim.claimed || !claim.activation) return;
+  const claimed = claim.activation;
+  let evidence: Awaited<ReturnType<typeof executeAltanaVenusActivation>>;
   try {
     if (!env.ALTANA_VENUS_SESSION) throw new Error("ALTANA_SESSION_UNAVAILABLE");
-    const evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION);
-    const completedAt = new Date().toISOString();
-    const receiptId = crypto.randomUUID();
-    const receipt = {
+    evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION);
+  } catch (error) {
+    const code = activationErrorCode(error);
+    const message = error instanceof Error ? error.message : "The bounded action failed closed";
+    await store.fail(activationId, code, message, new Date().toISOString());
+    return;
+  }
+  const completedAt = new Date().toISOString();
+  const receiptId = crypto.randomUUID();
+  const receipt = {
       schemaVersion: "positioncrew.altana-venus-activation-receipt.v1",
       receiptId,
       activationId,
@@ -2078,19 +2091,35 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
       },
       completedAt,
       claimBoundary: ALTANA_VENUS_CLAIM_BOUNDARY,
-    };
-    const receiptJson = canonicalJson(receipt);
-    await store.complete({
+  };
+  const receiptJson = canonicalJson(receipt);
+  const receiptHash = await sha256Commitment(receipt);
+  try {
+    await store.persistConfirmed({
       activationId,
       receiptId,
       receiptJson,
-      receiptHash: await sha256Commitment(receipt),
-      completedAt,
+      receiptHash,
     });
   } catch (error) {
-    const code = activationErrorCode(error);
-    const message = error instanceof Error ? error.message : "The bounded action failed closed";
-    await store.fail(activationId, code, message, new Date().toISOString());
+    console.error(JSON.stringify({
+      level: "error",
+      event: "positioncrew.altana.confirmed_evidence_persistence_failed",
+      activationId,
+      transactionHash: evidence.transactionHash,
+      errorMessage: error instanceof Error ? error.message : "Unknown persistence failure",
+    }));
+    return;
+  }
+  try {
+    await store.finalizeConfirmed(activationId, completedAt);
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: "error",
+      event: "positioncrew.altana.receipt_finalization_deferred",
+      activationId,
+      errorMessage: error instanceof Error ? error.message : "Unknown finalization failure",
+    }));
   }
 }
 
@@ -2149,7 +2178,18 @@ async function createAltanaVenusActivation(
   }
   const store = altanaActivationStore(env);
   const prior = await store.getBySourceReceipt(parsed.sourceReceiptId);
-  if (prior) return json(prior, prior.state === "CREATED" || prior.state === "RUNNING" ? 202 : 200);
+  if (prior) {
+    if (prior.state === "CREATED" || prior.state === "CONFIRMED") {
+      context.waitUntil(finishAltanaVenusActivation(env, prior.activationId));
+      return json(prior, 202);
+    }
+    if (prior.state === "RUNNING") {
+      const cutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+      const recovered = await store.failStaleRunning(prior.activationId, cutoff, new Date().toISOString());
+      return json(recovered ?? prior, recovered?.state === "FAILED" ? 200 : 202);
+    }
+    return json(prior, 200);
+  }
   const created = await store.create({
     activationId: crypto.randomUUID(),
     idempotencyKey: parsed.idempotencyKey,
@@ -2159,7 +2199,6 @@ async function createAltanaVenusActivation(
     dayBucket: new Date().toISOString().slice(0, 10),
     createdAt: new Date().toISOString(),
     globalDailyLimit: ALTANA_VENUS_DAILY_ACTIVATION_LIMIT,
-    runningLeaseCutoff: new Date(Date.now() - 5 * 60_000).toISOString(),
   });
   context.waitUntil(finishAltanaVenusActivation(env, created.activationId));
   return json(created, 202);

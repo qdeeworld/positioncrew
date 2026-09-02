@@ -5,7 +5,7 @@ CREATE TABLE altana_venus_activations (
   source_receipt_id TEXT NOT NULL UNIQUE,
   client_key_hash TEXT NOT NULL,
   day_bucket TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('CREATED', 'RUNNING', 'COMPLETED', 'FAILED')),
+  state TEXT NOT NULL CHECK (state IN ('CREATED', 'RUNNING', 'CONFIRMED', 'COMPLETED', 'FAILED')),
   created_at TEXT NOT NULL,
   started_at TEXT,
   completed_at TEXT,
@@ -14,6 +14,9 @@ CREATE TABLE altana_venus_activations (
   receipt_hash TEXT,
   error_code TEXT,
   error_message TEXT,
+  confirmed_receipt_id TEXT,
+  confirmed_receipt_json TEXT,
+  confirmed_receipt_hash TEXT,
   UNIQUE (client_key_hash, day_bucket)
 );
 
