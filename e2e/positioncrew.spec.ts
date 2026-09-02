@@ -957,6 +957,19 @@ test("capital check turns current positions into truthful provider routes", asyn
   await expect(page.getByRole("button", { name: "Compare providers for this job" })).toHaveCount(3);
 });
 
+test("capital check does not claim jobs were found when every current read fails", async ({ page }) => {
+  await page.route("**/api/wallets/*/venus", async (route) => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.route("**/api/markets/venus/stable-yields", async (route) => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.route("**/api/markets/pancake/wbnb-usdt/grid", async (route) => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.goto("/#marketplace");
+  await page.locator(".capital-check-form input").first().fill("0x0000000000000000000000000000000000000001");
+  await page.locator(".capital-check-form").getByRole("button", { name: "Check my BSC capital" }).click();
+
+  await expect(page.getByText("No current jobs could be determined.", { exact: true })).toBeVisible();
+  await expect(page.getByText("0/4 ready", { exact: true })).toBeVisible();
+  await expect(page.getByText("Jobs found. Now choose who handles them.", { exact: true })).toHaveCount(0);
+});
+
 test("BSC telemetry and Venus wallet risk are independently inspectable", async ({ page }) => {
   await installDeterministicLiveProbeRoutes(page);
   await page.goto("/#marketplace");
