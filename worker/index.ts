@@ -2277,6 +2277,11 @@ async function createAltanaVenusActivation(
   const store = altanaActivationStore(env);
   const prior = await store.getBySourceReceipt(parsed.sourceReceiptId);
   if (prior) {
+    if (prior.idempotencyKey !== parsed.idempotencyKey) {
+      return apiError(409, "ACTIVATION_IDEMPOTENCY_CONFLICT", [
+        "This source receipt is already bound to a different idempotency key.",
+      ]);
+    }
     if (prior.state === "CREATED" || prior.state === "CHAIN_SUBMITTED" || prior.state === "CHAIN_CONFIRMED" || prior.state === "CONFIRMED") {
       context.waitUntil(finishAltanaVenusActivation(env, prior.activationId));
       return json(prior, 202);

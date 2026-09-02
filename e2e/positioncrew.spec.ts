@@ -928,7 +928,8 @@ test("a bounded testnet activation keeps polling through durable chain states", 
   });
   await page.route(new RegExp(`/api/activations/${activationId}$`), async (route) => {
     statusReads += 1;
-    const state = statusReads === 1 ? "CHAIN_SUBMITTED" : statusReads === 2 ? "CHAIN_CONFIRMED" : "COMPLETED";
+    if (statusReads === 1) return route.abort("connectionreset");
+    const state = statusReads === 2 ? "CHAIN_SUBMITTED" : statusReads === 3 ? "CHAIN_CONFIRMED" : "COMPLETED";
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(activation(state)) });
   });
 
@@ -939,8 +940,10 @@ test("a bounded testnet activation keeps polling through durable chain states", 
   await expect(page.getByRole("heading", { name: "Repay 152 USDT" })).toBeVisible();
   await page.getByRole("button", { name: "Run 0.0001 tBNB sandbox action" }).click();
   await expect(page.getByText("CHAIN SUBMITTED", { exact: true })).toBeVisible();
+  await expect(page.locator(".activation-sandbox .form-error")).toBeVisible({ timeout: 4_000 });
   await expect(page.getByText("Onchain proof complete", { exact: true })).toBeVisible({ timeout: 8_000 });
-  expect(statusReads).toBeGreaterThanOrEqual(3);
+  expect(statusReads).toBeGreaterThanOrEqual(4);
+  await expect(page.locator(".activation-sandbox .form-error")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Inspect transaction" })).toHaveAttribute("href", /testnet\.bscscan\.com/);
   await expect(page.getByRole("link", { name: "Open durable activation receipt" })).toHaveAttribute(
     "href",

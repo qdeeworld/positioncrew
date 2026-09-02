@@ -27,6 +27,7 @@ export function VenusActivationSandbox({ hireId, receiptId }: { hireId: string; 
       try {
         const response = await fetch(`/api/activations/${activation.activationId}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`Status returned HTTP ${response.status}`);
+        setError(null);
         setActivation(await response.json() as ActivationRecord);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Activation status is temporarily unavailable.");
