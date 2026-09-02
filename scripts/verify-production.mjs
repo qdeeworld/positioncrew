@@ -1143,6 +1143,7 @@ try {
       /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.accountKeyPublicKey ?? "") &&
       boundedActivationStatus.session.verification?.liveExecutionRuleCount === 1 &&
       boundedActivationStatus.session.verification?.liveCallScopeVerified === true &&
+      boundedActivationStatus.session.verification?.liveCallCheckerRuleCount === 0 &&
       boundedActivationStatus.session.verification?.liveSpendRuleCount === 1 &&
       boundedActivationStatus.session.verification?.liveSpendToken?.toLowerCase() === "0x0000000000000000000000000000000000000000" &&
       boundedActivationStatus.session.verification?.liveSpendPeriod === "minute" &&
