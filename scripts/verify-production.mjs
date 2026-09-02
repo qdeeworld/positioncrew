@@ -1137,6 +1137,10 @@ try {
       boundedActivationStatus.session.permissions.spend[0]?.period === "minute" &&
       boundedActivationStatus.session.verification?.registryValid === true &&
       boundedActivationStatus.session.verification?.accountAuthorized === true &&
+      boundedActivationStatus.session.verification?.accountKeyExpiry === boundedActivationStatus.session.expiry &&
+      boundedActivationStatus.session.verification?.accountKeyType === 2 &&
+      boundedActivationStatus.session.verification?.accountKeyIsSuperAdmin === false &&
+      /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.accountKeyPublicKey ?? "") &&
       /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.registryKeyId ?? "") &&
       /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.accountKeyHash ?? "") &&
       boundedActivationStatus.session.verification?.keyStore?.toLowerCase() === "0x6b8361c29d05d498b1a12b54a37310f94171e94a",

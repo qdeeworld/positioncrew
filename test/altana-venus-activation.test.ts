@@ -56,6 +56,7 @@ describe("Altana Venus session boundary", () => {
 
   it("requires the session to remain live in both KeyStore and the account", async () => {
     const accountPublicKeyHash = keccak256(padHex(signer.address, { size: 32 }));
+    const accountPublicKey = padHex(signer.address, { size: 32 });
     const accountKeyHash = keccak256(encodeAbiParameters(
       [{ type: "uint256" }, { type: "bytes32" }],
       [2n, accountPublicKeyHash],
@@ -63,11 +64,20 @@ describe("Altana Venus session boundary", () => {
     const verified = await verifyLiveAltanaVenusSession(secret(), 1_900_000_000_000, async (request) => {
       const typed = request as { functionName?: string; args?: unknown[] };
       if (typed.functionName === "isValidKey") return true;
-      return [[], [accountKeyHash]];
+      return [[{
+        expiry: 2_000_000_000n,
+        keyType: 2,
+        isSuperAdmin: false,
+        publicKey: accountPublicKey,
+      }], [accountKeyHash]];
     });
     expect(verified.verification.registryValid).toBe(true);
     expect(verified.verification.accountAuthorized).toBe(true);
     expect(verified.verification.accountKeyHash).toBe(accountKeyHash);
+    expect(verified.verification.accountKeyExpiry).toBe(2_000_000_000);
+    expect(verified.verification.accountKeyType).toBe(2);
+    expect(verified.verification.accountKeyIsSuperAdmin).toBe(false);
+    expect(verified.verification.accountKeyPublicKey).toBe(accountPublicKey);
     expect(verified.verification.registryKeyId).not.toBe(accountKeyHash);
 
     await expect(verifyLiveAltanaVenusSession(secret(), 1_900_000_000_000, async (request) =>
@@ -76,6 +86,24 @@ describe("Altana Venus session boundary", () => {
     await expect(verifyLiveAltanaVenusSession(secret(), 1_900_000_000_000, async (request) =>
       (request as { functionName?: string }).functionName === "isValidKey" ? true : [[], []]
     )).rejects.toThrow("ALTANA_SESSION_ACCOUNT_UNAUTHORIZED");
+  });
+
+  it.each([
+    [{ expiry: 1_999_999_999n, keyType: 2, isSuperAdmin: false, publicKey: padHex(signer.address, { size: 32 }) }, "ALTANA_SESSION_ACCOUNT_EXPIRY_MISMATCH"],
+    [{ expiry: 2_000_000_000n, keyType: 1, isSuperAdmin: false, publicKey: padHex(signer.address, { size: 32 }) }, "ALTANA_SESSION_ACCOUNT_KEY_TYPE_MISMATCH"],
+    [{ expiry: 2_000_000_000n, keyType: 2, isSuperAdmin: true, publicKey: padHex(signer.address, { size: 32 }) }, "ALTANA_SESSION_ACCOUNT_SUPER_ADMIN"],
+    [{ expiry: 2_000_000_000n, keyType: 2, isSuperAdmin: false, publicKey: `0x${"44".repeat(32)}` }, "ALTANA_SESSION_ACCOUNT_PUBLIC_KEY_MISMATCH"],
+  ])("rejects mismatched account-key metadata", async (metadata, expectedError) => {
+    const accountPublicKeyHash = keccak256(padHex(signer.address, { size: 32 }));
+    const accountKeyHash = keccak256(encodeAbiParameters(
+      [{ type: "uint256" }, { type: "bytes32" }],
+      [2n, accountPublicKeyHash],
+    ));
+    await expect(verifyLiveAltanaVenusSession(secret(), 1_900_000_000_000, async (request) =>
+      (request as { functionName?: string }).functionName === "isValidKey"
+        ? true
+        : [[metadata], [accountKeyHash]]
+    )).rejects.toThrow(expectedError);
   });
 });
 

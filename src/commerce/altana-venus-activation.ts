@@ -16,9 +16,9 @@ export const ALTANA_VENUS_ACTOR = "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d" a
 export const ALTANA_VENUS_VBNB = "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c" as Address;
 export const ALTANA_VENUS_MINT_SELECTOR = "0x1249c58b" as Hex;
 export const ALTANA_VENUS_SUPPLY_WEI = 100_000_000_000_000n;
-// Native-token spend accounting includes the payable call and relay fee.
-// The product action stays fixed at 0.0001 tBNB; the additional 0.0001 tBNB
-// is explicit fee headroom, not an action-sizing allowance.
+// Altana's native-token rule is one aggregate ceiling for the payable call and
+// relay fee; it does not earmark value between them. PositionCrew's only
+// execution path still hardcodes the 0.0001 tBNB product action below.
 export const ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI = 200_000_000_000_000n;
 export const ALTANA_VENUS_DAILY_ACTIVATION_LIMIT = 8;
 export const ALTANA_VENUS_CLAIM_BOUNDARY =
@@ -147,6 +147,44 @@ const ACCOUNT_GET_KEYS_ABI = [{
   ],
 }] as const;
 
+interface AltanaAccountKeyMetadata {
+  expiry: bigint;
+  keyType: number;
+  isSuperAdmin: boolean;
+  publicKey: Hex;
+}
+
+function parseAltanaAccountKeyMetadata(raw: unknown): AltanaAccountKeyMetadata {
+  const record = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : null;
+  const values = Array.isArray(raw)
+    ? raw
+    : [record?.expiry, record?.keyType, record?.isSuperAdmin, record?.publicKey];
+  const [expiryRaw, keyTypeRaw, isSuperAdminRaw, publicKeyRaw] = values;
+  const expiry = typeof expiryRaw === "bigint"
+    ? expiryRaw
+    : typeof expiryRaw === "number" && Number.isSafeInteger(expiryRaw) && expiryRaw >= 0
+      ? BigInt(expiryRaw)
+      : null;
+  if (
+    expiry === null ||
+    typeof keyTypeRaw !== "number" ||
+    !Number.isInteger(keyTypeRaw) ||
+    typeof isSuperAdminRaw !== "boolean" ||
+    typeof publicKeyRaw !== "string" ||
+    !/^0x[0-9a-fA-F]+$/.test(publicKeyRaw)
+  ) {
+    throw new Error("ALTANA_SESSION_ACCOUNT_METADATA_INVALID");
+  }
+  return {
+    expiry,
+    keyType: keyTypeRaw,
+    isSuperAdmin: isSuperAdminRaw,
+    publicKey: publicKeyRaw as Hex,
+  };
+}
+
 const AltanaRelayStatusSchema = z.object({
   status: z.union([z.number(), z.string()]),
   receipts: z.array(z.object({
@@ -239,11 +277,27 @@ export async function verifyLiveAltanaVenusSession(
     }),
   ]);
   if (registryValid !== true) throw new Error("ALTANA_SESSION_KEYSTORE_INVALID");
+  const accountKeys = Array.isArray(accountKeysRaw) && Array.isArray(accountKeysRaw[0])
+    ? accountKeysRaw[0]
+    : [];
   const keyHashes = Array.isArray(accountKeysRaw) && Array.isArray(accountKeysRaw[1])
     ? accountKeysRaw[1].filter((value): value is string => typeof value === "string")
     : [];
-  if (!keyHashes.some((value) => value.toLowerCase() === accountKeyHash.toLowerCase())) {
+  const matchingKeyIndex = keyHashes.findIndex(
+    (value) => value.toLowerCase() === accountKeyHash.toLowerCase(),
+  );
+  if (matchingKeyIndex < 0) {
     throw new Error("ALTANA_SESSION_ACCOUNT_UNAUTHORIZED");
+  }
+  const matchingKey = parseAltanaAccountKeyMetadata(accountKeys[matchingKeyIndex]);
+  const expectedAccountPublicKey = padHex(parsed.session.signer.address, { size: 32 });
+  if (matchingKey.expiry !== BigInt(parsed.session.expiry)) {
+    throw new Error("ALTANA_SESSION_ACCOUNT_EXPIRY_MISMATCH");
+  }
+  if (matchingKey.keyType !== 2) throw new Error("ALTANA_SESSION_ACCOUNT_KEY_TYPE_MISMATCH");
+  if (matchingKey.isSuperAdmin) throw new Error("ALTANA_SESSION_ACCOUNT_SUPER_ADMIN");
+  if (matchingKey.publicKey.toLowerCase() !== expectedAccountPublicKey.toLowerCase()) {
+    throw new Error("ALTANA_SESSION_ACCOUNT_PUBLIC_KEY_MISMATCH");
   }
   return {
     ...session,
@@ -253,6 +307,10 @@ export async function verifyLiveAltanaVenusSession(
       keyStore: BNB_TESTNET.keyStore,
       registryValid: true as const,
       accountAuthorized: true as const,
+      accountKeyExpiry: Number(matchingKey.expiry),
+      accountKeyType: matchingKey.keyType,
+      accountKeyIsSuperAdmin: matchingKey.isSuperAdmin,
+      accountKeyPublicKey: matchingKey.publicKey,
       checkedAt: new Date(now).toISOString(),
     },
   };
