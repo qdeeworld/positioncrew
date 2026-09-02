@@ -1117,6 +1117,20 @@ try {
     candidateCount: externalComparisons.candidates.length,
   };
 
+  const boundedActivationStatus = await fetchJson(
+    "altana-venus-activation-status",
+    marketplace.boundedActivationStatusUrl,
+  );
+  assert(
+    boundedActivationStatus.schemaVersion === "positioncrew.altana-venus-activation-status.v1" &&
+      boundedActivationStatus.status === "AVAILABLE" &&
+      boundedActivationStatus.fixedSupplyWei === "100000000000000" &&
+      boundedActivationStatus.session?.permissions?.calls?.length === 1 &&
+      boundedActivationStatus.session.permissions.calls[0]?.signature === "mint()",
+    "Bounded Altana Venus activation is unavailable or broader than the published authority",
+  );
+  report.boundedActivation = boundedActivationStatus;
+
   const venusNativeSupplyEvidence = await fetchJson(
     "venus-testnet-native-supply-evidence",
     marketplace.venusTestnetNativeSupplyEvidenceUrl,
@@ -1850,6 +1864,26 @@ try {
       "/api/evidence/venus-testnet-native-supply/2026-08-24",
       "get",
       "getVenusTestnetNativeSupplyEvidence",
+    ],
+    [
+      "/api/activations/venus-testnet-supply/status",
+      "get",
+      "getAltanaVenusActivationStatus",
+    ],
+    [
+      "/api/activations/venus-testnet-supply",
+      "post",
+      "createAltanaVenusActivation",
+    ],
+    [
+      "/api/activations/{activationId}",
+      "get",
+      "getAltanaVenusActivation",
+    ],
+    [
+      "/api/activation-receipts/{receiptId}",
+      "get",
+      "getAltanaVenusActivationReceipt",
     ],
     [
       "/api/evidence/bounded-grid-forward-shadow",

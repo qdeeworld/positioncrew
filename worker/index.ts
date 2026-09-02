@@ -30,6 +30,17 @@ import {
   type D1Database,
 } from "../src/commerce/d1-marketplace-store.js";
 import {
+  AltanaVenusActivationCapacityExceeded,
+  AltanaVenusActivationStore,
+} from "../src/commerce/d1-altana-activation-store.js";
+import {
+  ALTANA_VENUS_CLAIM_BOUNDARY,
+  ALTANA_VENUS_DAILY_ACTIVATION_LIMIT,
+  AltanaVenusActivationRequestSchema,
+  executeAltanaVenusActivation,
+  publicAltanaVenusSession,
+} from "../src/commerce/altana-venus-activation.js";
+import {
   CurrentBlockPinnedEvidenceSchema,
   FRESH_MARKETPLACE_TASKS,
   FreshMarketplaceChainSchema,
@@ -138,6 +149,7 @@ interface Env {
   SHADOW_GRID_TICK_TOKEN?: string;
   SHADOW_GRID_TEST_NOW?: string;
   SHADOW_GRID_TEST_CHECKPOINT_NOW?: string;
+  ALTANA_VENUS_SESSION?: string;
 }
 
 interface WorkerExecutionContext {
@@ -2005,6 +2017,168 @@ async function rescue(request: Request): Promise<Response> {
   return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET or POST."]);
 }
 
+function altanaActivationStore(env: Env): AltanaVenusActivationStore {
+  if (!env.DB) throw new Error("POSITIONCREW_D1_UNAVAILABLE");
+  return new AltanaVenusActivationStore(env.DB);
+}
+
+async function altanaActivationClientKey(request: Request): Promise<string> {
+  return sha256Commitment({
+    ip: request.headers.get("CF-Connecting-IP") ?? "unknown",
+    userAgent: (request.headers.get("User-Agent") ?? "unknown").slice(0, 240),
+  });
+}
+
+function activationErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : "UNKNOWN_ACTIVATION_FAILURE";
+  const code = message.split(":", 1)[0] ?? "UNKNOWN_ACTIVATION_FAILURE";
+  return /^[A-Z0-9_]+$/.test(code) ? code : "ACTIVATION_EXECUTION_FAILED";
+}
+
+async function finishAltanaVenusActivation(env: Env, activationId: string): Promise<void> {
+  const store = altanaActivationStore(env);
+  const claimed = await store.claim(activationId, new Date().toISOString());
+  if (!claimed || claimed.state !== "RUNNING") return;
+  try {
+    if (!env.ALTANA_VENUS_SESSION) throw new Error("ALTANA_SESSION_UNAVAILABLE");
+    const evidence = await executeAltanaVenusActivation(env.ALTANA_VENUS_SESSION);
+    const completedAt = new Date().toISOString();
+    const receiptId = crypto.randomUUID();
+    const receipt = {
+      schemaVersion: "positioncrew.altana-venus-activation-receipt.v1",
+      receiptId,
+      activationId,
+      source: {
+        hireId: claimed.sourceHireId,
+        receiptId: claimed.sourceReceiptId,
+        binding: "COMPLETED_CURRENT_BLOCK_PINNED_LENDING_DECISION",
+      },
+      authority: {
+        mode: "ALTANA_SESSION_KEY",
+        publicKey: evidence.session.publicKey,
+        expiry: evidence.session.expiry,
+        grantTransactionHash: evidence.session.grantTransactionHash,
+        target: evidence.target,
+        selector: evidence.selector,
+        permissions: evidence.session.permissions,
+      },
+      transaction: {
+        chainId: evidence.chainId,
+        actor: evidence.actor,
+        target: evidence.target,
+        suppliedWei: evidence.suppliedWei,
+        hash: evidence.transactionHash,
+        callsId: evidence.callsId,
+        explorerUrl: `https://testnet.bscscan.com/tx/${evidence.transactionHash}`,
+        beforeBlockNumber: evidence.beforeBlockNumber,
+        confirmedBlockNumber: evidence.confirmedBlockNumber,
+        vTokenBalanceBefore: evidence.vTokenBalanceBefore,
+        vTokenBalanceAfter: evidence.vTokenBalanceAfter,
+        vTokenDelta: evidence.vTokenDelta,
+      },
+      completedAt,
+      claimBoundary: ALTANA_VENUS_CLAIM_BOUNDARY,
+    };
+    const receiptJson = canonicalJson(receipt);
+    await store.complete({
+      activationId,
+      receiptId,
+      receiptJson,
+      receiptHash: await sha256Commitment(receipt),
+      completedAt,
+    });
+  } catch (error) {
+    const code = activationErrorCode(error);
+    const message = error instanceof Error ? error.message : "The bounded action failed closed";
+    await store.fail(activationId, code, message, new Date().toISOString());
+  }
+}
+
+async function altanaActivationStatus(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
+  if (!env.ALTANA_VENUS_SESSION) {
+    return json({
+      schemaVersion: "positioncrew.altana-venus-activation-status.v1",
+      status: "UNAVAILABLE",
+      reason: "A bounded session has not been provisioned.",
+      claimBoundary: ALTANA_VENUS_CLAIM_BOUNDARY,
+    });
+  }
+  try {
+    const session = publicAltanaVenusSession(env.ALTANA_VENUS_SESSION);
+    const dayBucket = new Date().toISOString().slice(0, 10);
+    const usedToday = await altanaActivationStore(env).dailyCount(dayBucket);
+    return json({
+      schemaVersion: "positioncrew.altana-venus-activation-status.v1",
+      status: usedToday < ALTANA_VENUS_DAILY_ACTIVATION_LIMIT ? "AVAILABLE" : "DAILY_CAP_REACHED",
+      fixedSupplyWei: "100000000000000",
+      dailyLimit: ALTANA_VENUS_DAILY_ACTIVATION_LIMIT,
+      usedToday,
+      remainingToday: Math.max(0, ALTANA_VENUS_DAILY_ACTIVATION_LIMIT - usedToday),
+      session,
+      claimBoundary: ALTANA_VENUS_CLAIM_BOUNDARY,
+    });
+  } catch (error) {
+    return json({
+      schemaVersion: "positioncrew.altana-venus-activation-status.v1",
+      status: "UNAVAILABLE",
+      reason: activationErrorCode(error),
+      claimBoundary: ALTANA_VENUS_CLAIM_BOUNDARY,
+    });
+  }
+}
+
+async function createAltanaVenusActivation(
+  request: Request,
+  env: Env,
+  context: WorkerExecutionContext,
+): Promise<Response> {
+  if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
+  if (!env.ALTANA_VENUS_SESSION) return apiError(503, "ACTIVATION_UNAVAILABLE", ["Bounded session unavailable."]);
+  publicAltanaVenusSession(env.ALTANA_VENUS_SESSION);
+  const parsed = AltanaVenusActivationRequestSchema.parse(await boundedJson(request));
+  const source = await freshStore(env).getHire(parsed.sourceHireId);
+  if (!source ||
+    source.hire.service !== "LENDING_RESCUE" ||
+    source.hire.evidenceMode !== "CURRENT_BLOCK_PINNED" ||
+    source.job.status !== "COMPLETED" ||
+    source.receipt?.receiptId !== parsed.sourceReceiptId) {
+    return apiError(409, "SOURCE_RECEIPT_NOT_ELIGIBLE", [
+      "Use one completed current block-pinned Lending hire and its exact receipt.",
+    ]);
+  }
+  const store = altanaActivationStore(env);
+  const prior = await store.getBySourceReceipt(parsed.sourceReceiptId);
+  if (prior) return json(prior, prior.state === "CREATED" || prior.state === "RUNNING" ? 202 : 200);
+  const created = await store.create({
+    activationId: crypto.randomUUID(),
+    idempotencyKey: parsed.idempotencyKey,
+    sourceHireId: parsed.sourceHireId,
+    sourceReceiptId: parsed.sourceReceiptId,
+    clientKeyHash: await altanaActivationClientKey(request),
+    dayBucket: new Date().toISOString().slice(0, 10),
+    createdAt: new Date().toISOString(),
+    globalDailyLimit: ALTANA_VENUS_DAILY_ACTIVATION_LIMIT,
+    runningLeaseCutoff: new Date(Date.now() - 5 * 60_000).toISOString(),
+  });
+  context.waitUntil(finishAltanaVenusActivation(env, created.activationId));
+  return json(created, 202);
+}
+
+async function getAltanaVenusActivation(request: Request, env: Env, activationId: string): Promise<Response> {
+  if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
+  const activation = await altanaActivationStore(env).get(activationId);
+  return activation ? json(activation) : apiError(404, "ACTIVATION_NOT_FOUND", ["Unknown activation ID."]);
+}
+
+async function getAltanaVenusActivationReceipt(request: Request, env: Env, receiptId: string): Promise<Response> {
+  if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
+  const activation = await altanaActivationStore(env).getReceipt(receiptId);
+  return activation
+    ? json(activation, 200, "public, max-age=3600, s-maxage=86400, immutable")
+    : apiError(404, "ACTIVATION_RECEIPT_NOT_FOUND", ["Unknown activation receipt ID."]);
+}
+
 async function api(
   request: Request,
   url: URL,
@@ -2033,6 +2207,17 @@ async function api(
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
       return json(buildOpenApiDocument(url.origin), 200, "public, max-age=0, s-maxage=300");
     }
+
+    if (url.pathname === "/api/activations/venus-testnet-supply/status") {
+      return altanaActivationStatus(request, env);
+    }
+    if (url.pathname === "/api/activations/venus-testnet-supply") {
+      return createAltanaVenusActivation(request, env, context);
+    }
+    const altanaActivationRoute = url.pathname.match(/^\/api\/activations\/([0-9a-f-]{36})$/);
+    if (altanaActivationRoute?.[1]) return getAltanaVenusActivation(request, env, altanaActivationRoute[1]);
+    const altanaReceiptRoute = url.pathname.match(/^\/api\/activation-receipts\/([0-9a-f-]{36})$/);
+    if (altanaReceiptRoute?.[1]) return getAltanaVenusActivationReceipt(request, env, altanaReceiptRoute[1]);
 
     if (url.pathname === "/api/providers") {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
@@ -2298,6 +2483,9 @@ async function api(
     }
     if (isFreshMarketplaceCapacityExceeded(error)) {
       return apiError(429, "HIRE_CAPACITY_EXCEEDED", [error.message]);
+    }
+    if (error instanceof AltanaVenusActivationCapacityExceeded) {
+      return apiError(429, error.code, [error.message]);
     }
     if (error instanceof FreshMarketplaceRequestError) {
       return apiError(error.status, error.code, [error.message]);

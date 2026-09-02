@@ -1,4 +1,5 @@
 import { RecentJobsPanel } from "./RecentJobsPanel";
+import { VenusActivationSandbox } from "./VenusActivationSandbox";
 import { clearCapitalCheckSeed, readCapitalCheckSeed } from "../capital-check";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
@@ -2321,6 +2322,15 @@ export function JobWorkspace({
           </div>
         </section>
       </div>
+      {service === "LENDING_RESCUE" &&
+        marketplaceTrace?.hire.evidenceMode === "CURRENT_BLOCK_PINNED" &&
+        marketplaceTrace.job.status === "COMPLETED" &&
+        marketplaceTrace.receipt && (
+          <VenusActivationSandbox
+            hireId={marketplaceTrace.hire.hireId}
+            receiptId={marketplaceTrace.receipt.receiptId}
+          />
+        )}
       <RecentJobsPanel onOpenJob={onSelectJob} />
     </main>
   );

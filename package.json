@@ -35,6 +35,7 @@
     "runtime:termix": "tsx src/cli/run-termix-runtime.ts",
     "preflight:termix": "tsx src/cli/termix-onboarding-preflight.ts",
     "evidence:venus-testnet-supply": "tsx src/cli/venus-testnet-native-supply.ts",
+    "activate:grant-altana-venus-session": "tsx src/cli/grant-altana-venus-session.ts",
     "verify:gate2a": "tsx src/cli/run-lending-rescue.ts",
     "verify:all": "tsx src/cli/verify-all-providers.ts",
     "verify:production": "node scripts/verify-production.mjs",
@@ -56,6 +57,7 @@
     "node": "22.x"
   },
   "dependencies": {
+    "@altananetwork/sdk": "0.7.1",
     "@bnbagent/sdk": "0.5.5",
     "@noble/hashes": "^1.8.0",
     "drizzle-orm": "0.45.2",
