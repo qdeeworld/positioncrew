@@ -38,6 +38,7 @@ import {
   ALTANA_VENUS_CLAIM_BOUNDARY,
   ALTANA_VENUS_DAILY_ACTIVATION_LIMIT,
   AltanaVenusActivationRequestSchema,
+  AltanaConfirmationPersistenceError,
   completeAltanaVenusExecutionEvidence,
   executeAltanaVenusActivation,
   publicAltanaVenusSession,
@@ -2065,12 +2066,32 @@ async function finishAltanaVenusActivation(env: Env, activationId: string): Prom
       });
     }
   } catch (error) {
+    if (error instanceof AltanaConfirmationPersistenceError) {
+      try {
+        await store.persistChainConfirmed({
+          activationId,
+          executionJson: canonicalJson(error.confirmation),
+          executionHash: await sha256Commitment(error.confirmation),
+        });
+        evidence = await completeAltanaVenusExecutionEvidence(error.confirmation);
+      } catch (persistenceError) {
+        console.error(JSON.stringify({
+          level: "error",
+          event: "positioncrew.altana.chain_confirmation_persistence_deferred",
+          activationId,
+          transactionHash: error.confirmation.transactionHash,
+          errorMessage: persistenceError instanceof Error ? persistenceError.message : "Unknown persistence failure",
+        }));
+        return;
+      }
+    } else {
     const current = await store.get(activationId);
     if (current?.state === "CHAIN_CONFIRMED") return;
     const code = activationErrorCode(error);
     const message = error instanceof Error ? error.message : "The bounded action failed closed";
     await store.fail(activationId, code, message, new Date().toISOString());
     return;
+    }
   }
   if (!claimed) return;
   const completedAt = new Date().toISOString();

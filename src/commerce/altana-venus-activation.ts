@@ -7,7 +7,7 @@ export const ALTANA_VENUS_ACTOR = "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d" a
 export const ALTANA_VENUS_VBNB = "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c" as Address;
 export const ALTANA_VENUS_MINT_SELECTOR = "0x1249c58b" as Hex;
 export const ALTANA_VENUS_SUPPLY_WEI = 100_000_000_000_000n;
-export const ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI = 200_000_000_000_000n;
+export const ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI = 100_000_000_000_000n;
 export const ALTANA_VENUS_DAILY_ACTIVATION_LIMIT = 8;
 export const ALTANA_VENUS_CLAIM_BOUNDARY =
   "Founder-funded BSC Testnet sandbox action. It proves one selector-bound Altana session execution and durable before/after evidence; it is not a mainnet lending rescue, user custody, payment, revenue, yield, or investment-performance claim.";
@@ -70,6 +70,17 @@ export type AltanaVenusConfirmedExecution = Omit<
   AltanaVenusExecutionEvidence,
   "vTokenBalanceAfter" | "vTokenDelta"
 >;
+
+export class AltanaConfirmationPersistenceError extends Error {
+  readonly code = "ALTANA_CONFIRMATION_PERSISTENCE_FAILED";
+  constructor(
+    readonly confirmation: AltanaVenusConfirmedExecution,
+    options?: ErrorOptions,
+  ) {
+    super("A confirmed transaction could not yet be persisted", options);
+    this.name = "AltanaConfirmationPersistenceError";
+  }
+}
 
 const BALANCE_OF_ABI = [{
   type: "function",
@@ -170,7 +181,11 @@ export async function executeAltanaVenusActivation(
       },
     },
   };
-  await onConfirmed(confirmed);
+  try {
+    await onConfirmed(confirmed);
+  } catch (cause) {
+    throw new AltanaConfirmationPersistenceError(confirmed, { cause });
+  }
   return completeAltanaVenusExecutionEvidence(confirmed);
 }
 
