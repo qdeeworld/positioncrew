@@ -116,7 +116,7 @@ const AltanaRelayStatusSchema = z.object({
 
 export function confirmedAltanaRelayTransaction(raw: unknown): Hex {
   const status = AltanaRelayStatusSchema.parse(raw);
-  if (status.status === 500 || status.status === "FAILED") throw new Error("ALTANA_EXECUTION_FAILED");
+  if ([400, 500, 600, "FAILED"].includes(status.status)) throw new Error("ALTANA_EXECUTION_FAILED");
   const transactionHash = status.receipts?.[0]?.transactionHash;
   if ((status.status !== 200 && status.status !== "CONFIRMED") || !transactionHash) {
     throw new Error("ALTANA_RELAY_PENDING");

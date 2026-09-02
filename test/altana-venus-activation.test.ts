@@ -65,8 +65,8 @@ describe("Altana relay outbox", () => {
       .toThrow("ALTANA_RELAY_PENDING");
   });
 
-  it("marks an explicit relay failure terminal", () => {
-    expect(() => confirmedAltanaRelayTransaction({ status: 500, receipts: [] }))
+  it.each([400, 500, 600, "FAILED"])("marks relay failure status %s terminal", (status) => {
+    expect(() => confirmedAltanaRelayTransaction({ status, receipts: [] }))
       .toThrow("ALTANA_EXECUTION_FAILED");
   });
 });
