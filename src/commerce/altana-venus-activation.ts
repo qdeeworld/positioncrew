@@ -1,13 +1,26 @@
 import { BNB_TESTNET, createClient, signerFromPrivateKey, type Session } from "@altananetwork/sdk";
-import { createPublicClient, getAddress, http, type Address, type Hex } from "viem";
+import {
+  createPublicClient,
+  encodeAbiParameters,
+  getAddress,
+  http,
+  keccak256,
+  padHex,
+  type Address,
+  type Hex,
+} from "viem";
 import { bscTestnet } from "viem/chains";
 import { z } from "zod";
 
 export const ALTANA_VENUS_ACTOR = "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d" as Address;
 export const ALTANA_VENUS_VBNB = "0x2E7222e51c0f6e98610A1543Aa3836E092CDe62c" as Address;
+export const ALTANA_TESTNET_ORCHESTRATOR = "0xcb5cef3c54aa90e9a7ad602a258d3d360cc862b9" as Address;
 export const ALTANA_VENUS_MINT_SELECTOR = "0x1249c58b" as Hex;
 export const ALTANA_VENUS_SUPPLY_WEI = 100_000_000_000_000n;
-export const ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI = 100_000_000_000_000n;
+// Altana's native-token rule is one aggregate ceiling for the payable call and
+// relay fee; it does not earmark value between them. PositionCrew's only
+// execution path still hardcodes the 0.0001 tBNB product action below.
+export const ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI = 200_000_000_000_000n;
 export const ALTANA_VENUS_DAILY_ACTIVATION_LIMIT = 8;
 export const ALTANA_VENUS_CLAIM_BOUNDARY =
   "Founder-funded BSC Testnet sandbox action. It proves one selector-bound Altana session execution and durable before/after evidence; it is not a mainnet lending rescue, user custody, payment, revenue, yield, or investment-performance claim.";
@@ -107,6 +120,158 @@ const BALANCE_OF_ABI = [{
   outputs: [{ name: "balance", type: "uint256" }],
 }] as const;
 
+const KEYSTORE_IS_VALID_KEY_ABI = [{
+  type: "function",
+  name: "isValidKey",
+  stateMutability: "view",
+  inputs: [{ name: "user", type: "address" }, { name: "keyId", type: "bytes32" }],
+  outputs: [{ name: "valid", type: "bool" }],
+}] as const;
+
+const ACCOUNT_GET_KEYS_ABI = [{
+  type: "function",
+  name: "getKeys",
+  stateMutability: "view",
+  inputs: [],
+  outputs: [
+    {
+      name: "keys",
+      type: "tuple[]",
+      components: [
+        { name: "expiry", type: "uint40" },
+        { name: "keyType", type: "uint8" },
+        { name: "isSuperAdmin", type: "bool" },
+        { name: "publicKey", type: "bytes" },
+      ],
+    },
+    { name: "keyHashes", type: "bytes32[]" },
+  ],
+}] as const;
+
+const ACCOUNT_PERMISSION_ABI = [
+  {
+    type: "function",
+    name: "approvedSignatureCheckers",
+    stateMutability: "view",
+    inputs: [{ name: "keyHash", type: "bytes32" }],
+    outputs: [{ name: "", type: "address[]" }],
+  },
+  {
+    type: "function",
+    name: "callCheckerInfos",
+    stateMutability: "view",
+    inputs: [{ name: "keyHash", type: "bytes32" }],
+    outputs: [{
+      name: "results",
+      type: "tuple[]",
+      components: [
+        { name: "target", type: "address" },
+        { name: "checker", type: "address" },
+      ],
+    }],
+  },
+  {
+    type: "function",
+    name: "canExecute",
+    stateMutability: "view",
+    inputs: [
+      { name: "keyHash", type: "bytes32" },
+      { name: "target", type: "address" },
+      { name: "data", type: "bytes" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "canExecutePackedInfos",
+    stateMutability: "view",
+    inputs: [{ name: "keyHash", type: "bytes32" }],
+    outputs: [{ name: "", type: "bytes32[]" }],
+  },
+  {
+    type: "function",
+    name: "spendInfos",
+    stateMutability: "view",
+    inputs: [{ name: "keyHash", type: "bytes32" }],
+    outputs: [{
+      name: "results",
+      type: "tuple[]",
+      components: [
+        { name: "token", type: "address" },
+        { name: "period", type: "uint8" },
+        { name: "limit", type: "uint256" },
+        { name: "spent", type: "uint256" },
+        { name: "lastUpdated", type: "uint256" },
+        { name: "currentSpent", type: "uint256" },
+        { name: "current", type: "uint256" },
+      ],
+    }],
+  },
+] as const;
+
+const ALTANA_NATIVE_TOKEN = "0x0000000000000000000000000000000000000000" as Address;
+const ALTANA_ANY_KEY_HASH = "0x3232323232323232323232323232323232323232323232323232323232323232" as Hex;
+const ALTANA_SCOPE_PROBE_TARGET = "0x0000000000000000000000000000000000000001" as Address;
+const ALTANA_SCOPE_PROBE_SELECTOR = "0xffffffff" as Hex;
+
+interface AltanaAccountKeyMetadata {
+  expiry: bigint;
+  keyType: number;
+  isSuperAdmin: boolean;
+  publicKey: Hex;
+}
+
+function parseAltanaAccountKeyMetadata(raw: unknown): AltanaAccountKeyMetadata {
+  const record = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : null;
+  const values = Array.isArray(raw)
+    ? raw
+    : [record?.expiry, record?.keyType, record?.isSuperAdmin, record?.publicKey];
+  const [expiryRaw, keyTypeRaw, isSuperAdminRaw, publicKeyRaw] = values;
+  const expiry = typeof expiryRaw === "bigint"
+    ? expiryRaw
+    : typeof expiryRaw === "number" && Number.isSafeInteger(expiryRaw) && expiryRaw >= 0
+      ? BigInt(expiryRaw)
+      : null;
+  if (
+    expiry === null ||
+    typeof keyTypeRaw !== "number" ||
+    !Number.isInteger(keyTypeRaw) ||
+    typeof isSuperAdminRaw !== "boolean" ||
+    typeof publicKeyRaw !== "string" ||
+    !/^0x[0-9a-fA-F]+$/.test(publicKeyRaw)
+  ) {
+    throw new Error("ALTANA_SESSION_ACCOUNT_METADATA_INVALID");
+  }
+  return {
+    expiry,
+    keyType: keyTypeRaw,
+    isSuperAdmin: isSuperAdminRaw,
+    publicKey: publicKeyRaw as Hex,
+  };
+}
+
+function parseAltanaSpendInfo(raw: unknown): { token: Address; period: number; limit: bigint } {
+  const record = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : null;
+  const values = Array.isArray(raw)
+    ? raw
+    : [record?.token, record?.period, record?.limit];
+  const [tokenRaw, periodRaw, limitRaw] = values;
+  if (
+    typeof tokenRaw !== "string" ||
+    !/^0x[0-9a-fA-F]{40}$/.test(tokenRaw) ||
+    typeof periodRaw !== "number" ||
+    !Number.isInteger(periodRaw) ||
+    typeof limitRaw !== "bigint"
+  ) {
+    throw new Error("ALTANA_SESSION_SPEND_METADATA_INVALID");
+  }
+  return { token: tokenRaw as Address, period: periodRaw, limit: limitRaw };
+}
+
 const AltanaRelayStatusSchema = z.object({
   status: z.union([z.number(), z.string()]),
   receipts: z.array(z.object({
@@ -170,6 +335,226 @@ export function publicAltanaVenusSession(serialized: string, now = Date.now()) {
   };
 }
 
+export async function verifyLiveAltanaVenusSession(
+  serialized: string,
+  now = Date.now(),
+  readContract?: (request: unknown) => Promise<unknown>,
+) {
+  const parsed = parseAltanaVenusSessionSecret(serialized, now);
+  const session = publicAltanaVenusSession(serialized, now);
+  const registryKeyId = keccak256(session.publicKey as Hex);
+  const accountPublicKeyHash = keccak256(padHex(parsed.session.signer.address, { size: 32 }));
+  const accountKeyHash = keccak256(encodeAbiParameters(
+    [{ type: "uint256" }, { type: "bytes32" }],
+    [2n, accountPublicKeyHash],
+  ));
+  const rpc = createPublicClient({ chain: bscTestnet, transport: http(BNB_TESTNET.publicRpcUrl) });
+  const read = readContract ?? ((request: unknown) => rpc.readContract(request as never));
+  const [
+    registryValid,
+    accountKeysRaw,
+    approvedSignatureCheckersRaw,
+    callCheckerInfosRaw,
+    executeInfosRaw,
+    exactCallAllowed,
+    alternateTargetAllowed,
+    alternateSelectorAllowed,
+    alternateTargetSelectorAllowed,
+    orchestratorMintSelectorAllowed,
+    orchestratorProbeSelectorAllowed,
+    spendInfosRaw,
+    wildcardApprovedSignatureCheckersRaw,
+    wildcardCallCheckerInfosRaw,
+    wildcardExecuteInfosRaw,
+    wildcardSpendInfosRaw,
+  ] = await Promise.all([
+    read({
+      address: BNB_TESTNET.keyStore,
+      abi: KEYSTORE_IS_VALID_KEY_ABI,
+      functionName: "isValidKey",
+      args: [ALTANA_VENUS_ACTOR, registryKeyId],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_GET_KEYS_ABI,
+      functionName: "getKeys",
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "approvedSignatureCheckers",
+      args: [accountKeyHash],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "callCheckerInfos",
+      args: [accountKeyHash],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecutePackedInfos",
+      args: [accountKeyHash],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_VENUS_VBNB, ALTANA_VENUS_MINT_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_SCOPE_PROBE_TARGET, ALTANA_VENUS_MINT_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_VENUS_VBNB, ALTANA_SCOPE_PROBE_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_SCOPE_PROBE_TARGET, ALTANA_SCOPE_PROBE_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_TESTNET_ORCHESTRATOR, ALTANA_VENUS_MINT_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecute",
+      args: [accountKeyHash, ALTANA_TESTNET_ORCHESTRATOR, ALTANA_SCOPE_PROBE_SELECTOR],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "spendInfos",
+      args: [accountKeyHash],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "approvedSignatureCheckers",
+      args: [ALTANA_ANY_KEY_HASH],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "callCheckerInfos",
+      args: [ALTANA_ANY_KEY_HASH],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "canExecutePackedInfos",
+      args: [ALTANA_ANY_KEY_HASH],
+    }),
+    read({
+      address: ALTANA_VENUS_ACTOR,
+      abi: ACCOUNT_PERMISSION_ABI,
+      functionName: "spendInfos",
+      args: [ALTANA_ANY_KEY_HASH],
+    }),
+  ]);
+  if (registryValid !== true) throw new Error("ALTANA_SESSION_KEYSTORE_INVALID");
+  const accountKeys = Array.isArray(accountKeysRaw) && Array.isArray(accountKeysRaw[0])
+    ? accountKeysRaw[0]
+    : [];
+  const keyHashes = Array.isArray(accountKeysRaw) && Array.isArray(accountKeysRaw[1])
+    ? accountKeysRaw[1].filter((value): value is string => typeof value === "string")
+    : [];
+  const matchingKeyIndex = keyHashes.findIndex(
+    (value) => value.toLowerCase() === accountKeyHash.toLowerCase(),
+  );
+  if (matchingKeyIndex < 0) {
+    throw new Error("ALTANA_SESSION_ACCOUNT_UNAUTHORIZED");
+  }
+  const matchingKey = parseAltanaAccountKeyMetadata(accountKeys[matchingKeyIndex]);
+  const expectedAccountPublicKey = padHex(parsed.session.signer.address, { size: 32 });
+  if (matchingKey.expiry !== BigInt(parsed.session.expiry)) {
+    throw new Error("ALTANA_SESSION_ACCOUNT_EXPIRY_MISMATCH");
+  }
+  if (matchingKey.keyType !== 2) throw new Error("ALTANA_SESSION_ACCOUNT_KEY_TYPE_MISMATCH");
+  if (matchingKey.isSuperAdmin) throw new Error("ALTANA_SESSION_ACCOUNT_SUPER_ADMIN");
+  if (matchingKey.publicKey.toLowerCase() !== expectedAccountPublicKey.toLowerCase()) {
+    throw new Error("ALTANA_SESSION_ACCOUNT_PUBLIC_KEY_MISMATCH");
+  }
+  const executeInfos = Array.isArray(executeInfosRaw)
+    ? executeInfosRaw.filter((value): value is string => typeof value === "string")
+    : [];
+  if (
+    executeInfos.length !== 2 ||
+    exactCallAllowed !== true ||
+    alternateTargetAllowed !== false ||
+    alternateSelectorAllowed !== false ||
+    alternateTargetSelectorAllowed !== false ||
+    orchestratorMintSelectorAllowed !== true ||
+    orchestratorProbeSelectorAllowed !== true
+  ) {
+    throw new Error("ALTANA_SESSION_EXECUTION_SCOPE_MISMATCH");
+  }
+  const callCheckerInfos = Array.isArray(callCheckerInfosRaw) ? callCheckerInfosRaw : [];
+  if (callCheckerInfos.length !== 0) {
+    throw new Error("ALTANA_SESSION_CALL_CHECKER_SCOPE_MISMATCH");
+  }
+  const approvedSignatureCheckers = Array.isArray(approvedSignatureCheckersRaw)
+    ? approvedSignatureCheckersRaw
+    : [];
+  if (approvedSignatureCheckers.length !== 0) {
+    throw new Error("ALTANA_SESSION_SIGNATURE_CHECKER_SCOPE_MISMATCH");
+  }
+  const wildcardRuleCount = [
+    wildcardApprovedSignatureCheckersRaw,
+    wildcardCallCheckerInfosRaw,
+    wildcardExecuteInfosRaw,
+    wildcardSpendInfosRaw,
+  ].reduce<number>((count, value) => count + (Array.isArray(value) ? value.length : 0), 0);
+  if (wildcardRuleCount !== 0) throw new Error("ALTANA_SESSION_WILDCARD_SCOPE_MISMATCH");
+  const spendInfos = Array.isArray(spendInfosRaw) ? spendInfosRaw : [];
+  if (spendInfos.length !== 1) throw new Error("ALTANA_SESSION_SPEND_SCOPE_MISMATCH");
+  const spendInfo = parseAltanaSpendInfo(spendInfos[0]);
+  if (
+    spendInfo.token.toLowerCase() !== ALTANA_NATIVE_TOKEN.toLowerCase() ||
+    spendInfo.period !== 0 ||
+    spendInfo.limit !== ALTANA_VENUS_SESSION_SPEND_LIMIT_WEI
+  ) {
+    throw new Error("ALTANA_SESSION_SPEND_SCOPE_MISMATCH");
+  }
+  return {
+    ...session,
+    verification: {
+      registryKeyId,
+      accountKeyHash,
+      keyStore: BNB_TESTNET.keyStore,
+      registryValid: true as const,
+      accountAuthorized: true as const,
+      accountKeyExpiry: Number(matchingKey.expiry),
+      accountKeyType: matchingKey.keyType,
+      accountKeyIsSuperAdmin: matchingKey.isSuperAdmin,
+      accountKeyPublicKey: matchingKey.publicKey,
+      liveExecutionRuleCount: executeInfos.length,
+      liveCallScopeVerified: true as const,
+      liveOrchestrator: ALTANA_TESTNET_ORCHESTRATOR,
+      liveCallCheckerRuleCount: callCheckerInfos.length,
+      liveSignatureCheckerRuleCount: approvedSignatureCheckers.length,
+      liveWildcardRuleCount: wildcardRuleCount,
+      liveSpendRuleCount: spendInfos.length,
+      liveSpendToken: spendInfo.token,
+      liveSpendPeriod: "minute" as const,
+      liveSpendLimit: spendInfo.limit.toString(),
+      checkedAt: new Date(now).toISOString(),
+    },
+  };
+}
+
 export async function executeAltanaVenusActivation(
   serializedSession: string,
   authorizeSubmission: () => Promise<void>,
@@ -186,6 +571,7 @@ export async function executeAltanaVenusActivation(
     args: [ALTANA_VENUS_ACTOR],
     blockNumber: beforeBlockNumber,
   });
+  await verifyLiveAltanaVenusSession(serializedSession);
   await authorizeSubmission();
   const execution = await createClient({ chains: [BNB_TESTNET], defaultChainId: 97 }).execute({
     session,

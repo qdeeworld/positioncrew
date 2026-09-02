@@ -1133,8 +1133,27 @@ try {
       boundedActivationStatus.session.permissions.calls[0]?.signature === "mint()" &&
       boundedActivationStatus.session.permissions.calls[0]?.to?.toLowerCase() === "0x2e7222e51c0f6e98610a1543aa3836e092cde62c" &&
       boundedActivationStatus.session.permissions.spend?.length === 1 &&
-      boundedActivationStatus.session.permissions.spend[0]?.limit === "100000000000000" &&
-      boundedActivationStatus.session.permissions.spend[0]?.period === "minute",
+      boundedActivationStatus.session.permissions.spend[0]?.limit === "200000000000000" &&
+      boundedActivationStatus.session.permissions.spend[0]?.period === "minute" &&
+      boundedActivationStatus.session.verification?.registryValid === true &&
+      boundedActivationStatus.session.verification?.accountAuthorized === true &&
+      boundedActivationStatus.session.verification?.accountKeyExpiry === boundedActivationStatus.session.expiry &&
+      boundedActivationStatus.session.verification?.accountKeyType === 2 &&
+      boundedActivationStatus.session.verification?.accountKeyIsSuperAdmin === false &&
+      /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.accountKeyPublicKey ?? "") &&
+      boundedActivationStatus.session.verification?.liveExecutionRuleCount === 2 &&
+      boundedActivationStatus.session.verification?.liveCallScopeVerified === true &&
+      boundedActivationStatus.session.verification?.liveOrchestrator?.toLowerCase() === "0xcb5cef3c54aa90e9a7ad602a258d3d360cc862b9" &&
+      boundedActivationStatus.session.verification?.liveCallCheckerRuleCount === 0 &&
+      boundedActivationStatus.session.verification?.liveSignatureCheckerRuleCount === 0 &&
+      boundedActivationStatus.session.verification?.liveWildcardRuleCount === 0 &&
+      boundedActivationStatus.session.verification?.liveSpendRuleCount === 1 &&
+      boundedActivationStatus.session.verification?.liveSpendToken?.toLowerCase() === "0x0000000000000000000000000000000000000000" &&
+      boundedActivationStatus.session.verification?.liveSpendPeriod === "minute" &&
+      boundedActivationStatus.session.verification?.liveSpendLimit === "200000000000000" &&
+      /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.registryKeyId ?? "") &&
+      /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.accountKeyHash ?? "") &&
+      boundedActivationStatus.session.verification?.keyStore?.toLowerCase() === "0x6b8361c29d05d498b1a12b54a37310f94171e94a",
     "Bounded Altana Venus activation is unavailable or broader than the published authority",
   );
   report.boundedActivation = boundedActivationStatus;

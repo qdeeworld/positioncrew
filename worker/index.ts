@@ -43,7 +43,7 @@ import {
   completeAltanaVenusExecutionEvidence,
   confirmAltanaVenusSubmittedExecution,
   executeAltanaVenusActivation,
-  publicAltanaVenusSession,
+  verifyLiveAltanaVenusSession,
 } from "../src/commerce/altana-venus-activation.js";
 import {
   CurrentBlockPinnedEvidenceSchema,
@@ -2234,7 +2234,7 @@ async function altanaActivationStatus(request: Request, env: Env): Promise<Respo
     });
   }
   try {
-    const session = publicAltanaVenusSession(env.ALTANA_VENUS_SESSION);
+    const session = await verifyLiveAltanaVenusSession(env.ALTANA_VENUS_SESSION);
     const dayBucket = new Date().toISOString().slice(0, 10);
     const usedToday = await altanaActivationStore(env).dailyCount(dayBucket);
     return json({
@@ -2294,7 +2294,7 @@ async function createAltanaVenusActivation(
     return json(prior, 200);
   }
   if (!env.ALTANA_VENUS_SESSION) return apiError(503, "ACTIVATION_UNAVAILABLE", ["Bounded session unavailable."]);
-  publicAltanaVenusSession(env.ALTANA_VENUS_SESSION);
+  await verifyLiveAltanaVenusSession(env.ALTANA_VENUS_SESSION);
   const created = await store.create({
     activationId: crypto.randomUUID(),
     idempotencyKey: parsed.idempotencyKey,

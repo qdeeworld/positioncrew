@@ -72,17 +72,18 @@ export function VenusActivationSandbox({ hireId, receiptId }: { hireId: string; 
         <span className="eyebrow"><TestTube2 size={15} /> Optional BSC Testnet proof</span>
         <h2 id="activation-sandbox-title">See bounded authority become an onchain action</h2>
         <p>
-          PositionCrew can now bind this completed decision to one founder-funded testnet supply. The delegated key can call only Venus
-          <code> mint()</code>, for exactly 0.0001 tBNB, before its published expiry.
+          PositionCrew can bind this completed decision to one founder-funded testnet supply. Its runner submits 0.0001 tBNB, while the
+          delegated key is restricted to Venus <code>mint()</code>, a short expiry, and a 0.0002 tBNB/minute native-spend ceiling.
         </p>
       </div>
       <div className="activation-sandbox__limits" aria-label="Authority limits">
         <span><LockKeyhole size={16} /><strong>One method</strong><small>Venus mint()</small></span>
-        <span><ShieldCheck size={16} /><strong>Fixed value</strong><small>0.0001 tBNB</small></span>
+        <span><ShieldCheck size={16} /><strong>Runner value</strong><small>0.0001 tBNB</small></span>
         <span><TestTube2 size={16} /><strong>Sandbox only</strong><small>No user wallet</small></span>
       </div>
       <p className="activation-sandbox__boundary">
-        This does not execute the mainnet recommendation or use your funds. Capacity is deliberately small; unavailable budget fails closed.
+        This does not execute the mainnet recommendation or use your funds. Altana applies the 0.0002 tBNB/minute ceiling across call value
+        and relay fees rather than earmarking each part; PositionCrew keeps the key server-side and hardcodes the smaller action value.
       </p>
       {!activation && (
         <button className="primary-action" type="button" onClick={activate} disabled={pending}>
