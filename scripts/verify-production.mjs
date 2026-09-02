@@ -1141,6 +1141,12 @@ try {
       boundedActivationStatus.session.verification?.accountKeyType === 2 &&
       boundedActivationStatus.session.verification?.accountKeyIsSuperAdmin === false &&
       /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.accountKeyPublicKey ?? "") &&
+      boundedActivationStatus.session.verification?.liveExecutionRuleCount === 1 &&
+      boundedActivationStatus.session.verification?.liveCallScopeVerified === true &&
+      boundedActivationStatus.session.verification?.liveSpendRuleCount === 1 &&
+      boundedActivationStatus.session.verification?.liveSpendToken?.toLowerCase() === "0x0000000000000000000000000000000000000000" &&
+      boundedActivationStatus.session.verification?.liveSpendPeriod === "minute" &&
+      boundedActivationStatus.session.verification?.liveSpendLimit === "200000000000000" &&
       /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.registryKeyId ?? "") &&
       /^0x[0-9a-f]{64}$/iu.test(boundedActivationStatus.session.verification?.accountKeyHash ?? "") &&
       boundedActivationStatus.session.verification?.keyStore?.toLowerCase() === "0x6b8361c29d05d498b1a12b54a37310f94171e94a",
