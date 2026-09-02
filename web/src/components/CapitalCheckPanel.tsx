@@ -37,6 +37,7 @@ interface ProviderRoute {
   status: string;
   detail: string;
   action: string;
+  outcome: string;
 }
 
 const PROVIDER_ROUTES: Record<ServiceId, ProviderRoute> = {
@@ -45,24 +46,28 @@ const PROVIDER_ROUTES: Record<ServiceId, ProviderRoute> = {
     status: "1 rescue provider · 1 monitoring cross-check",
     detail: "Both inspect the same account. Only PositionCrew currently returns the bounded rescue contract; AiKi independently checks the risk diagnosis.",
     action: "Check providers and hire",
+    outcome: "Check whether this position needs a rescue and preserve the decision.",
   },
   LP_REBALANCE: {
     providers: "PositionCrew LP + V3 Pools powered by HeyAnon",
     status: "Two-provider exact-job audition",
     detail: "Both providers receive the same current LP position. PositionCrew normalizes the external range and applies your unchanged limits before selection.",
     action: "Compare providers for this job",
+    outcome: "Compare two range plans and admit only one that stays inside your limits.",
   },
   YIELD_OPTIMIZATION: {
     providers: "PositionCrew Yield + AiKi Venus Yield",
     status: "Two-provider exact-job audition",
     detail: "Both providers inspect the same current Venus markets. Rate evidence, liquidity, costs, risk limits, and horizon decide eligibility.",
     action: "Compare providers for this job",
+    outcome: "Compare current yield plans after costs, liquidity, and concentration limits.",
   },
   BOUNDED_GRID: {
     providers: "PositionCrew Grid + Brain on BNB Grid Planner",
     status: "Two-provider exact-job audition",
     detail: "Both providers evaluate the same live pool. The external range is admitted only when it passes the buyer's economics and loss limits.",
     action: "Compare providers for this job",
+    outcome: "Compare grid plans and reject any range that breaks your loss or cost caps.",
   },
 };
 
@@ -273,7 +278,7 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
       <div className="capital-check-intro">
         <span className="page-kicker">Position first · provider second</span>
         <h2 id="capital-check-title">Find the job. Then prove who can handle it.</h2>
-        <p>Enter a public address once. PositionCrew finds current capital jobs and shows the providers available to audition. Choosing a route reloads and pins fresh evidence inside that job before comparison. Nothing is signed or moved.</p>
+        <p>Enter a public address once. PositionCrew finds what needs attention, checks which agents can handle the exact job, and preserves the result. Nothing is signed or moved.</p>
         <div className="capital-check-trust"><ShieldCheck size={15} aria-hidden="true" /> Public reads only · no wallet connection · no transaction</div>
       </div>
 
@@ -301,7 +306,14 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
       {scanning && <div className="capital-check-progress" role="status"><span /><p><strong>Reading current BSC state</strong>Venus account, stable-yield markets, PancakeSwap market{positionId.trim() ? ", and the supplied LP NFT" : ""}.</p></div>}
       {cards && (
         <div className="capital-check-results" aria-live="polite">
-          <div className="capital-check-results-head"><div>{readyCount > 0 ? <CheckCircle2 size={17} aria-hidden="true" /> : <AlertTriangle size={17} aria-hidden="true" />}<span><strong>{readyCount > 0 ? "Jobs found. Now choose who handles them." : "No current jobs could be determined."}</strong><small>{readyCount > 0 ? "Each job shows the steps required to load and pin fresh evidence before provider audition." : "Every current read failed or returned no routable input. Retry before choosing a provider."}</small></span></div><span>{readyCount}/4 ready</span></div>
+          <div className="capital-check-results-head"><div>{readyCount > 0 ? <CheckCircle2 size={17} aria-hidden="true" /> : <AlertTriangle size={17} aria-hidden="true" />}<span><strong>{readyCount > 0 ? "Your capital desk is ready." : "No current jobs could be determined."}</strong><small>{readyCount > 0 ? "Start with the position that needs attention, then review the provider decision before hiring." : "Every current read failed or returned no routable input. Retry before choosing a provider."}</small></span></div><span>{readyCount}/4 ready</span></div>
+          {readyCount > 0 && (
+            <ol className="capital-check-journey" aria-label="How PositionCrew handles a capital job">
+              <li><span>1</span><strong>Position found</strong><small>Current BSC state</small></li>
+              <li><span>2</span><strong>Providers checked</strong><small>Same exact job</small></li>
+              <li><span>3</span><strong>Result preserved</strong><small>Plan or refusal</small></li>
+            </ol>
+          )}
           <div className="capital-check-grid">
             {cards.map((card) => {
               const task = TASKS.find((candidate) => candidate.id === card.service);
@@ -314,12 +326,18 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
                   <h3>{card.title}</h3>
                   <p>{card.detail}</p>
                   <div className="capital-check-metric"><span>{card.metricLabel}</span><strong>{card.metric}</strong></div>
-                  <div className="capital-check-provider-route">
-                    <span>Provider route</span>
-                    <strong>{route.status}</strong>
-                    <b>{route.providers}</b>
-                    <small>{route.detail}</small>
+                  <div className="capital-check-next-step">
+                    <span>What happens next</span>
+                    <strong>{route.outcome}</strong>
                   </div>
+                  <details className="capital-check-provider-proof">
+                    <summary><ShieldCheck size={13} aria-hidden="true" /> How providers are checked</summary>
+                    <div>
+                      <strong>{route.status}</strong>
+                      <b>{route.providers}</b>
+                      <small>{route.detail}</small>
+                    </div>
+                  </details>
                   <div className="capital-check-card-foot">
                     {card.blockNumber && card.explorerUrl ? <a href={card.explorerUrl} target="_blank" rel="noreferrer">Block {Number(card.blockNumber).toLocaleString("en-US")} <ExternalLink size={11} aria-hidden="true" /></a> : <span>Current evidence required</span>}
                     {canOpen ? <button type="button" onClick={() => onOpenJob(card.service)}>{route.action} <ArrowRight size={13} aria-hidden="true" /></button> : card.tone === "input" ? <button type="button" onClick={() => document.querySelector<HTMLInputElement>(".capital-check-form input[inputmode='numeric']")?.focus()}>Add NFT ID</button> : <button type="button" onClick={() => void scanCapital()}>Retry</button>}
