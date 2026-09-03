@@ -122,7 +122,7 @@ The local Cloudflare-compatible worker serves the application on `http://127.0.0
 - `GET /.well-known/positioncrew.json` for the marketplace discovery manifest;
 - `GET /openapi.json` for the four-provider OpenAPI 3.1 contract;
 - `GET /api/evidence/venus-testnet-native-supply/2026-08-24` for one immutable, founder-controlled Venus BSC Testnet supply receipt using exactly `0.0001 tBNB`;
-- `GET /api/activation-receipts/275e5cb6-d872-4156-aeb6-7e5f26428973` for the durable Altana least-authority sandbox receipt bound to [BSC testnet transaction `0x801e...dfb3`](https://testnet.bscscan.com/tx/0x801e87784cf06e80190106fd25788d04581d38661f8138912bf1c05d48abdfb3);
+- [`GET https://positioncrew.dolepee.com/api/activation-receipts/275e5cb6-d872-4156-aeb6-7e5f26428973`](https://positioncrew.dolepee.com/api/activation-receipts/275e5cb6-d872-4156-aeb6-7e5f26428973) for the production-D1 Altana least-authority sandbox receipt bound to [BSC testnet transaction `0x801e...dfb3`](https://testnet.bscscan.com/tx/0x801e87784cf06e80190106fd25788d04581d38661f8138912bf1c05d48abdfb3);
 - `GET /api/providers/:provider/manifest` for a self-contained provider transport and claim boundary;
 - `GET /api/schemas/:schemaVersion` for exact request or deliverable JSON Schema;
 - `GET /api/status` for block-pinned BSC, PancakeSwap, Venus, and integration-boundary telemetry;
