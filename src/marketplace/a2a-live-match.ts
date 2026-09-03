@@ -355,10 +355,10 @@ export function validateBrainHealthFactorDelivery(
   const stress = delivery.drawdown.stress;
   const measuredAt = Date.parse(delivery.position.measured_at);
   const submittedAt = authoritativeSubmittedAt ? Date.parse(authoritativeSubmittedAt) : null;
-  const normalizedProtocol = delivery.position.protocol.trim().toLowerCase();
-  const protocolMatches = normalizedProtocol === "venus" ||
-    normalizedProtocol === "venus classic" ||
-    normalizedProtocol === "venus protocol";
+  const normalizeProtocol = (value: string) => value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const normalizedProtocol = normalizeProtocol(delivery.position.protocol);
+  const requestedProtocol = normalizeProtocol(job.protocol);
+  const protocolMatches = normalizedProtocol === requestedProtocol;
   const monotonicStress = stress.every((row, index) => index === 0 || row.collateral_drop_pct > stress[index - 1]!.collateral_drop_pct)
     && stress.every((row, index) => index === 0 || row.health_factor <= stress[index - 1]!.health_factor);
   const observedBlock = delivery.position.block_number ?? delivery.position.observed_block;
@@ -366,7 +366,7 @@ export function validateBrainHealthFactorDelivery(
     { id: "OUTPUT_SCHEMA", passed: true, detail: "Provider result parses under the frozen Brain health-factor adapter schema." },
     { id: "ACCOUNT_BINDING", passed: delivery.position.account.toLowerCase() === job.account.toLowerCase(), detail: `Expected ${job.account}; received ${delivery.position.account}.` },
     { id: "CHAIN_BINDING", passed: delivery.position.chain === "eip155:56", detail: `Received ${delivery.position.chain}.` },
-    { id: "PROTOCOL_BINDING", passed: protocolMatches, detail: `Expected Venus Classic; received ${delivery.position.protocol}.` },
+    { id: "PROTOCOL_BINDING", passed: protocolMatches, detail: `Expected ${job.protocol}; received ${delivery.position.protocol}.` },
     { id: "CURRENT_HEALTH_FACTOR", passed: Number.isFinite(delivery.position.health_factor), detail: `Received ${delivery.position.health_factor}.` },
     { id: "LIQUIDATION_DISTANCE", passed: Number.isFinite(delivery.drawdown.tolerable_collateral_drop_pct), detail: `Received ${delivery.drawdown.tolerable_collateral_drop_pct}%.` },
     { id: "COLLATERAL_STRESS_TABLE", passed: monotonicStress, detail: monotonicStress ? `${stress.length} monotonic stress rows received.` : "Stress rows are not strictly increasing in drawdown with non-increasing health factor." },
