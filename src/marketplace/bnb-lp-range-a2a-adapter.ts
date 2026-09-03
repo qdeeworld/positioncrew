@@ -1,4 +1,5 @@
 import { verifyMessage } from "ethers";
+import { getAddress, keccak256, toBytes } from "viem";
 import { z } from "zod";
 
 import {
@@ -88,6 +89,75 @@ export type BnbLpSignedQuote = z.infer<typeof QuoteDataSchema>;
 
 function sameAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+function sortCanonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortCanonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, sortCanonical((value as Record<string, unknown>)[key])]),
+    );
+  }
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new Error("Canonical quote content cannot contain non-finite numbers");
+  }
+  return value;
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortCanonical(value)).replace(
+    /[\u007f-\uffff]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+function keccakCanonical(value: unknown): string {
+  return keccak256(toBytes(canonicalJson(value)));
+}
+
+function sanitizeForClaim(value: unknown): string {
+  const input = typeof value === "string" ? value : String(value);
+  let output = "";
+  for (const character of input.replaceAll("[", "(").replaceAll("]", ")")) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint >= 0x20 || character === "\t" || character === "\n") {
+      output += character;
+    }
+  }
+  return output;
+}
+
+function signedDescriptionContent(quote: BnbLpSignedQuote): Record<string, unknown> {
+  const terms: Record<string, unknown> = {
+    deliverables: sanitizeForClaim(quote.response.terms.deliverables),
+    quality_standards: sanitizeForClaim(quote.response.terms.quality_standards),
+  };
+  const successCriteria = quote.response.terms.success_criteria;
+  if (Array.isArray(successCriteria) && successCriteria.length > 0) {
+    terms.success_criteria = successCriteria.map(sanitizeForClaim);
+  }
+  return {
+    version: 1,
+    negotiated_at: quote.response.negotiated_at,
+    task: sanitizeForClaim(quote.request.task_description),
+    terms,
+    price: quote.response.terms.price,
+    currency: quote.response.terms.currency,
+    quote_expires_at: quote.response.quote_expires_at,
+    chain_id: quote.chain_id,
+    verifying_contract: getAddress(quote.verifying_contract),
+  };
+}
+
+function responseHashContent(quote: BnbLpSignedQuote): Record<string, unknown> {
+  return {
+    accepted: quote.response.accepted,
+    terms: quote.response.terms,
+    estimated_completion_seconds: quote.response.estimated_completion_seconds,
+    quote_expires_at: quote.response.quote_expires_at,
+  };
 }
 
 function taskDescription(request: LpRebalanceRequest): string {
@@ -189,24 +259,25 @@ export async function requestBnbLpRangeQuote(
   const startedClock = performance.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("external A2A timeout"), 12_000);
-  let response: Response;
+  let envelopeInput: unknown;
   try {
-    response = await fetchImpl(BNB_LP_RANGE_PROVIDER.endpoint, {
+    const response = await fetchImpl(BNB_LP_RANGE_PROVIDER.endpoint, {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify(nativeRequest),
       redirect: "error",
       signal: controller.signal,
     });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`External LP quote failed with HTTP ${response.status}`);
+    }
+    envelopeInput = await readBoundedJson(response);
   } finally {
     clearTimeout(timeout);
   }
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
-    throw new Error(`External LP quote failed with HTTP ${response.status}`);
-  }
 
-  const envelope = QuoteEnvelopeSchema.parse(await readBoundedJson(response));
+  const envelope = QuoteEnvelopeSchema.parse(envelopeInput);
   if (envelope.id !== nativeRequest.id) {
     throw new Error("External LP quote does not bind the JSON-RPC request id");
   }
@@ -230,7 +301,30 @@ export async function requestBnbLpRangeQuote(
   if (BigInt(quote.response.terms.price) > BigInt(BNB_LP_RANGE_PROVIDER.maximumPriceAtomic)) {
     throw new Error("External LP quote exceeds the frozen maximum price");
   }
-  const nowSeconds = Math.floor(now.getTime() / 1_000);
+  const verificationTime = options.now ?? new Date();
+  const verificationMilliseconds = verificationTime.getTime();
+  if (Date.parse(frozenRequest.deadline) <= verificationMilliseconds) {
+    throw new Error("Frozen PositionCrew LP request expired before quote verification");
+  }
+  if (
+    Date.parse(frozenRequest.marketState.observedAt) + frozenRequest.maxDataAgeSeconds * 1_000 <
+    verificationMilliseconds
+  ) {
+    throw new Error("Frozen PositionCrew LP observation is stale at quote verification");
+  }
+  const recomputedRequestHash = keccakCanonical(quote.request);
+  if (recomputedRequestHash.toLowerCase() !== quote.request_hash.toLowerCase()) {
+    throw new Error("External LP request_hash does not match the echoed canonical request");
+  }
+  const recomputedResponseHash = keccakCanonical(responseHashContent(quote));
+  if (recomputedResponseHash.toLowerCase() !== quote.response_hash.toLowerCase()) {
+    throw new Error("External LP response_hash does not match the canonical quote response");
+  }
+  const recomputedNegotiationHash = keccakCanonical(signedDescriptionContent(quote));
+  if (recomputedNegotiationHash.toLowerCase() !== quote.negotiation_hash.toLowerCase()) {
+    throw new Error("External LP negotiation_hash does not match the signed quote content");
+  }
+  const nowSeconds = Math.floor(verificationMilliseconds / 1_000);
   if (quote.response.quote_expires_at <= nowSeconds) {
     throw new Error("External LP quote is already expired");
   }
@@ -245,7 +339,7 @@ export async function requestBnbLpRangeQuote(
     throw new Error("External LP quote signer does not match the frozen ERC-8004 owner");
   }
 
-  const completedAt = new Date();
+  const completedAt = verificationTime;
   return {
     schemaVersion: "positioncrew.live-match.lp-quote-trace.v1",
     adapterId: "positioncrew:a2a:bnb-lp-range:quote:v1",

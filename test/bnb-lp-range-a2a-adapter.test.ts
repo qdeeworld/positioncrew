@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getAddress, keccak256, toBytes } from "viem";
 
 import type { LpRebalanceRequest } from "../src/contracts/lp-rebalance.js";
 import { requestBnbLpRangeQuote } from "../src/marketplace/bnb-lp-range-a2a-adapter.js";
@@ -67,10 +68,59 @@ const request: LpRebalanceRequest = {
   },
 };
 
+function canonical(value: unknown): string {
+  const sort = (item: unknown): unknown => Array.isArray(item)
+    ? item.map(sort)
+    : item !== null && typeof item === "object"
+      ? Object.fromEntries(Object.keys(item as Record<string, unknown>).sort().map((key) => [key, sort((item as Record<string, unknown>)[key])]))
+      : item;
+  return JSON.stringify(sort(value)).replace(/[\u007f-\uffff]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+function hash(value: unknown): string {
+  return keccak256(toBytes(canonical(value)));
+}
+
+function sanitize(value: unknown): string {
+  return String(value)
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
+}
+
+function rehash(data: any): void {
+  data.request_hash = hash(data.request);
+  const response = {
+    accepted: data.response.accepted,
+    terms: data.response.terms,
+    estimated_completion_seconds: data.response.estimated_completion_seconds,
+    quote_expires_at: data.response.quote_expires_at,
+  };
+  data.response_hash = hash(response);
+  const terms: Record<string, unknown> = {
+    deliverables: sanitize(data.response.terms.deliverables),
+    quality_standards: sanitize(data.response.terms.quality_standards),
+  };
+  if (Array.isArray(data.response.terms.success_criteria) && data.response.terms.success_criteria.length > 0) {
+    terms.success_criteria = data.response.terms.success_criteria.map(sanitize);
+  }
+  data.negotiation_hash = hash({
+    version: 1,
+    negotiated_at: data.response.negotiated_at,
+    task: sanitize(data.request.task_description),
+    terms,
+    price: data.response.terms.price,
+    currency: data.response.terms.currency,
+    quote_expires_at: data.response.quote_expires_at,
+    chain_id: data.chain_id,
+    verifying_contract: getAddress(data.verifying_contract),
+  });
+}
+
 function responseFor(body: string, overrides: Record<string, unknown> = {}): unknown {
   const rpc = JSON.parse(body) as { id: string; params: { message: { parts: Array<{ data: Record<string, unknown> }> } } };
   const submitted = rpc.params.message.parts[0]!.data;
-  return {
+  const envelope = {
     jsonrpc: "2.0",
     id: rpc.id,
     result: {
@@ -105,6 +155,8 @@ function responseFor(body: string, overrides: Record<string, unknown> = {}): unk
       }],
     },
   };
+  rehash(envelope.result.parts[0]!.data);
+  return envelope;
 }
 
 beforeEach(() => {
@@ -132,6 +184,15 @@ describe("BNB LP Range signed quote adapter", () => {
     await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow("changed the frozen job or quality terms");
   });
 
+  it("rejects a response whose signed-content hash does not match its fields", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const response = responseFor(String(init?.body)) as any;
+      response.result.parts[0].data.response.terms.price = "1";
+      return new Response(JSON.stringify(response), { status: 200 });
+    }) as typeof fetch;
+    await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow("response_hash does not match");
+  });
+
   it("rejects a signature that does not recover the frozen ERC-8004 owner", async () => {
     verifyMessageMock.mockReturnValue("0x0000000000000000000000000000000000000001");
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
@@ -143,8 +204,16 @@ describe("BNB LP Range signed quote adapter", () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const response = responseFor(String(init?.body)) as any;
       response.result.parts[0].data.response.terms.price = "100000000000000001";
+      rehash(response.result.parts[0].data);
       return new Response(JSON.stringify(response), { status: 200 });
     }) as typeof fetch;
     await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow("exceeds the frozen maximum price");
+  });
+
+  it("rejects a signed quote for an already-expired PositionCrew request", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+      new Response(JSON.stringify(responseFor(String(init?.body))), { status: 200 })) as typeof fetch;
+    const afterDeadline = new Date("2026-09-03T14:35:37.000Z");
+    await expect(requestBnbLpRangeQuote(request, { fetchImpl, now: afterDeadline })).rejects.toThrow("request expired");
   });
 });
