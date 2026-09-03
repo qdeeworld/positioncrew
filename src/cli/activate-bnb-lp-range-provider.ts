@@ -18,6 +18,11 @@ import { bsc } from "viem/chains";
 import { LpRebalanceRequestSchema, type LpRebalanceRequest } from "../contracts/lp-rebalance.js";
 import { canonicalHash } from "../core/canonical.js";
 import {
+  bscMainnetNetworkAtRpc,
+  providerSubmissionStillOpen,
+  recoverFundingEvidence,
+} from "../commerce/erc8183-funding-recovery.js";
+import {
   bnbLpRangePaymentContract,
   notifyBnbLpRangeFunded,
   requestBnbLpRangeQuote,
@@ -178,6 +183,7 @@ interface ActivationCheckpoint {
   transactions: TransactionRecord[];
   fundedBlock: string | null;
   fundedAt: string | null;
+  fundingEvidence?: { source: "RECORDED_TRANSACTION_RECEIPT" | "SIGNED_WINDOW_LOG_FALLBACK"; transactionHash: Hex | null } | null;
   notification: unknown;
   result: unknown;
   boundary: string;
@@ -246,7 +252,7 @@ async function buildPreflight(): Promise<ActivationPreflight> {
   const rpcUrl = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org";
   const publicClient = createPublicClient({ chain: bsc, transport: http(rpcUrl) });
   const payment = bnbLpRangePaymentContract();
-  const readClient = await ERC8183Client.create({ network: "bsc-mainnet" });
+  const readClient = await ERC8183Client.create({ network: bscMainnetNetworkAtRpc(rpcUrl) });
   const probe = await inspectPancakePosition(argument("position-id") ?? POSITION_ID);
   const frozenRequest = freezeActivationRequest(probe.lpRequest);
   const quote = await requestBnbLpRangeQuote(frozenRequest);
@@ -411,6 +417,8 @@ async function boundedManifest(url: string, allowedOrigins: readonly string[]): 
 
 async function broadcast(preflightPath: string): Promise<void> {
   const preflight = await readPreflight(preflightPath);
+  const rpcUrl = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org";
+  const sdkNetwork = bscMainnetNetworkAtRpc(rpcUrl);
   const suppliedApproval = argument("approval-hash");
   if (!preflight.ready) throw new Error(`Broadcast blocked by preflight: ${preflight.blockers.join("; ")}`);
   if (suppliedApproval !== preflight.approvalHash) throw new Error("Broadcast requires the exact user-approved --approval-hash from this preflight");
@@ -428,7 +436,7 @@ async function broadcast(preflightPath: string): Promise<void> {
     }
     if (preloadedCheckpoint.pendingPhase) throw new Error(`Checkpoint stopped during ${preloadedCheckpoint.pendingPhase}; reconcile that transaction before any retry`);
     if (preloadedCheckpoint.commerceJobId !== null) {
-      const readClient = await ERC8183Client.create({ network: "bsc-mainnet" });
+      const readClient = await ERC8183Client.create({ network: sdkNetwork });
       const existing = await readClient.getJob(BigInt(preloadedCheckpoint.commerceJobId));
       if (!same(existing.client, EXPECTED_WALLET) || !same(existing.provider, preflight.approvalEnvelope.provider) || existing.description !== preflight.quote.jobDescription) throw new Error("Resumed on-chain job does not match the approved checkpoint");
       if ([JobStatus.FUNDED, JobStatus.SUBMITTED, JobStatus.COMPLETED].includes(existing.status)) needsFunding = false;
@@ -444,12 +452,11 @@ async function broadcast(preflightPath: string): Promise<void> {
   const privateKey = await loadPrivateKey(keyPath);
   const account = privateKeyToAccount(privateKey);
   if (!same(account.address, EXPECTED_WALLET)) throw new Error("Operator key does not match the approved wallet");
-  const rpcUrl = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org";
   const publicClient = createPublicClient({ chain: bsc, transport: http(rpcUrl) });
   const walletClient = createWalletClient({ account, chain: bsc, transport: http(rpcUrl) });
   const payment = bnbLpRangePaymentContract();
   const sdkWallet = new EVMWalletProvider({ password: randomBytes(32).toString("hex"), privateKey, persist: false });
-  const client = await ERC8183Client.create({ walletProvider: sdkWallet, network: "bsc-mainnet" });
+  const client = await ERC8183Client.create({ walletProvider: sdkWallet, network: sdkNetwork });
   const paymentToken = getAddress(await client.paymentToken());
   const approval = preflight.approvalEnvelope;
   if (await publicClient.getChainId() !== 56 || client.network.chainId !== 56) throw new Error("Broadcast RPC is not BSC mainnet");
@@ -476,6 +483,7 @@ async function broadcast(preflightPath: string): Promise<void> {
       transactions: [],
       fundedBlock: null,
       fundedAt: null,
+      fundingEvidence: null,
       notification: null,
       result: null,
       boundary: "No recorded transaction has moved LP capital. Recovery actions and settlement require separate approval.",
@@ -622,21 +630,37 @@ async function broadcast(preflightPath: string): Promise<void> {
   }
   job = await verifyJob();
   if (![JobStatus.FUNDED, JobStatus.SUBMITTED, JobStatus.COMPLETED].includes(job.status)) throw new Error(`Job status ${JobStatus[job.status]} is not resumable for delivery`);
-  const fundedBlock = await client.getJobFundedBlock(commerceJobId, { negotiatedAt: preflight.quote.negotiatedAt, quoteExpiresAt: preflight.quote.quoteExpiresAt });
-  if (fundedBlock === null) throw new Error("Job funding did not occur inside the provider-signed quote window");
+  const recordedFund = [...checkpoint.transactions].reverse().find((transaction) => transaction.phase === "fund-job") ?? null;
+  const fundingEvidence = await recoverFundingEvidence({
+    recorded: recordedFund ? { hash: recordedFund.hash, blockNumber: recordedFund.blockNumber } : null,
+    expected: {
+      commerce: approval.contracts.commerce,
+      client: EXPECTED_WALLET,
+      provider: approval.provider,
+      jobId: commerceJobId,
+      amount: acceptedPrice,
+    },
+    readTransactionReceipt: (hash) => publicClient.getTransactionReceipt({ hash }),
+    fallbackFundedBlock: () => client.getJobFundedBlock(commerceJobId, {
+      negotiatedAt: preflight.quote.negotiatedAt,
+      quoteExpiresAt: preflight.quote.quoteExpiresAt,
+    }),
+  });
+  const fundedBlock = fundingEvidence.blockNumber;
   const fundedBlockData = await publicClient.getBlock({ blockNumber: fundedBlock });
   const fundedAtSeconds = Number(fundedBlockData.timestamp);
   if (fundedAtSeconds < preflight.quote.negotiatedAt || fundedAtSeconds >= preflight.quote.quoteExpiresAt) throw new Error("Funded block timestamp is outside the signed quote window");
   checkpoint.fundedBlock = fundedBlock.toString();
   checkpoint.fundedAt = new Date(fundedAtSeconds * 1_000).toISOString();
+  checkpoint.fundingEvidence = { source: fundingEvidence.source, transactionHash: fundingEvidence.transactionHash };
   const residualAllowance = await client.tokenAllowance(EXPECTED_WALLET, approval.contracts.commerce);
   if (residualAllowance !== 0n) throw new Error("Funding left a residual payment-token allowance; separate revocation approval is required");
   await persist("FUNDED_VERIFIED");
-  if (!checkpoint.notification && job.status === JobStatus.FUNDED) {
+  const pollDeadline = Date.parse(preflight.frozenRequest.deadline);
+  if (!checkpoint.notification && job.status === JobStatus.FUNDED && providerSubmissionStillOpen(preflight.frozenRequest.deadline)) {
     checkpoint.notification = await notifyBnbLpRangeFunded(commerceJobId, { messageId: preflight.notificationMessageId });
     await persist("PROVIDER_NOTIFIED");
   }
-  const pollDeadline = Date.parse(preflight.frozenRequest.deadline);
   while (job.status === JobStatus.FUNDED && Date.now() < pollDeadline) {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000));
     job = await verifyJob();
