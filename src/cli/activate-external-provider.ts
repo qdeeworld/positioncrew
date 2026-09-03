@@ -627,6 +627,7 @@ const compatibility = deliveryReceived && deliveryHashMatches
   ? validateBrainHealthFactorDelivery(frozenJob, deliverable, deliverySubmittedAt ?? undefined)
   : null;
 const compatible = compatibility?.status === "COMPATIBLE";
+const deliveryWindowExpired = Date.now() >= Date.parse(frozenJob.deadline);
 const evidence = {
   schemaVersion: "positioncrew.live-match.external-activation.v1",
   recordedAt: new Date().toISOString(),
@@ -650,6 +651,7 @@ const evidence = {
   deliveryReceived,
   deliverySubmittedAt,
   deliverySubmittedWithinDeadline,
+  deliveryWindowExpired,
   compatibility,
   states: {
     identity: "REGISTRY_OBSERVED",
@@ -659,12 +661,16 @@ const evidence = {
       ? "DELIVERED"
       : deliveryRetrievalError
         ? "DELIVERY_RETRIEVAL_FAILED"
-        : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
+        : deliveryWindowExpired
+          ? "NOT_DELIVERED_BY_DEADLINE"
+          : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
     compatibility: compatible
       ? "EXACT_JOB_COMPATIBLE"
       : deliveryReceived
         ? "EXACT_JOB_INCOMPATIBLE"
-        : "PENDING_PROVIDER_DELIVERY",
+        : deliveryWindowExpired
+          ? "DELIVERY_DEADLINE_EXPIRED"
+          : "PENDING_PROVIDER_DELIVERY",
     selection: compatible ? "SELECTED_FOR_FUNDED_JOB" : "NOT_ELIGIBLE_YET",
   },
   boundary: compatible
