@@ -171,8 +171,11 @@ describe("BNB LP Range signed quote adapter", () => {
     const trace = await requestBnbLpRangeQuote(request, { fetchImpl, now });
     expect(trace.states.identity).toBe("FROZEN_REGISTRY_OWNER_SIGNATURE_MATCHED");
     expect(trace.states.selection).toBe("NOT_ELIGIBLE_YET");
-    expect(trace.quote.response.terms.price).toBe("100000000000000000");
-    expect(verifyMessageMock).toHaveBeenCalledWith(trace.quote.negotiation_hash, trace.quote.provider_sig);
+    expect((trace.authenticatedQuote.terms as Record<string, unknown>).price).toBe("100000000000000000");
+    expect(verifyMessageMock).toHaveBeenCalledWith(
+      trace.authenticatedQuote.negotiation_hash,
+      trace.authenticatedQuote.provider_sig,
+    );
   });
 
   it("rejects a quote that changes the frozen quality terms", async () => {
@@ -215,5 +218,27 @@ describe("BNB LP Range signed quote adapter", () => {
       new Response(JSON.stringify(responseFor(String(init?.body))), { status: 200 })) as typeof fetch;
     const afterDeadline = new Date("2026-09-03T14:35:37.000Z");
     await expect(requestBnbLpRangeQuote(request, { fetchImpl, now: afterDeadline })).rejects.toThrow("request expired");
+  });
+
+  it("rejects a mainnet provider quote for a testnet request", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+      new Response(JSON.stringify(responseFor(String(init?.body))), { status: 200 })) as typeof fetch;
+    await expect(requestBnbLpRangeQuote({ ...request, chainId: 97 }, { fetchImpl, now })).rejects.toThrow(
+      "request chain does not match",
+    );
+  });
+
+  it("does not expose unsigned response fields as authenticated quote terms", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const response = responseFor(String(init?.body)) as any;
+      response.result.parts[0].data.response.estimated_completion_seconds = 86_400;
+      response.result.parts[0].data.response.terms.unsigned_extension = "not-owner-authenticated";
+      rehash(response.result.parts[0].data);
+      return new Response(JSON.stringify(response), { status: 200 });
+    }) as typeof fetch;
+    const trace = await requestBnbLpRangeQuote(request, { fetchImpl, now });
+    expect(trace.authenticatedQuote).not.toHaveProperty("estimated_completion_seconds");
+    expect(trace.authenticatedQuote.terms).not.toHaveProperty("unsigned_extension");
+    expect(trace.protocolIntegrity.boundary).toContain("not covered by the provider owner signature");
   });
 });

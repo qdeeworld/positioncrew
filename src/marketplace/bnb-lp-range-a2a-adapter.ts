@@ -160,6 +160,28 @@ function responseHashContent(quote: BnbLpSignedQuote): Record<string, unknown> {
   };
 }
 
+function authenticatedQuote(quote: BnbLpSignedQuote): Record<string, unknown> {
+  const terms: Record<string, unknown> = {
+    deliverables: quote.response.terms.deliverables,
+    quality_standards: quote.response.terms.quality_standards,
+    price: quote.response.terms.price,
+    currency: quote.response.terms.currency,
+  };
+  if (Array.isArray(quote.response.terms.success_criteria) && quote.response.terms.success_criteria.length > 0) {
+    terms.success_criteria = quote.response.terms.success_criteria;
+  }
+  return {
+    task_description: quote.request.task_description,
+    terms,
+    negotiated_at: quote.response.negotiated_at,
+    quote_expires_at: quote.response.quote_expires_at,
+    chain_id: quote.chain_id,
+    verifying_contract: getAddress(quote.verifying_contract),
+    negotiation_hash: quote.negotiation_hash,
+    provider_sig: quote.provider_sig,
+  };
+}
+
 function taskDescription(request: LpRebalanceRequest): string {
   return `Evaluate this exact PositionCrew LP_REBALANCE request without changing its fields: ${JSON.stringify(request)}`;
 }
@@ -236,7 +258,12 @@ export interface BnbLpRangeQuoteTrace {
   startedAt: string;
   completedAt: string;
   durationMilliseconds: number;
-  quote: BnbLpSignedQuote;
+  authenticatedQuote: ReturnType<typeof authenticatedQuote>;
+  protocolIntegrity: {
+    requestHash: string;
+    responseHash: string;
+    boundary: string;
+  };
   recoveredSigner: string;
   states: {
     identity: "FROZEN_REGISTRY_OWNER_SIGNATURE_MATCHED";
@@ -295,6 +322,9 @@ export async function requestBnbLpRangeQuote(
   if (!sameAddress(quote.verifying_contract, BNB_LP_RANGE_PROVIDER.kernel)) {
     throw new Error("External LP quote uses an unexpected ERC-8183 kernel");
   }
+  if (frozenRequest.chainId !== quote.chain_id) {
+    throw new Error("Frozen PositionCrew LP request chain does not match the provider quote chain");
+  }
   if (!sameAddress(quote.response.terms.currency, BNB_LP_RANGE_PROVIDER.paymentToken)) {
     throw new Error("External LP quote uses an unexpected payment token");
   }
@@ -352,7 +382,13 @@ export async function requestBnbLpRangeQuote(
     startedAt: now.toISOString(),
     completedAt: completedAt.toISOString(),
     durationMilliseconds: Math.round(performance.now() - startedClock),
-    quote,
+    authenticatedQuote: authenticatedQuote(quote),
+    protocolIntegrity: {
+      requestHash: quote.request_hash,
+      responseHash: quote.response_hash,
+      boundary:
+        "These canonical hashes detect inconsistent protocol payloads but are not covered by the provider owner signature. PositionCrew does not use or expose unsigned response extensions as authenticated quote terms.",
+    },
     recoveredSigner,
     states: {
       identity: "FROZEN_REGISTRY_OWNER_SIGNATURE_MATCHED",
