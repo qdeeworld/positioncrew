@@ -283,7 +283,7 @@ if (resumeJobId !== null && resumeCheckpointPath) {
       /^0x[0-9a-fA-F]{64}$/.test((entry as Record<string, unknown>).hash as string)
     ) as Record<string, unknown> | undefined
     : undefined;
-  if (recordedSwap) {
+  if (recordedSwap && !resumeDeliveryValidation) {
     const swapHash = recordedSwap.hash as Hex;
     const [swapTransaction, swapReceipt] = await Promise.all([
       publicClient.getTransaction({ hash: swapHash }),
