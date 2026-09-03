@@ -119,6 +119,7 @@ interface ApprovalEnvelope {
   payment: { token: string; exactAmountAtomic: string; maximumLossAtomic: string };
   swap: { tokenIn: string; tokenOut: string; router: string; maximumInputWei: string; minimumOutputAtomic: string; maximumSlippageBps: string };
   gas: { maximumTotalGasWei: string; gasPriceCeilingWei: string; gasUnitsEnvelope: string };
+  lifecycle: { requestDeadline: string; disputeWindowSeconds: string; onchainExpiredAt: string };
   frozenRequestHash: string;
   jobDescriptionHash: string;
   quoteExpiresAt: number;
@@ -318,6 +319,7 @@ async function buildPreflight(): Promise<ActivationPreflight> {
     payment: { token: paymentToken, exactAmountAtomic: acceptedPrice.toString(), maximumLossAtomic: acceptedPrice.toString() },
     swap: { tokenIn: WBNB, tokenOut: paymentToken, router: PANCAKE_V3_ROUTER, maximumInputWei: swapInput.toString(), minimumOutputAtomic: minimumOutput.toString(), maximumSlippageBps: MAXIMUM_SLIPPAGE_BPS.toString() },
     gas: { maximumTotalGasWei: maximumTotalGasWei.toString(), gasPriceCeilingWei: gasPriceCeiling.toString(), gasUnitsEnvelope: gasUnitsEnvelope.toString() },
+    lifecycle: { requestDeadline: frozenRequest.deadline, disputeWindowSeconds: disputeWindow.toString(), onchainExpiredAt: onchainExpiredAt.toString() },
     frozenRequestHash: canonicalHash(frozenRequest),
     jobDescriptionHash: quote.jobDescriptionHash,
     quoteExpiresAt: quote.quoteExpiresAt,
@@ -358,6 +360,11 @@ async function readPreflight(path: string): Promise<ActivationPreflight> {
   if (preflight.quote.jobDescriptionHash !== preflight.approvalEnvelope.jobDescriptionHash) throw new Error("Stored SDK job description differs from the approved envelope");
   if (preflight.quote.quoteExpiresAt !== preflight.approvalEnvelope.quoteExpiresAt) throw new Error("Stored quote expiry differs from the approved envelope");
   if (preflight.approvalEnvelope.frozenRequestHash !== canonicalHash(preflight.frozenRequest)) throw new Error("Approval does not bind the frozen LP request");
+  if (
+    preflight.approvalEnvelope.lifecycle.requestDeadline !== preflight.frozenRequest.deadline ||
+    preflight.approvalEnvelope.lifecycle.disputeWindowSeconds !== preflight.protocol.disputeWindowSeconds ||
+    preflight.approvalEnvelope.lifecycle.onchainExpiredAt !== preflight.protocol.onchainExpiredAt
+  ) throw new Error("Stored lifecycle timing differs from the approved envelope");
   return preflight;
 }
 
@@ -435,6 +442,8 @@ async function broadcast(preflightPath: string): Promise<void> {
   if (await publicClient.getChainId() !== 56 || client.network.chainId !== 56) throw new Error("Broadcast RPC is not BSC mainnet");
   if (!same(client.address ?? "", EXPECTED_WALLET)) throw new Error("SDK wallet changed after approval");
   if (!same(client.network.commerceContract, approval.contracts.commerce) || !same(client.network.routerContract, approval.contracts.router) || !same(client.network.policyContract, approval.contracts.policy) || !same(client.network.registryContract, approval.contracts.registry) || !same(paymentToken, approval.payment.token)) throw new Error("Live ERC-8183 deployment differs from the approved contracts");
+  const liveDisputeWindow = await client.policy.disputeWindow();
+  if (liveDisputeWindow.toString() !== approval.lifecycle.disputeWindowSeconds) throw new Error("Live policy dispute window differs from the approved lifecycle");
   const owner = await publicClient.readContract({ address: getAddress(client.network.registryContract), abi: registryAbi, functionName: "ownerOf", args: [BigInt(payment.agentTokenId)] });
   if (!same(owner, approval.provider) || !same(owner, preflight.quote.recoveredSigner)) throw new Error("ERC-8004 ownership changed after approval");
 
@@ -525,7 +534,10 @@ async function broadcast(preflightPath: string): Promise<void> {
 
   const acceptedPrice = BigInt(approval.payment.exactAmountAtomic);
   let paymentBalance = await publicClient.readContract({ address: paymentToken, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] });
-  if (paymentBalance < acceptedPrice && checkpoint.commerceJobId === null) {
+  if (paymentBalance < acceptedPrice && needsFunding) {
+    if (checkpoint.transactions.some((transaction) => transaction.phase === "swap-wbnb-for-u")) {
+      throw new Error("The approved swap already confirmed but the payment balance is insufficient; reconcile funds instead of repeating the swap");
+    }
     if (!preflight.swap.required || BigInt(approval.swap.minimumOutputAtomic) <= 0n || BigInt(approval.swap.minimumOutputAtomic) < acceptedPrice - paymentBalance) {
       throw new Error("Payment balance now requires a swap that the approved preflight did not safely bound; create a new preflight");
     }
@@ -547,9 +559,10 @@ async function broadcast(preflightPath: string): Promise<void> {
     paymentBalance = await publicClient.readContract({ address: paymentToken, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] });
     if (paymentBalance < acceptedPrice) throw new Error("Bounded swap completed without enough U for the accepted quote");
   }
+  if (needsFunding && paymentBalance < acceptedPrice) throw new Error("Payment balance is insufficient; refusing to spend gas on an unfundable OPEN job");
 
-  const disputeWindow = BigInt(preflight.protocol.disputeWindowSeconds);
-  const expiredAt = BigInt(preflight.protocol.onchainExpiredAt);
+  const disputeWindow = BigInt(approval.lifecycle.disputeWindowSeconds);
+  const expiredAt = BigInt(approval.lifecycle.onchainExpiredAt);
   if (expiredAt !== BigInt(Math.floor(Date.parse(preflight.frozenRequest.deadline) / 1_000)) + disputeWindow) throw new Error("Approved on-chain expiry no longer aligns with the request deadline and dispute window");
   let commerceJobId = checkpoint.commerceJobId === null ? null : BigInt(checkpoint.commerceJobId);
   if (commerceJobId === null) {
@@ -589,6 +602,9 @@ async function broadcast(preflightPath: string): Promise<void> {
     if (paymentAllowance === 0n) await runTx("approve-payment", () => client.approvePaymentToken(approval.contracts.commerce, acceptedPrice));
     paymentAllowance = await client.tokenAllowance(EXPECTED_WALLET, approval.contracts.commerce);
     if (paymentAllowance !== acceptedPrice) throw new Error("Exact payment approval did not become visible on-chain");
+    const immediatelyBeforeFunding = Math.floor(Date.now() / 1_000);
+    if (preflight.quote.quoteExpiresAt - immediatelyBeforeFunding < FUNDING_BUFFER_SECONDS) throw new Error("Quote no longer has the approved 180-second funding buffer; do not fund this immutable OPEN job");
+    if (Math.floor(Date.parse(preflight.frozenRequest.deadline) / 1_000) - immediatelyBeforeFunding < deliverySeconds + FUNDING_BUFFER_SECONDS) throw new Error("Request no longer has the required delivery and funding buffers; do not fund this immutable OPEN job");
     await runTx("fund-job", () => client.fund(commerceJobId!, acceptedPrice, { approveFloor: 0n }));
   }
   job = await verifyJob();
