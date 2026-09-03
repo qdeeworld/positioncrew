@@ -1014,8 +1014,10 @@ test("capital check turns current positions into truthful provider routes", asyn
   await expect(page.getByText("1 rescue provider · 1 monitoring cross-check", { exact: true })).toBeVisible();
   await expect(page.getByText("PositionCrew LP + V3 Pools powered by HeyAnon", { exact: true })).toBeVisible();
   await expect(page.getByText("PositionCrew Yield + AiKi Venus Yield", { exact: true })).toBeVisible();
-  await expect(page.getByText("PositionCrew Grid + Brain on BNB Grid Planner", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Compare providers for this job" })).toHaveCount(3);
+  await expect(page.getByText("PositionCrew Grid + two external market checks", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 bounded-grid provider · 2 partial external checks", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Compare providers for this job" })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Build a bounded grid" })).toBeVisible();
 
   const lpRoute = page.locator(".capital-check-card").filter({ hasText: "V3 Pools powered by HeyAnon" });
   await lpRoute.getByRole("button", { name: "Compare providers for this job" }).click();
