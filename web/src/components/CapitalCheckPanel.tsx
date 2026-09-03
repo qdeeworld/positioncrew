@@ -63,11 +63,11 @@ const PROVIDER_ROUTES: Record<ServiceId, ProviderRoute> = {
     outcome: "Compare current yield plans after costs, liquidity, and concentration limits.",
   },
   BOUNDED_GRID: {
-    providers: "PositionCrew Grid + Brain on BNB Grid Planner",
-    status: "Two-provider exact-job audition",
-    detail: "Both providers evaluate the same live pool. The external range is admitted only when it passes the buyer's economics and loss limits.",
-    action: "Compare providers for this job",
-    outcome: "Compare grid plans and reject any range that breaks your loss or cost caps.",
+    providers: "PositionCrew Grid + two external market checks",
+    status: "1 bounded-grid provider · 2 partial external checks",
+    detail: "Only PositionCrew returns the full bounded order, cost, loss, expiry, and cancellation contract. External agents can check the live pool or publish a separate plan, but neither is eligible for Grid selection yet.",
+    action: "Build a bounded grid",
+    outcome: "Test the current pool against your inventory, loss, cost, and expiry limits.",
   },
 };
 
