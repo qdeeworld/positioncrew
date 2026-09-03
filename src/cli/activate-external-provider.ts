@@ -415,7 +415,8 @@ if (resumeJobId !== null) {
       ? "Delivery-validation resume requires a FUNDED, SUBMITTED, or COMPLETED job"
       : "Transaction resume requires an OPEN job");
   }
-  const legacyMaximumBudget = resumeDeliveryValidation && existingJob.budget === PAYMENT_BUDGET;
+  const legacyMaximumBudget = existingJob.budget === PAYMENT_BUDGET &&
+    (resumeDeliveryValidation || existingJob.status === JobStatus.OPEN);
   if (existingJob.budget !== 0n && existingJob.budget !== acceptedPrice && !legacyMaximumBudget) {
     throw new Error("Resumed job budget does not match the accepted quote");
   }
@@ -461,7 +462,7 @@ await writeFile(outputPath, `${json({
 let notification: Awaited<ReturnType<typeof notifyBrainHealthFactorFunded>> | null = null;
 if (!resumeDeliveryValidation) {
   if (resumeJobId !== null) {
-    if (resumedJobBudget === 0n) {
+    if (resumedJobBudget !== acceptedPrice) {
       await client.setBudget(commerceJobId, acceptedPrice);
       await enforceTotalGas("set-budget");
     }
