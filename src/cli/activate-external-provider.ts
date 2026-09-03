@@ -197,7 +197,7 @@ const preflight = {
     maximumSlippageBps: MAX_SLIPPAGE_BPS,
     route: { tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, router: PANCAKE_V3_ROUTER },
   },
-  activation: { provider: payment.provider, kernel: payment.kernel, budgetAtomic: PAYMENT_BUDGET },
+  activation: { provider: payment.provider, kernel: payment.kernel, maximumBudgetAtomic: PAYMENT_BUDGET },
   maximumTotalGasWei: MAX_TOTAL_GAS,
   gasAlreadySpentWei: gasAlreadySpent,
   remainingGasCeilingWei: remainingGasCeiling,
@@ -340,6 +340,7 @@ if (resumeJobId !== null && resumeCheckpointPath) {
   }
   quote = await requestBrainHealthFactorQuote(frozenJob);
 }
+const acceptedPrice = BigInt(quote.quote.price);
 if (!capabilityProofArgument && !paidCapabilityTrial) {
   throw new Error(
     "Broadcast blocked: supply --capability-proof=<provider-native zero-value challenge manifest> or explicitly choose --paid-capability-trial.",
@@ -392,7 +393,7 @@ if (resumeJobId !== null) {
       ? "Delivery-validation resume requires a FUNDED, SUBMITTED, or COMPLETED job"
       : "Transaction resume requires an OPEN job");
   }
-  if (existingJob.budget !== 0n && existingJob.budget !== PAYMENT_BUDGET) throw new Error("Resumed job has an unexpected budget");
+  if (existingJob.budget !== 0n && existingJob.budget !== acceptedPrice) throw new Error("Resumed job budget does not match the accepted quote");
   if (!resumeDeliveryValidation && existingJob.expiredAt <= BigInt(Math.floor(Date.now() / 1000)) + disputeWindow) throw new Error("Resumed job cannot clear the policy dispute window");
   let existingDescription: unknown;
   try {
@@ -436,16 +437,16 @@ let notification: Awaited<ReturnType<typeof notifyBrainHealthFactorFunded>> | nu
 if (!resumeDeliveryValidation) {
   if (resumeJobId !== null) {
     if (resumedJobBudget === 0n) {
-      await client.setBudget(commerceJobId, PAYMENT_BUDGET);
+      await client.setBudget(commerceJobId, acceptedPrice);
       await enforceTotalGas("set-budget");
     }
   } else {
     await client.registerJob(commerceJobId);
     await enforceTotalGas("register-job");
-    await client.setBudget(commerceJobId, PAYMENT_BUDGET);
+    await client.setBudget(commerceJobId, acceptedPrice);
     await enforceTotalGas("set-budget");
   }
-  if (tokenBalance < PAYMENT_BUDGET) {
+  if (tokenBalance < acceptedPrice) {
     if (requiredWrapInput > 0n) {
       committedSwapInput += requiredWrapInput;
       await record("wrap-bnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrapInput }));
@@ -478,7 +479,7 @@ if (!resumeDeliveryValidation) {
     cumulativeGasWei: cumulativeGas,
     boundary: "The exact job terms are verified and the recovery checkpoint is durable. Escrow funding and provider notification have not started.",
   })}\n`, { mode: 0o600 });
-  await client.fund(commerceJobId, PAYMENT_BUDGET, { approveFloor: 0n });
+  await client.fund(commerceJobId, acceptedPrice, { approveFloor: 0n });
   await enforceTotalGas("fund-job");
   await writeFile(outputPath, `${json({
     schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
