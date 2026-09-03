@@ -56,19 +56,20 @@ describe("external provider audition evidence", () => {
       },
       commerce: {
         protocol: "ERC-8183",
-        jobId: "56668",
+        jobId: "56699",
         contentHashMatchesOnchain: true,
         escrowedAmount: "0.10 U",
+        settlementStatus: "PENDING_OPTIMISTIC_WINDOW",
       },
       validation: {
         status: "DELIVERED_INCOMPATIBLE",
-        passedChecks: 7,
-        failedChecks: 2,
+        passedChecks: 9,
+        failedChecks: 3,
       },
     });
     expect(evidence?.validation.checks.filter((check) => check.status === "FAIL").map(
       (check) => check.code,
-    )).toEqual(["PROTOCOL_CROSS_CHECK", "BLOCK_ATTRIBUTION"]);
+    )).toEqual(["PROTOCOL_BINDING", "PROTOCOL_CROSS_CHECK", "BLOCK_ATTRIBUTION"]);
     expect(result.selection.eligibleCandidateCount).toBe(1);
     expect(result.selection.winnerProviderSlug).toBe("lending-rescue");
     expect(result.claimBoundary).not.toContain(expect.stringMatching(/strongest|ranked/i));

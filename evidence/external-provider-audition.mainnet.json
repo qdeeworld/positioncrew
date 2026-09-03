@@ -1,6 +1,6 @@
 {
   "schemaVersion": "positioncrew.external-provider-audition.v1",
-  "recordedAt": "2026-08-30T05:44:17.359Z",
+  "recordedAt": "2026-09-03T13:20:11.262Z",
   "chainId": 56,
   "provider": {
     "name": "Brain on BNB",
@@ -8,24 +8,25 @@
   },
   "commerce": {
     "protocol": "ERC-8183",
-    "jobId": "56668",
+    "jobId": "56699",
     "kernel": "0xEa4DAa3100A767e86FDed867729ae7446476EBA6",
-    "submissionTransaction": "0x92805ddc2a123a893093e261427f18b57ec223b7f278e364882fe21f89e8fd5c",
-    "deliverableUrl": "https://agent.brainonbnb.com/job/56668/result",
-    "deliverableHash": "0x529ee17d8a32d5bfc41ef10987c01b639cfbeffcbe7f927093e669226213d090",
+    "submissionTransaction": "0xf72103d3eea0eb7de717be07c8e68b7fd65ec09c01c56944db8c0cb4065b4c9b",
+    "deliverableUrl": "https://agent.brainonbnb.com/job/56699/result",
+    "deliverableHash": "0x7ff53b2e68f2165fe3fcd656d83c6908d8cf63938e119a90bf4226d55523926a",
     "contentHashMatchesOnchain": true,
-    "escrowedAmount": "0.10 U"
+    "escrowedAmount": "0.10 U",
+    "settlementStatus": "PENDING_OPTIMISTIC_WINDOW"
   },
   "job": {
     "service": "HEALTH_FACTOR_MONITORING",
     "protocol": "Venus Classic",
     "account": "0xe02702687b1653a782af57fbcc56d59b7e99a935",
-    "deadline": "2026-08-30T05:39:25.186Z"
+    "deadline": "2026-09-03T13:31:01.389Z"
   },
   "validation": {
     "status": "DELIVERED_INCOMPATIBLE",
-    "passedChecks": 7,
-    "failedChecks": 2,
+    "passedChecks": 9,
+    "failedChecks": 3,
     "checks": [
       {
         "code": "IDENTITY_AND_DELIVERY",
@@ -43,9 +44,14 @@
         "detail": "The result included health factor, liquidation distance, and five collateral stress rows."
       },
       {
+        "code": "PROTOCOL_BINDING",
+        "status": "FAIL",
+        "detail": "The frozen job required Venus Classic; the provider identified the protocol only as Venus."
+      },
+      {
         "code": "PROTOCOL_CROSS_CHECK",
         "status": "FAIL",
-        "detail": "The provider reported a $35.26 difference from Venus getAccountLiquidity and marked its own cross-check as disagreeing."
+        "detail": "The provider reported a $43.13 difference from Venus getAccountLiquidity and marked its own cross-check as disagreeing."
       },
       {
         "code": "BLOCK_ATTRIBUTION",
@@ -53,6 +59,6 @@
         "detail": "The result did not identify the BSC block used for its calculation."
       }
     ],
-    "boundary": "The provider proved mainnet activation and attributable delivery, but it did not pass PositionCrew compatibility. No normalized result, eligibility, selection, or ranking was created."
+    "boundary": "The funded provider proved mainnet activation and attributable delivery, but it did not pass PositionCrew compatibility. Escrow settlement remains pending. No normalized result, eligibility, selection, or ranking was created."
   }
 }

@@ -606,12 +606,12 @@ function LendingProviderAuditionPanel({
         <aside className="external-provider-audit" aria-labelledby="external-provider-audit-title">
           <div className="external-provider-audit-heading">
             <div>
-              <span className="section-kicker">Prior external provider audition</span>
+              <span className="section-kicker">Funded external provider audition</span>
               <h4 id="external-provider-audit-title">
                 Delivery verified; job compatibility refused
               </h4>
               <p>
-                PositionCrew funded an independent health-factor job on BSC mainnet.
+                PositionCrew funded an external health-factor job on BSC mainnet.
                 {` ${audition.externalProviderAudit.provider.name}`} returned an onchain-hash-matched
                 result before the deadline, but the result did not meet the contract required for
                 a PositionCrew Lending Rescue decision.
@@ -629,12 +629,12 @@ function LendingProviderAuditionPanel({
             </span>
             <span>
               <b>{audition.externalProviderAudit.validation.failedChecks} checks failed</b>
-              No BSC block number and a $35.26 Venus cross-check difference
+              Wrong protocol binding, no BSC block number, and a $43.13 protocol difference
             </span>
             <span>
               <b>ERC-8183 job #{audition.externalProviderAudit.commerce.jobId}</b>
-              {audition.externalProviderAudit.commerce.escrowedAmount} recorded in the funded job;
-              settlement is not claimed
+              {audition.externalProviderAudit.commerce.escrowedAmount} funded; seven-day optimistic
+              settlement remains pending
             </span>
           </div>
 
@@ -656,8 +656,9 @@ function LendingProviderAuditionPanel({
           </div>
 
           <p className="external-provider-audit-boundary">
-            This was a separate frozen audition, not a test of your current request. PositionCrew
-            did not normalize, select, or rank the external provider.
+            This was a separate frozen audition, not a test of your current request. Paying for an
+            attempt did not lower the safety bar: PositionCrew did not normalize, select, or rank
+            the external provider.
           </p>
         </aside>
       ) : null}
