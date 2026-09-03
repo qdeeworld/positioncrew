@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for newly actionable PositionCrew TermiX orders
+
+[Path]
+PathChanged=/var/lib/positioncrew-termix-orders/pending.json
+Unit=positioncrew-termix-order-alert.service
+
+[Install]
+WantedBy=multi-user.target
+

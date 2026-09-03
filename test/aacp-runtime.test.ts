@@ -34,6 +34,10 @@ import {
   runtimeExitCode,
   validateProtectedRuntimeTokenFile,
 } from "../src/cli/run-termix-runtime.js";
+import {
+  actionableOrders,
+  unseenOrderTransitions,
+} from "../src/cli/watch-termix-orders.js";
 
 const NOW = new Date("2026-08-13T12:00:00.000Z");
 
@@ -66,6 +70,32 @@ function jwt(exp: number): string {
 }
 
 describe("PositionCrew TermiX A2A runtime", () => {
+  it("alerts once per actionable TermiX order transition for the exact provider", () => {
+    const initial = {
+      schemaVersion: "positioncrew.termix-order-watch.v1" as const,
+      agentId: "agent-1",
+      observations: {},
+      lastPollAt: null,
+    };
+    const orders = actionableOrders([
+      { id: "order-1", status: "PENDING_ACCEPT", providerAgentId: "agent-1", deliveryDueAt: null },
+      { id: "order-2", status: "SETTLED", providerAgentId: "agent-1", deliveryDueAt: null },
+      { id: "order-3", status: "FUNDED", providerAgentId: "agent-2", deliveryDueAt: null },
+    ], "agent-1");
+    expect(orders.map((order) => order.id)).toEqual(["order-1"]);
+
+    const first = unseenOrderTransitions(initial, orders);
+    expect(first.changed.map((order) => order.id)).toEqual(["order-1"]);
+    expect(unseenOrderTransitions(first.state, orders).changed).toEqual([]);
+
+    const advanced = unseenOrderTransitions(first.state, [{
+      ...orders[0]!,
+      status: "IN_PROGRESS",
+      availableActions: { canSubmitDelivery: true },
+    }]);
+    expect(advanced.changed.map((order) => order.id)).toEqual(["order-1"]);
+  });
+
   it.each([
     ["LENDING_RESCUE", "target health factor", "smallest bounded repay", "lending-rescue"],
     ["LP_REBALANCE", "PancakeSwap V3 position", "range shift or HOLD", "lp-rebalance"],
@@ -327,6 +357,28 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(unit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE");
     expect(unit).toContain("AmbientCapabilities=\n");
     expect(unit).toContain("BindReadOnlyPaths=-/home/crosswind/.local/state/positioncrew");
+  });
+
+  it("keeps TermiX order observation separate from Telegram credentials", () => {
+    const observer = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-orders.service", import.meta.url),
+      "utf8",
+    );
+    const alertPath = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-order-alert.path", import.meta.url),
+      "utf8",
+    );
+    const alert = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-order-alert.service", import.meta.url),
+      "utf8",
+    );
+
+    expect(observer).toContain("LoadCredential=session-token:");
+    expect(observer).not.toContain("crosswind.env");
+    expect(observer).not.toMatch(/TELEGRAM|WALLET_KEY|PRIVATE_KEY/);
+    expect(alertPath).toContain("PathChanged=/var/lib/positioncrew-termix-orders/pending.json");
+    expect(alert).toContain("EnvironmentFile=/etc/crosswind/crosswind.env");
+    expect(alert).not.toContain("termix-session.token");
   });
 
   it("uses only a bearer runtime token for inbox, signal, and reply calls", async () => {
