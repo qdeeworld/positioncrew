@@ -148,10 +148,13 @@ async function main(): Promise<void> {
 
   const token = await readProtectedToken(tokenPath);
   const previous = await loadState(statePath, agentId);
-  const orders = actionableOrders(await fetchOrders(baseUrl, token), agentId);
-  const transition = unseenOrderTransitions(previous, orders);
-  if (transition.changed.length) {
-    for (const order of transition.changed) {
+  const providerOrders = (await fetchOrders(baseUrl, token)).filter(
+    (order) => !order.providerAgentId || order.providerAgentId === agentId,
+  );
+  const transition = unseenOrderTransitions(previous, providerOrders);
+  const changed = actionableOrders(transition.changed, agentId);
+  if (changed.length) {
+    for (const order of changed) {
       const fingerprint = orderFingerprint(order);
       const occurrence = `${transition.state.lastPollAt}\n${randomUUID()}`;
       const id = createHash("sha256").update(`${order.id}\n${fingerprint}\n${occurrence}`).digest("hex");
@@ -175,8 +178,8 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify({
     event: "termix.order-watch.complete",
     agentId,
-    actionableCount: orders.length,
-    changedCount: transition.changed.length,
+    actionableCount: actionableOrders(providerOrders, agentId).length,
+    changedCount: changed.length,
     lastPollAt: transition.state.lastPollAt,
   })}\n`);
 }

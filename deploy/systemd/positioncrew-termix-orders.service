@@ -14,18 +14,20 @@ Environment=TERMIX_AGENT_ID=cmt4dzxvcli4tw70125nd5ra8
 Environment=TERMIX_BASE_URL=https://platform-backend.prod.termix.live
 Environment=TERMIX_SESSION_TOKEN_FILE=%d/session-token
 Environment=TERMIX_ORDER_STATE_PATH=/var/lib/positioncrew-termix-orders/state.json
-Environment=TERMIX_ORDER_OUTBOX_PATH=/var/lib/positioncrew-termix-orders/outbox
+Environment=TERMIX_ORDER_OUTBOX_PATH=/var/cache/positioncrew-termix-order-outbox
 LoadCredential=session-token:/etc/positioncrew-runtime/credentials/termix-session.token
 ExecStart=/usr/bin/node /home/crosswind/apps/positioncrew/dist/cli/watch-termix-orders.js
 TimeoutStartSec=30s
-UMask=0077
+UMask=0007
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectHome=read-only
 ProtectSystem=strict
 StateDirectory=positioncrew-termix-orders
-StateDirectoryMode=0770
+StateDirectoryMode=0700
+CacheDirectory=positioncrew-termix-order-outbox
+CacheDirectoryMode=0770
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

@@ -2,7 +2,7 @@
 Description=Watch for newly actionable PositionCrew TermiX orders
 
 [Path]
-PathExistsGlob=/var/lib/positioncrew-termix-orders/outbox/*.json
+PathExistsGlob=/var/cache/positioncrew-termix-order-outbox/*.json
 Unit=positioncrew-termix-order-alert.service
 
 [Install]

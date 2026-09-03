@@ -375,10 +375,12 @@ describe("PositionCrew TermiX A2A runtime", () => {
 
     expect(observer).toContain("LoadCredential=session-token:");
     expect(observer).toContain("User=positioncrew-orders");
-    expect(observer).toContain("StateDirectoryMode=0770");
+    expect(observer).toContain("StateDirectoryMode=0700");
+    expect(observer).toContain("CacheDirectoryMode=0770");
+    expect(observer).toContain("UMask=0007");
     expect(observer).not.toContain("crosswind.env");
     expect(observer).not.toMatch(/TELEGRAM|WALLET_KEY|PRIVATE_KEY/);
-    expect(alertPath).toContain("PathExistsGlob=/var/lib/positioncrew-termix-orders/outbox/*.json");
+    expect(alertPath).toContain("PathExistsGlob=/var/cache/positioncrew-termix-order-outbox/*.json");
     expect(alert).toContain("EnvironmentFile=/etc/crosswind/crosswind.env");
     expect(alert).toContain("SupplementaryGroups=positioncrew-orders");
     expect(alert).toContain("Restart=on-failure");
