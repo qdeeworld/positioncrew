@@ -5,6 +5,7 @@ import { EVMWalletProvider, ERC8183Client, JobStatus } from "@bnbagent/sdk";
 import {
   createPublicClient,
   createWalletClient,
+  decodeFunctionData,
   formatEther,
   getAddress,
   http,
@@ -269,10 +270,40 @@ let frozenJob;
 let quote;
 let resumeCheckpointState: string | null = null;
 let resumeCheckpointNotification: unknown = null;
+let checkpointCommittedSwapInput = 0n;
 if (resumeJobId !== null && resumeCheckpointPath) {
   const checkpoint = JSON.parse(await readFile(resumeCheckpointPath, "utf8")) as Record<string, unknown>;
   resumeCheckpointState = typeof checkpoint.state === "string" ? checkpoint.state : null;
   resumeCheckpointNotification = checkpoint.notification ?? null;
+  const recordedSwap = Array.isArray(checkpoint.transactions)
+    ? checkpoint.transactions.find((entry) =>
+      typeof entry === "object" && entry !== null &&
+      (entry as Record<string, unknown>).phase === "swap-wbnb-for-u" &&
+      typeof (entry as Record<string, unknown>).hash === "string" &&
+      /^0x[0-9a-fA-F]{64}$/.test((entry as Record<string, unknown>).hash as string)
+    ) as Record<string, unknown> | undefined
+    : undefined;
+  if (recordedSwap) {
+    const swapHash = recordedSwap.hash as Hex;
+    const [swapTransaction, swapReceipt] = await Promise.all([
+      publicClient.getTransaction({ hash: swapHash }),
+      publicClient.getTransactionReceipt({ hash: swapHash }),
+    ]);
+    const decodedSwap = decodeFunctionData({ abi: routerAbi, data: swapTransaction.input });
+    const [swapParameters] = decodedSwap.args;
+    if (
+      swapReceipt.status !== "success" ||
+      swapTransaction.from.toLowerCase() !== EXPECTED_WALLET.toLowerCase() ||
+      swapTransaction.to?.toLowerCase() !== PANCAKE_V3_ROUTER.toLowerCase() ||
+      decodedSwap.functionName !== "exactInputSingle" ||
+      swapParameters.amountIn !== SWAP_INPUT ||
+      swapParameters.tokenIn.toLowerCase() !== WBNB.toLowerCase() ||
+      swapParameters.tokenOut.toLowerCase() !== paymentToken.toLowerCase()
+    ) {
+      throw new Error("Resume checkpoint swap transaction does not match the frozen acquisition");
+    }
+    checkpointCommittedSwapInput = SWAP_INPUT;
+  }
   if (String(checkpoint.commerceJobId) !== resumeJobId.toString()) {
     throw new Error("Resume checkpoint does not bind the requested ERC-8183 job ID");
   }
@@ -348,7 +379,9 @@ if (resumeJobId !== null && resumeCheckpointPath) {
 }
 const acceptedPrice = BigInt(quote.quote.price);
 if (!resumeDeliveryValidation) {
-  existingCommittedSwapInput = wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
+  existingCommittedSwapInput = checkpointCommittedSwapInput > 0n
+    ? checkpointCommittedSwapInput
+    : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
   committedSwapInput = existingCommittedSwapInput;
   requiredWrapInput = tokenBalance >= acceptedPrice ? 0n : SWAP_INPUT - existingCommittedSwapInput;
   const exactNativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
