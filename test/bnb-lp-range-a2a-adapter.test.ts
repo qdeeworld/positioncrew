@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DeliverableManifest } from "@bnbagent/sdk/erc8183";
 import { getAddress, keccak256, toBytes } from "viem";
 
 import type { LpRebalanceRequest } from "../src/contracts/lp-rebalance.js";
 import {
   buildBnbLpRangeQuoteRequest,
+  notifyBnbLpRangeFunded,
   requestBnbLpRangeQuote,
+  validateBnbLpRangeDelivery,
 } from "../src/marketplace/bnb-lp-range-a2a-adapter.js";
 
 const verifyMessageMock = vi.hoisted(() => vi.fn());
@@ -175,6 +178,8 @@ describe("BNB LP Range signed quote adapter", () => {
     expect(trace.states.identity).toBe("FROZEN_REGISTRY_OWNER_SIGNATURE_MATCHED");
     expect(trace.states.selection).toBe("NOT_ELIGIBLE_YET");
     expect(trace.authenticatedQuote.price).toBe("100000000000000000");
+    expect(trace.jobDescription).toContain(trace.authenticatedQuote.provider_sig as string);
+    expect(new TextEncoder().encode(trace.jobDescription).byteLength).toBeLessThanOrEqual(4_096);
     expect(verifyMessageMock).toHaveBeenCalledWith(
       trace.authenticatedQuote.negotiation_hash,
       trace.authenticatedQuote.provider_sig,
@@ -320,6 +325,8 @@ describe("BNB LP Range signed quote adapter", () => {
       response.result.parts[0].data.response.negotiated_at = Math.floor(
         Date.parse("2026-09-03T14:32:00.000Z") / 1_000,
       );
+      response.result.parts[0].data.response.quote_expires_at =
+        response.result.parts[0].data.response.negotiated_at + 900;
       rehash(response.result.parts[0].data);
       return new Response(JSON.stringify(response), { status: 200 });
     }) as typeof fetch;
@@ -339,6 +346,145 @@ describe("BNB LP Range signed quote adapter", () => {
     await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow(
       "expiry is not later",
     );
+  });
+
+  it("rejects a quote whose signed window exceeds 900 seconds", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const response = responseFor(String(init?.body)) as any;
+      response.result.parts[0].data.response.quote_expires_at = response.result.parts[0].data.response.negotiated_at + 901;
+      rehash(response.result.parts[0].data);
+      return new Response(JSON.stringify(response), { status: 200 });
+    }) as typeof fetch;
+    await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow("maximum 900-second");
+  });
+
+  it("accepts only a funded notification bound to the exact job", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { id: string };
+      return new Response(JSON.stringify({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { kind: "message", messageId: "provider-funded", parts: [{ kind: "data", data: { status: "accepted", job_id: 42 } }] },
+      }), { status: 200 });
+    }) as typeof fetch;
+    const notification = await notifyBnbLpRangeFunded(42n, { fetchImpl, messageId: "funded-message" });
+    expect(notification.status).toBe("accepted");
+    expect(notification.commerceJobId).toBe("42");
+  });
+
+  it("rejects a funded notification for another job", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { id: string };
+      return new Response(JSON.stringify({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { kind: "message", messageId: "provider-funded", parts: [{ kind: "data", data: { status: "accepted", job_id: 43 } }] },
+      }), { status: 200 });
+    }) as typeof fetch;
+    await expect(notifyBnbLpRangeFunded(42n, { fetchImpl, messageId: "funded-message" })).rejects.toThrow("different job ID");
+  });
+
+  it("validates a strictly bound ERC-8183 LP delivery manifest", () => {
+    const deliverable = {
+      schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
+      service: "LP_REBALANCE",
+      requestId: request.requestId,
+      generatedAt: "2026-09-03T14:34:40.000Z",
+      expiresAt: "2026-09-03T14:35:30.000Z",
+      status: "NO_ACTION",
+      decision: "HOLD",
+      proposedRange: null,
+      estimatedRebalanceCostUsd: "0",
+      expectedGrossFeesUsd: "1",
+      expectedNetBenefitUsd: "0",
+      breakEvenHours: null,
+      inventoryExposure: { token0Bps: request.position.token0ShareBps, token1Bps: request.position.token1ShareBps },
+      summary: "The frozen position remains in range.",
+      actionSteps: [],
+      invalidationConditions: ["The source block changes."],
+      limitations: ["This is analysis only."],
+    };
+    const contracts = {
+      commerce: "0xEa4DAa3100A767e86FDed867729ae7446476EBA6",
+      router: "0x1111111111111111111111111111111111111111",
+      policy: "0x2222222222222222222222222222222222222222",
+    };
+    const manifest = new DeliverableManifest({
+      version: 1,
+      jobId: 42,
+      chainId: 56,
+      contracts,
+      response: { content: JSON.stringify(deliverable), contentType: "application/json" },
+    });
+    const validation = validateBnbLpRangeDelivery({
+      request,
+      manifestDocument: manifest.toDict(),
+      commerceJobId: 42n,
+      onchainDeliverable: manifest.manifestHash(),
+      fundedAt: "2026-09-03T14:34:30.000Z",
+      submittedAt: "2026-09-03T14:34:45.000Z",
+      expectedContracts: contracts,
+      now: new Date("2026-09-03T14:34:50.000Z"),
+    });
+    expect(validation.status).toBe("COMPATIBLE");
+    expect(validation.currentState).toBe("CURRENTLY_NO_ACTION");
+  });
+
+  it("fails closed when the fetched manifest differs from the on-chain hash", () => {
+    const contracts = {
+      commerce: "0xEa4DAa3100A767e86FDed867729ae7446476EBA6",
+      router: "0x1111111111111111111111111111111111111111",
+      policy: "0x2222222222222222222222222222222222222222",
+    };
+    const manifest = new DeliverableManifest({
+      version: 1,
+      jobId: 42,
+      chainId: 56,
+      contracts,
+      response: { content: "{}", contentType: "application/json" },
+    });
+    const validation = validateBnbLpRangeDelivery({
+      request,
+      manifestDocument: manifest.toDict(),
+      commerceJobId: 42n,
+      onchainDeliverable: `0x${"0".repeat(64)}`,
+      fundedAt: "2026-09-03T14:34:30.000Z",
+      submittedAt: "2026-09-03T14:34:45.000Z",
+      expectedContracts: contracts,
+      now,
+    });
+    expect(validation.status).toBe("INCOMPATIBLE");
+  });
+
+  it("rejects an actionable SHIFT that keeps the existing range", () => {
+    const contracts = {
+      commerce: "0xEa4DAa3100A767e86FDed867729ae7446476EBA6",
+      router: "0x1111111111111111111111111111111111111111",
+      policy: "0x2222222222222222222222222222222222222222",
+    };
+    const deliverable = {
+      schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
+      service: "LP_REBALANCE",
+      requestId: request.requestId,
+      generatedAt: "2026-09-03T14:34:40.000Z",
+      expiresAt: "2026-09-03T14:35:30.000Z",
+      status: "ACTIONABLE",
+      decision: "SHIFT",
+      proposedRange: { lowerTick: request.position.lowerTick, upperTick: request.position.upperTick },
+      estimatedRebalanceCostUsd: "1",
+      expectedGrossFeesUsd: "10",
+      expectedNetBenefitUsd: "5",
+      breakEvenHours: "1",
+      inventoryExposure: { token0Bps: 5000, token1Bps: 5000 },
+      summary: "No-op shift.",
+      actionSteps: ["Do nothing."],
+      invalidationConditions: ["The source block changes."],
+      limitations: ["This is analysis only."],
+    };
+    const manifest = new DeliverableManifest({ version: 1, jobId: 42, chainId: 56, contracts, response: { content: JSON.stringify(deliverable), contentType: "application/json" } });
+    const validation = validateBnbLpRangeDelivery({ request, manifestDocument: manifest.toDict(), commerceJobId: 42n, onchainDeliverable: manifest.manifestHash(), fundedAt: "2026-09-03T14:34:30.000Z", submittedAt: "2026-09-03T14:34:45.000Z", expectedContracts: contracts, now });
+    expect(validation.status).toBe("INCOMPATIBLE");
+    expect(validation.checks.find((check) => check.id === "decision-width-semantics")?.status).toBe("FAIL");
   });
 
   it("creates distinct lossless signed tasks for bracket-normalization collisions", () => {
