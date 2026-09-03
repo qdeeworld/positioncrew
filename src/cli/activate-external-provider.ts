@@ -345,6 +345,16 @@ const descriptionBinding = {
   capabilityMode: capabilityProof ? "PREPAYMENT_ZERO_VALUE_PROOF" : "PAID_DELIVERY_VALIDATION",
   capabilityProofHash: capabilityProof ? canonicalHash(capabilityProof.proof) : null,
 };
+const legacyDescriptionBinding = capabilityProof
+  ? {
+      schema: frozenJob.schemaVersion,
+      requestHash: quote.frozenJobHash,
+      account: frozenJob.account,
+      service: quote.quote.service,
+      quotedPrice: quote.quote.price,
+      capabilityProofHash: canonicalHash(capabilityProof.proof),
+    }
+  : null;
 const description = JSON.stringify(descriptionBinding);
 let commerceJobId: bigint;
 let originalOnchainDescription: string;
@@ -362,7 +372,10 @@ if (resumeJobId !== null) {
   } catch {
     throw new Error("Resumed job description is not valid JSON");
   }
-  if (canonicalHash(existingDescription) !== canonicalHash(descriptionBinding)) {
+  if (
+    canonicalHash(existingDescription) !== canonicalHash(descriptionBinding) &&
+    (!legacyDescriptionBinding || canonicalHash(existingDescription) !== canonicalHash(legacyDescriptionBinding))
+  ) {
     throw new Error("Resumed job description does not bind the current account, request hash, service, and quote");
   }
   commerceJobId = resumeJobId;
@@ -461,7 +474,15 @@ while (finalStatus === JobStatus.FUNDED && Date.now() < pollDeadline) {
 const deliverableUrl = finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED
   ? await client.getDeliverableUrl(commerceJobId)
   : null;
-const deliverable = deliverableUrl ? await boundedJson(deliverableUrl) : null;
+let deliverable: unknown = null;
+let deliveryRetrievalError: string | null = null;
+if (deliverableUrl) {
+  try {
+    deliverable = await boundedJson(deliverableUrl);
+  } catch (error) {
+    deliveryRetrievalError = error instanceof Error ? error.message : "Unknown delivery retrieval failure";
+  }
+}
 const compatibility = deliverable
   ? validateBrainHealthFactorDelivery(frozenJob, deliverable)
   : null;
@@ -482,12 +503,17 @@ const evidence = {
   finalStatus: JobStatus[finalStatus],
   deliverableUrl,
   deliverable,
+  deliveryRetrievalError,
   compatibility,
   states: {
     identity: "REGISTRY_OBSERVED",
     liveness: "A2A_RESPONDED",
     activation: "MAINNET_ERC8183_FUNDED",
-    delivery: deliverable ? "DELIVERED" : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
+    delivery: deliverable
+      ? "DELIVERED"
+      : deliveryRetrievalError
+        ? "DELIVERY_RETRIEVAL_FAILED"
+        : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
     compatibility: compatible
       ? "EXACT_JOB_COMPATIBLE"
       : deliverable
