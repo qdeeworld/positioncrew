@@ -151,29 +151,32 @@ const rpcUrl = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org";
 const payment = brainOnBnbPaymentContract();
 const paymentToken = getAddress(payment.paymentToken);
 const publicClient = createPublicClient({ chain: bsc, transport: http(rpcUrl) });
-const [chainId, nativeBalance, tokenBalance, wrappedBalance, quoted] = await Promise.all([
+const [chainId, nativeBalance, tokenBalance, wrappedBalance] = await Promise.all([
   publicClient.getChainId(),
   publicClient.getBalance({ address: EXPECTED_WALLET }),
   publicClient.readContract({ address: paymentToken, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] }),
   publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] }),
-  publicClient.simulateContract({
+]);
+const quotedOutput = resumeDeliveryValidation
+  ? 0n
+  : (await publicClient.simulateContract({
     account: EXPECTED_WALLET,
     address: PANCAKE_V3_QUOTER,
     abi: quoterAbi,
     functionName: "quoteExactInputSingle",
     args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: SWAP_INPUT, fee: FEE, sqrtPriceLimitX96: 0n }],
-  }),
-]);
+  })).result[0];
 if (chainId !== 56) throw new Error(`RPC chain mismatch: expected 56, received ${chainId}`);
-const [quotedOutput] = quoted.result;
 const minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
-const existingCommittedSwapInput = tokenBalance >= PAYMENT_BUDGET
+const existingCommittedSwapInput = resumeDeliveryValidation
+  ? 0n
+  : tokenBalance >= PAYMENT_BUDGET
   ? SWAP_INPUT
   : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
-const requiredWrapInput = tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - existingCommittedSwapInput;
-const nativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
-if (nativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
-const gasAlreadySpent = nativeDecrease - existingCommittedSwapInput;
+const requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - existingCommittedSwapInput;
+const nativeDecrease = resumeDeliveryValidation ? 0n : CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
+if (!resumeDeliveryValidation && nativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
+const gasAlreadySpent = resumeDeliveryValidation ? 0n : nativeDecrease - existingCommittedSwapInput;
 if (!resumeDeliveryValidation && gasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
 const remainingGasCeiling = MAX_TOTAL_GAS - gasAlreadySpent;
 if (!resumeDeliveryValidation && minimumOutput < PAYMENT_BUDGET) throw new Error("Bounded swap cannot acquire the external provider budget");
@@ -499,7 +502,8 @@ let finalStatus = resumeDeliveryValidation && resumedJobStatus !== null
 if (
   resumeDeliveryValidation &&
   finalStatus === JobStatus.FUNDED &&
-  resumeCheckpointState === "FUNDED_NOTIFICATION_PENDING" &&
+  resumeCheckpointState !== null &&
+  ["ESCROW_SETUP_PENDING", "ESCROW_FUNDING_PENDING", "FUNDED_NOTIFICATION_PENDING"].includes(resumeCheckpointState) &&
   resumeCheckpointNotification === null
 ) {
   notification = await notifyBrainHealthFactorFunded({ messageId: frozenJob.jobId, commerceJobId, account: accountToInspect });
@@ -517,6 +521,7 @@ let deliveryRetrievalError: string | null = null;
 let deliveryContentHash: `0x${string}` | null = null;
 let submittedDeliverableHash: `0x${string}` | null = null;
 let deliveryHashMatches = false;
+let deliveryReceived = false;
 let deliverySubmittedAt: string | null = null;
 let deliverySubmittedWithinDeadline = false;
 if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) {
@@ -535,12 +540,13 @@ if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) 
     deliveryHashMatches = deliveryContentHash.toLowerCase() === submittedDeliverableHash.toLowerCase();
     if (!deliveryHashMatches) throw new Error(`Fetched delivery hash ${deliveryContentHash} does not match onchain submission ${submittedDeliverableHash}`);
     if (!deliverySubmittedWithinDeadline) throw new Error(`Onchain delivery was submitted at ${deliverySubmittedAt ?? "an unknown time"}, after the frozen deadline ${frozenJob.deadline}`);
+    deliveryReceived = true;
     deliverable = unwrapBrainResult(fetched.document);
   } catch (error) {
     deliveryRetrievalError = error instanceof Error ? error.message : "Unknown delivery retrieval failure";
   }
 }
-const compatibility = deliverable && deliveryHashMatches
+const compatibility = deliveryReceived && deliveryHashMatches
   ? validateBrainHealthFactorDelivery(frozenJob, deliverable, deliverySubmittedAt ?? undefined)
   : null;
 const compatible = compatibility?.status === "COMPATIBLE";
@@ -564,6 +570,7 @@ const evidence = {
   deliveryContentHash,
   submittedDeliverableHash,
   deliveryHashMatches,
+  deliveryReceived,
   deliverySubmittedAt,
   deliverySubmittedWithinDeadline,
   compatibility,
@@ -571,14 +578,14 @@ const evidence = {
     identity: "REGISTRY_OBSERVED",
     liveness: "A2A_RESPONDED",
     activation: "MAINNET_ERC8183_FUNDED",
-    delivery: deliverable
+    delivery: deliveryReceived
       ? "DELIVERED"
       : deliveryRetrievalError
         ? "DELIVERY_RETRIEVAL_FAILED"
         : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
     compatibility: compatible
       ? "EXACT_JOB_COMPATIBLE"
-      : deliverable
+      : deliveryReceived
         ? "EXACT_JOB_INCOMPATIBLE"
         : "PENDING_PROVIDER_DELIVERY",
     selection: compatible ? "SELECTED_FOR_FUNDED_JOB" : "NOT_ELIGIBLE_YET",
