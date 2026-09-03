@@ -368,6 +368,9 @@ export async function requestBnbLpRangeQuote(
   if (quote.response.quote_expires_at <= nowSeconds) {
     throw new Error("External LP quote is already expired");
   }
+  if (quote.response.negotiated_at * 1_000 < requestedAtMilliseconds - 1_000) {
+    throw new Error("External LP negotiation predates the frozen PositionCrew request");
+  }
   if (
     quote.response.negotiated_at > nowSeconds + 60 ||
     quote.response.negotiated_at < nowSeconds - 300

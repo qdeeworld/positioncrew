@@ -310,4 +310,18 @@ describe("BNB LP Range signed quote adapter", () => {
       "captured after request creation",
     );
   });
+
+  it("rejects a negotiation that predates the frozen request", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const response = responseFor(String(init?.body)) as any;
+      response.result.parts[0].data.response.negotiated_at = Math.floor(
+        Date.parse("2026-09-03T14:32:00.000Z") / 1_000,
+      );
+      rehash(response.result.parts[0].data);
+      return new Response(JSON.stringify(response), { status: 200 });
+    }) as typeof fetch;
+    await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow(
+      "negotiation predates",
+    );
+  });
 });
