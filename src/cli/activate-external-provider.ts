@@ -471,14 +471,13 @@ while (finalStatus === JobStatus.FUNDED && Date.now() < pollDeadline) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000));
   finalStatus = await client.getJobStatus(commerceJobId);
 }
-const deliverableUrl = finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED
-  ? await client.getDeliverableUrl(commerceJobId)
-  : null;
+let deliverableUrl: string | null = null;
 let deliverable: unknown = null;
 let deliveryRetrievalError: string | null = null;
-if (deliverableUrl) {
+if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) {
   try {
-    deliverable = await boundedJson(deliverableUrl);
+    deliverableUrl = await client.getDeliverableUrl(commerceJobId);
+    if (deliverableUrl) deliverable = await boundedJson(deliverableUrl);
   } catch (error) {
     deliveryRetrievalError = error instanceof Error ? error.message : "Unknown delivery retrieval failure";
   }
