@@ -18,7 +18,7 @@ function receipt(overrides: Record<string, unknown> = {}) {
     abi: JOB_FUNDED_EVENT_ABI,
     eventName: "JobFunded",
     args: { jobId: 56_700n, client, provider },
-  });
+  }) as [Hex, ...Hex[]];
   return {
     transactionHash: hash,
     status: "success" as const,
