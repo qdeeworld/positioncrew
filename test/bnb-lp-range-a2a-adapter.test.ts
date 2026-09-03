@@ -456,6 +456,37 @@ describe("BNB LP Range signed quote adapter", () => {
     expect(validation.status).toBe("INCOMPATIBLE");
   });
 
+  it("rejects an actionable SHIFT that keeps the existing range", () => {
+    const contracts = {
+      commerce: "0xEa4DAa3100A767e86FDed867729ae7446476EBA6",
+      router: "0x1111111111111111111111111111111111111111",
+      policy: "0x2222222222222222222222222222222222222222",
+    };
+    const deliverable = {
+      schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
+      service: "LP_REBALANCE",
+      requestId: request.requestId,
+      generatedAt: "2026-09-03T14:34:40.000Z",
+      expiresAt: "2026-09-03T14:35:30.000Z",
+      status: "ACTIONABLE",
+      decision: "SHIFT",
+      proposedRange: { lowerTick: request.position.lowerTick, upperTick: request.position.upperTick },
+      estimatedRebalanceCostUsd: "1",
+      expectedGrossFeesUsd: "10",
+      expectedNetBenefitUsd: "5",
+      breakEvenHours: "1",
+      inventoryExposure: { token0Bps: 5000, token1Bps: 5000 },
+      summary: "No-op shift.",
+      actionSteps: ["Do nothing."],
+      invalidationConditions: ["The source block changes."],
+      limitations: ["This is analysis only."],
+    };
+    const manifest = new DeliverableManifest({ version: 1, jobId: 42, chainId: 56, contracts, response: { content: JSON.stringify(deliverable), contentType: "application/json" } });
+    const validation = validateBnbLpRangeDelivery({ request, manifestDocument: manifest.toDict(), commerceJobId: 42n, onchainDeliverable: manifest.manifestHash(), fundedAt: "2026-09-03T14:34:30.000Z", submittedAt: "2026-09-03T14:34:45.000Z", expectedContracts: contracts, now });
+    expect(validation.status).toBe("INCOMPATIBLE");
+    expect(validation.checks.find((check) => check.id === "decision-width-semantics")?.status).toBe("FAIL");
+  });
+
   it("creates distinct lossless signed tasks for bracket-normalization collisions", () => {
     const bracketed = buildBnbLpRangeQuoteRequest(
       { ...request, protocol: "foo[bar]" },

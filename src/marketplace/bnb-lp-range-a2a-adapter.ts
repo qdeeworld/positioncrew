@@ -718,8 +718,11 @@ export function validateBnbLpRangeDelivery(input: {
         ? width > existingWidth
         : output.decision === "NARROW"
           ? width < existingWidth
-          : true,
-      "WIDEN and NARROW decisions must change width in the stated direction.",
+          : output.decision === "SHIFT"
+            ? output.proposedRange.lowerTick !== request.position.lowerTick ||
+              output.proposedRange.upperTick !== request.position.upperTick
+            : true,
+      "WIDEN and NARROW must change width in the stated direction; SHIFT must change at least one endpoint.",
     );
   }
   add(

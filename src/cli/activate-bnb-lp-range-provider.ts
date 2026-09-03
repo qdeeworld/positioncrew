@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 
@@ -219,7 +219,6 @@ function verifyCheckpoint(checkpoint: ActivationCheckpoint): void {
 async function writeCheckpoint(path: string, checkpoint: ActivationCheckpoint, exclusive = false): Promise<void> {
   const sealed = sealCheckpoint(checkpoint);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await chmod(dirname(path), 0o700);
   if (exclusive) {
     await writeFile(path, `${json(sealed)}\n`, { mode: 0o600, flag: "wx" });
     return;
@@ -356,6 +355,8 @@ async function readPreflight(path: string): Promise<ActivationPreflight> {
   preflight.frozenRequest = LpRebalanceRequestSchema.parse(preflight.frozenRequest);
   if (preflight.approvalHash !== canonicalHash(preflight.approvalEnvelope)) throw new Error("Activation approval envelope hash mismatch");
   if (preflight.quote.jobDescriptionHash !== canonicalHash(preflight.quote.jobDescription)) throw new Error("Stored SDK job description hash mismatch");
+  if (preflight.quote.jobDescriptionHash !== preflight.approvalEnvelope.jobDescriptionHash) throw new Error("Stored SDK job description differs from the approved envelope");
+  if (preflight.quote.quoteExpiresAt !== preflight.approvalEnvelope.quoteExpiresAt) throw new Error("Stored quote expiry differs from the approved envelope");
   if (preflight.approvalEnvelope.frozenRequestHash !== canonicalHash(preflight.frozenRequest)) throw new Error("Approval does not bind the frozen LP request");
   return preflight;
 }
@@ -394,11 +395,30 @@ async function broadcast(preflightPath: string): Promise<void> {
   if (!preflight.ready) throw new Error(`Broadcast blocked by preflight: ${preflight.blockers.join("; ")}`);
   if (suppliedApproval !== preflight.approvalHash) throw new Error("Broadcast requires the exact user-approved --approval-hash from this preflight");
   if (argument("confirmation-token") !== "I_CONFIRM_EXACT_FUNDED_LP_ANALYSIS") throw new Error("Broadcast requires --confirmation-token=I_CONFIRM_EXACT_FUNDED_LP_ANALYSIS");
+  const resumePath = argument("resume-checkpoint");
+  let preloadedCheckpoint: ActivationCheckpoint | null = null;
+  let needsFunding = true;
+  if (resumePath) {
+    preloadedCheckpoint = JSON.parse(await readFile(resolve(resumePath), "utf8")) as ActivationCheckpoint;
+    verifyCheckpoint(preloadedCheckpoint);
+    if (preloadedCheckpoint.preflight.approvalHash !== preflight.approvalHash) throw new Error("Resume checkpoint does not bind this approved preflight");
+    const confirmedCreate = preloadedCheckpoint.transactions.some((transaction) => transaction.phase === "create-job");
+    if (preloadedCheckpoint.commerceJobId === null && (preloadedCheckpoint.state === "CREATE_JOB_ID_RECONCILIATION_REQUIRED" || confirmedCreate)) {
+      throw new Error("A confirmed createJob awaits ID reconciliation; refusing to create a duplicate job");
+    }
+    if (preloadedCheckpoint.pendingPhase) throw new Error(`Checkpoint stopped during ${preloadedCheckpoint.pendingPhase}; reconcile that transaction before any retry`);
+    if (preloadedCheckpoint.commerceJobId !== null) {
+      const readClient = await ERC8183Client.create({ network: "bsc-mainnet" });
+      const existing = await readClient.getJob(BigInt(preloadedCheckpoint.commerceJobId));
+      if (!same(existing.client, EXPECTED_WALLET) || !same(existing.provider, preflight.approvalEnvelope.provider) || existing.description !== preflight.quote.jobDescription) throw new Error("Resumed on-chain job does not match the approved checkpoint");
+      if ([JobStatus.FUNDED, JobStatus.SUBMITTED, JobStatus.COMPLETED].includes(existing.status)) needsFunding = false;
+      else if (existing.status !== JobStatus.OPEN) throw new Error(`Resumed job status ${JobStatus[existing.status]} is not recoverable by this command`);
+    }
+  }
   const nowSeconds = Math.floor(Date.now() / 1_000);
-  const fundedAlready = argument("resume-checkpoint") !== undefined;
-  if (!fundedAlready && preflight.quote.quoteExpiresAt - nowSeconds < FUNDING_BUFFER_SECONDS) throw new Error("Approved signed quote no longer has the required funding buffer; create a new preflight and approval");
+  if (needsFunding && preflight.quote.quoteExpiresAt - nowSeconds < FUNDING_BUFFER_SECONDS) throw new Error("Approved signed quote no longer has the required funding buffer; create a new preflight and approval");
   const deliverySeconds = Math.max(MINIMUM_DELIVERY_SECONDS, preflight.quote.declaredEstimatedCompletionSeconds);
-  if (!fundedAlready && Math.floor(Date.parse(preflight.frozenRequest.deadline) / 1_000) - nowSeconds < deliverySeconds + FUNDING_BUFFER_SECONDS) throw new Error("Approved request no longer has enough time for funding and delivery");
+  if (needsFunding && Math.floor(Date.parse(preflight.frozenRequest.deadline) / 1_000) - nowSeconds < deliverySeconds + FUNDING_BUFFER_SECONDS) throw new Error("Approved request no longer has enough time for funding and delivery");
   const keyPath = process.env.POSITIONCREW_OPERATOR_KEY_FILE;
   if (!keyPath) throw new Error("POSITIONCREW_OPERATOR_KEY_FILE is required for broadcast mode");
   const privateKey = await loadPrivateKey(keyPath);
@@ -418,14 +438,10 @@ async function broadcast(preflightPath: string): Promise<void> {
   const owner = await publicClient.readContract({ address: getAddress(client.network.registryContract), abi: registryAbi, functionName: "ownerOf", args: [BigInt(payment.agentTokenId)] });
   if (!same(owner, approval.provider) || !same(owner, preflight.quote.recoveredSigner)) throw new Error("ERC-8004 ownership changed after approval");
 
-  const resumePath = argument("resume-checkpoint");
   const checkpointPath = resolve(resumePath ?? argument("checkpoint") ?? `${homedir()}/.config/positioncrew/activations/bnb-lp-${preflight.approvalHash.slice(7, 19)}.json`);
   let checkpoint: ActivationCheckpoint;
   if (resumePath) {
-    checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as ActivationCheckpoint;
-    verifyCheckpoint(checkpoint);
-    if (checkpoint.preflight.approvalHash !== preflight.approvalHash) throw new Error("Resume checkpoint does not bind this approved preflight");
-    if (checkpoint.pendingPhase) throw new Error(`Checkpoint stopped during ${checkpoint.pendingPhase}; reconcile that transaction before any retry`);
+    checkpoint = preloadedCheckpoint!;
   } else {
     checkpoint = {
       schemaVersion: "positioncrew.live-match.lp-activation-checkpoint.v1",
@@ -448,12 +464,29 @@ async function broadcast(preflightPath: string): Promise<void> {
   const gasCap = BigInt(approval.gas.maximumTotalGasWei);
   const gasPriceCeiling = BigInt(approval.gas.gasPriceCeilingWei);
   const cumulativeGas = (): bigint => checkpoint.transactions.reduce((sum, transaction) => sum + BigInt(transaction.gasWei), 0n);
+  const remainingGasBudget = (): bigint => gasCap - cumulativeGas();
   const persist = async (state: string): Promise<void> => {
     checkpoint.state = state;
     checkpoint.updatedAt = new Date().toISOString();
     await writeCheckpoint(checkpointPath, checkpoint);
   };
+  const assertNetworkFee = async (phase: string): Promise<void> => {
+    const networkGasPrice = await publicClient.getGasPrice();
+    const sdkGasPrice = networkGasPrice * 12n / 10n;
+    if (sdkGasPrice > gasPriceCeiling) throw new Error(`${phase} cannot broadcast above the approved gas-price ceiling`);
+    if (remainingGasBudget() <= 0n) throw new Error(`${phase} has no approved gas budget remaining`);
+  };
+  const originalSignTransaction = sdkWallet.signTransaction.bind(sdkWallet);
+  sdkWallet.signTransaction = async (transaction) => {
+    const transactionGas = typeof transaction.gas === "bigint" ? transaction.gas : BigInt(transaction.gas ?? 0);
+    const transactionGasPrice = typeof transaction.gasPrice === "bigint" ? transaction.gasPrice : BigInt(transaction.gasPrice ?? 0);
+    if (transactionGas <= 0n || transactionGasPrice <= 0n) throw new Error("SDK transaction lacks a bounded legacy gas envelope");
+    if (transactionGasPrice > gasPriceCeiling) throw new Error("SDK transaction exceeds the approved gas-price ceiling before signing");
+    if (transactionGas * transactionGasPrice > remainingGasBudget()) throw new Error("SDK transaction can exceed the remaining approved gas budget");
+    return originalSignTransaction(transaction);
+  };
   const runTx = async <T extends { transactionHash: Hex; status: number; receipt: { status: string; blockNumber: bigint; gasUsed: bigint; effectiveGasPrice: bigint } | null }>(phase: string, action: () => Promise<T>): Promise<T> => {
+    await assertNetworkFee(phase);
     checkpoint.pendingPhase = phase;
     await persist(`${phase.toUpperCase()}_PENDING`);
     const result = await action();
@@ -467,10 +500,21 @@ async function broadcast(preflightPath: string): Promise<void> {
     await persist(`${phase.toUpperCase()}_CONFIRMED`);
     return { ...result, receipt } as T;
   };
-  const runWalletTx = async (phase: string, action: () => Promise<Hex>): Promise<void> => {
+  const directGasLimits: Record<string, bigint> = { "wrap-bnb": 50_000n, "approve-wbnb": 90_000n, "swap-wbnb-for-u": 350_000n };
+  const directFee = async (phase: string): Promise<{ gas: bigint; gasPrice: bigint }> => {
+    const gas = directGasLimits[phase];
+    if (!gas) throw new Error(`No approved gas limit exists for ${phase}`);
+    const networkGasPrice = await publicClient.getGasPrice();
+    const gasPrice = networkGasPrice * 12n / 10n;
+    if (gasPrice > gasPriceCeiling) throw new Error(`${phase} cannot broadcast above the approved gas-price ceiling`);
+    if (gas * gasPrice > remainingGasBudget()) throw new Error(`${phase} can exceed the remaining approved gas budget`);
+    return { gas, gasPrice };
+  };
+  const runWalletTx = async (phase: string, action: (fee: { gas: bigint; gasPrice: bigint }) => Promise<Hex>): Promise<void> => {
+    const fee = await directFee(phase);
     checkpoint.pendingPhase = phase;
     await persist(`${phase.toUpperCase()}_PENDING`);
-    const hash = await action();
+    const hash = await action(fee);
     const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 2, timeout: 120_000 });
     if (receipt.status !== "success") throw new Error(`${phase} transaction failed: ${hash}`);
     checkpoint.transactions.push({ phase, hash, blockNumber: receipt.blockNumber.toString(), gasWei: (receipt.gasUsed * receipt.effectiveGasPrice).toString() });
@@ -482,6 +526,9 @@ async function broadcast(preflightPath: string): Promise<void> {
   const acceptedPrice = BigInt(approval.payment.exactAmountAtomic);
   let paymentBalance = await publicClient.readContract({ address: paymentToken, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] });
   if (paymentBalance < acceptedPrice && checkpoint.commerceJobId === null) {
+    if (!preflight.swap.required || BigInt(approval.swap.minimumOutputAtomic) <= 0n || BigInt(approval.swap.minimumOutputAtomic) < acceptedPrice - paymentBalance) {
+      throw new Error("Payment balance now requires a swap that the approved preflight did not safely bound; create a new preflight");
+    }
     const swapInput = BigInt(approval.swap.maximumInputWei);
     const wrappedBalance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] });
     const requiredWrap = wrappedBalance < swapInput ? swapInput - wrappedBalance : 0n;
@@ -491,12 +538,12 @@ async function broadcast(preflightPath: string): Promise<void> {
     if (currentQuote < BigInt(approval.swap.minimumOutputAtomic)) throw new Error("Live swap quote fell below the user-approved minimum output");
     if (requiredWrap > 0n) {
       checkpoint.committedSwapInputWei = requiredWrap.toString();
-      await runWalletTx("wrap-bnb", () => walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrap }));
+      await runWalletTx("wrap-bnb", (fee) => walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrap, ...fee }));
     }
     const wrappedAllowance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "allowance", args: [EXPECTED_WALLET, PANCAKE_V3_ROUTER] });
     if (wrappedAllowance !== 0n && wrappedAllowance !== swapInput) throw new Error("Unexpected WBNB router allowance requires separate cleanup approval");
-    if (wrappedAllowance < swapInput) await runWalletTx("approve-wbnb", () => walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, swapInput] }));
-    await runWalletTx("swap-wbnb-for-u", () => walletClient.writeContract({ account, chain: bsc, address: PANCAKE_V3_ROUTER, abi: routerAbi, functionName: "exactInputSingle", args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: SWAP_FEE, recipient: EXPECTED_WALLET, amountIn: swapInput, amountOutMinimum: BigInt(approval.swap.minimumOutputAtomic), sqrtPriceLimitX96: 0n }] }));
+    if (wrappedAllowance < swapInput) await runWalletTx("approve-wbnb", (fee) => walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, swapInput], ...fee }));
+    await runWalletTx("swap-wbnb-for-u", (fee) => walletClient.writeContract({ account, chain: bsc, address: PANCAKE_V3_ROUTER, abi: routerAbi, functionName: "exactInputSingle", args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: SWAP_FEE, recipient: EXPECTED_WALLET, amountIn: swapInput, amountOutMinimum: BigInt(approval.swap.minimumOutputAtomic), sqrtPriceLimitX96: 0n }], ...fee }));
     paymentBalance = await publicClient.readContract({ address: paymentToken, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] });
     if (paymentBalance < acceptedPrice) throw new Error("Bounded swap completed without enough U for the accepted quote");
   }
@@ -550,7 +597,7 @@ async function broadcast(preflightPath: string): Promise<void> {
   if (fundedBlock === null) throw new Error("Job funding did not occur inside the provider-signed quote window");
   const fundedBlockData = await publicClient.getBlock({ blockNumber: fundedBlock });
   const fundedAtSeconds = Number(fundedBlockData.timestamp);
-  if (fundedAtSeconds < preflight.quote.negotiatedAt || fundedAtSeconds > preflight.quote.quoteExpiresAt) throw new Error("Funded block timestamp is outside the signed quote window");
+  if (fundedAtSeconds < preflight.quote.negotiatedAt || fundedAtSeconds >= preflight.quote.quoteExpiresAt) throw new Error("Funded block timestamp is outside the signed quote window");
   checkpoint.fundedBlock = fundedBlock.toString();
   checkpoint.fundedAt = new Date(fundedAtSeconds * 1_000).toISOString();
   const residualAllowance = await client.tokenAllowance(EXPECTED_WALLET, approval.contracts.commerce);
