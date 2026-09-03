@@ -378,6 +378,8 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(observer).not.toMatch(/TELEGRAM|WALLET_KEY|PRIVATE_KEY/);
     expect(alertPath).toContain("PathChanged=/var/lib/positioncrew-termix-orders/pending.json");
     expect(alert).toContain("EnvironmentFile=/etc/crosswind/crosswind.env");
+    expect(alert).toContain("Restart=on-failure");
+    expect(alert).toContain("StartLimitIntervalSec=0");
     expect(alert).not.toContain("termix-session.token");
   });
 

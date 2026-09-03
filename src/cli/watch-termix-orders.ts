@@ -15,7 +15,11 @@ const OrderSchema = z.object({
 
 const OrdersResponseSchema = z.union([
   z.array(OrderSchema),
-  z.object({ items: z.array(OrderSchema) }).passthrough(),
+  z.object({
+    items: z.array(OrderSchema),
+    page: z.number().int().positive().optional(),
+    totalPages: z.number().int().nonnegative().optional(),
+  }).passthrough(),
 ]);
 
 const StateSchema = z.object({
@@ -103,13 +107,26 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 }
 
 async function fetchOrders(baseUrl: string, token: string): Promise<Order[]> {
-  const response = await fetch(`${baseUrl}/api/v1/orders?side=provider&pageSize=50`, {
-    headers: { authorization: `Bearer ${token}`, accept: "application/json" },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error(`TermiX provider-order read failed with HTTP ${response.status}`);
-  const parsed = OrdersResponseSchema.parse(await response.json());
-  return Array.isArray(parsed) ? parsed : parsed.items;
+  const orders: Order[] = [];
+  const pageSize = 50;
+  for (let page = 1; page <= 1_000; page += 1) {
+    const query = new URLSearchParams({ side: "provider", pageSize: String(pageSize), page: String(page) });
+    const response = await fetch(`${baseUrl}/api/v1/orders?${query.toString()}`, {
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(`TermiX provider-order read failed with HTTP ${response.status}`);
+    const parsed = OrdersResponseSchema.parse(await response.json());
+    if (Array.isArray(parsed)) {
+      orders.push(...parsed);
+      return orders;
+    }
+    orders.push(...parsed.items);
+    if (parsed.totalPages !== undefined ? page >= parsed.totalPages : parsed.items.length < pageSize) {
+      return orders;
+    }
+  }
+  throw new Error("TermiX provider-order pagination exceeded the 1,000-page safety limit");
 }
 
 async function main(): Promise<void> {
@@ -125,7 +142,6 @@ async function main(): Promise<void> {
   const previous = await loadState(statePath, agentId);
   const orders = actionableOrders(await fetchOrders(baseUrl, token), agentId);
   const transition = unseenOrderTransitions(previous, orders);
-  await atomicJson(statePath, transition.state);
   if (transition.changed.length) {
     await atomicJson(alertPath, {
       schemaVersion: "positioncrew.termix-order-alert.v1",
@@ -140,6 +156,9 @@ async function main(): Promise<void> {
       boundary: "Operator attention only. No acceptance, delivery, settlement, signing, or transaction was performed.",
     });
   }
+  // Persist the deduplication cursor only after the alert outbox is durable.
+  // A crash can therefore cause a duplicate alert, but never a lost order.
+  await atomicJson(statePath, transition.state);
   process.stdout.write(`${JSON.stringify({
     event: "termix.order-watch.complete",
     agentId,

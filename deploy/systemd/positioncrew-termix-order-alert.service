@@ -4,6 +4,7 @@ After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/crosswind/crosswind.env
 ConditionPathExists=/opt/crosswind/package.json
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
@@ -15,6 +16,8 @@ Environment=PATH=/home/crosswind/.local/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=/etc/crosswind/crosswind.env
 ExecStart=/usr/bin/npm run alert:telegram -- POSITIONCREW_ORDER "A funded TermiX order needs operator action; inspect /var/lib/positioncrew-termix-orders/pending.json and its delivery deadline. No transaction was performed automatically."
 TimeoutStartSec=30s
+Restart=on-failure
+RestartSec=1min
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
@@ -25,4 +28,3 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-
