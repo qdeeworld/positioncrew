@@ -70,10 +70,11 @@ export function VenusActivationSandbox({ hireId, receiptId }: { hireId: string; 
     <section className="activation-sandbox" aria-labelledby="activation-sandbox-title">
       <div className="activation-sandbox__intro">
         <span className="eyebrow"><TestTube2 size={15} /> Optional BSC Testnet proof</span>
-        <h2 id="activation-sandbox-title">See bounded authority become an onchain action</h2>
+        <h2 id="activation-sandbox-title">Test scoped authority in a separate BSC sandbox</h2>
         <p>
-          PositionCrew can bind this completed decision to one founder-funded testnet supply. Its runner submits 0.0001 tBNB, while the
-          delegated key is restricted to Venus <code>mint()</code>, a short expiry, and a 0.0002 tBNB/minute native-spend ceiling.
+          After a completed Lending decision, you can inspect PositionCrew's activation controls through an independent, founder-funded
+          testnet supply. The runner submits 0.0001 tBNB, while the delegated key is restricted to Venus <code>mint()</code>, a short expiry,
+          and a 0.0002 tBNB/minute native-spend ceiling.
         </p>
       </div>
       <div className="activation-sandbox__limits" aria-label="Authority limits">
@@ -82,8 +83,9 @@ export function VenusActivationSandbox({ hireId, receiptId }: { hireId: string; 
         <span><TestTube2 size={16} /><strong>Sandbox only</strong><small>No user wallet</small></span>
       </div>
       <p className="activation-sandbox__boundary">
-        This does not execute the mainnet recommendation or use your funds. Altana applies the 0.0002 tBNB/minute ceiling across call value
-        and relay fees rather than earmarking each part; PositionCrew keeps the key server-side and hardcodes the smaller action value.
+        <strong>This does not execute the Lending result above or use your funds.</strong>{" "}
+        Altana applies the 0.0002 tBNB/minute ceiling across call value and relay fees rather than earmarking each part; PositionCrew keeps
+        the key server-side and hardcodes the smaller action value.
       </p>
       {!activation && (
         <button className="primary-action" type="button" onClick={activate} disabled={pending}>
