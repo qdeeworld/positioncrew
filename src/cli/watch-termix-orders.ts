@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -108,6 +109,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 
 async function fetchOrders(baseUrl: string, token: string): Promise<Order[]> {
   const orders: Order[] = [];
+  const pageSignatures = new Set<string>();
   const pageSize = 50;
   for (let page = 1; page <= 1_000; page += 1) {
     const query = new URLSearchParams({ side: "provider", pageSize: String(pageSize), page: String(page) });
@@ -119,11 +121,17 @@ async function fetchOrders(baseUrl: string, token: string): Promise<Order[]> {
     const parsed = OrdersResponseSchema.parse(await response.json());
     if (Array.isArray(parsed)) {
       orders.push(...parsed);
-      return orders;
+      if (parsed.length < pageSize) return [...new Map(orders.map((order) => [order.id, order])).values()];
+      const signature = parsed.map((order) => order.id).join("\n");
+      if (pageSignatures.has(signature)) {
+        throw new Error("TermiX provider-order endpoint repeated an array page while paginating");
+      }
+      pageSignatures.add(signature);
+      continue;
     }
     orders.push(...parsed.items);
     if (parsed.totalPages !== undefined ? page >= parsed.totalPages : parsed.items.length < pageSize) {
-      return orders;
+      return [...new Map(orders.map((order) => [order.id, order])).values()];
     }
   }
   throw new Error("TermiX provider-order pagination exceeded the 1,000-page safety limit");
@@ -133,7 +141,7 @@ async function main(): Promise<void> {
   const agentId = process.env.TERMIX_AGENT_ID?.trim();
   const tokenPath = process.env.TERMIX_SESSION_TOKEN_FILE?.trim();
   const statePath = resolve(process.env.TERMIX_ORDER_STATE_PATH?.trim() || ".state/termix-orders.json");
-  const alertPath = resolve(process.env.TERMIX_ORDER_ALERT_PATH?.trim() || ".state/termix-order-alert.json");
+  const outboxPath = resolve(process.env.TERMIX_ORDER_OUTBOX_PATH?.trim() || ".state/termix-order-outbox");
   const baseUrl = (process.env.TERMIX_BASE_URL?.trim() || "https://platform-backend.prod.termix.live").replace(/\/$/, "");
   if (!agentId) throw new Error("TERMIX_AGENT_ID is required");
   if (!tokenPath || !tokenPath.startsWith("/")) throw new Error("TERMIX_SESSION_TOKEN_FILE must be absolute");
@@ -143,18 +151,22 @@ async function main(): Promise<void> {
   const orders = actionableOrders(await fetchOrders(baseUrl, token), agentId);
   const transition = unseenOrderTransitions(previous, orders);
   if (transition.changed.length) {
-    await atomicJson(alertPath, {
-      schemaVersion: "positioncrew.termix-order-alert.v1",
-      observedAt: transition.state.lastPollAt,
-      agentId,
-      orders: transition.changed.map((order) => ({
-        orderId: order.id,
-        status: order.status,
-        deliveryDueAt: order.deliveryDueAt ?? null,
-        availableActions: order.availableActions ?? {},
-      })),
-      boundary: "Operator attention only. No acceptance, delivery, settlement, signing, or transaction was performed.",
-    });
+    for (const order of transition.changed) {
+      const fingerprint = orderFingerprint(order);
+      const id = createHash("sha256").update(`${order.id}\n${fingerprint}`).digest("hex");
+      await atomicJson(resolve(outboxPath, `${id}.json`), {
+        schemaVersion: "positioncrew.termix-order-alert.v1",
+        observedAt: transition.state.lastPollAt,
+        agentId,
+        order: {
+          orderId: order.id,
+          status: order.status,
+          deliveryDueAt: order.deliveryDueAt ?? null,
+          availableActions: order.availableActions ?? {},
+        },
+        boundary: "Operator attention only. No acceptance, delivery, settlement, signing, or transaction was performed.",
+      });
+    }
   }
   // Persist the deduplication cursor only after the alert outbox is durable.
   // A crash can therefore cause a duplicate alert, but never a lost order.

@@ -2,9 +2,8 @@
 Description=Watch for newly actionable PositionCrew TermiX orders
 
 [Path]
-PathChanged=/var/lib/positioncrew-termix-orders/pending.json
+PathExistsGlob=/var/lib/positioncrew-termix-orders/outbox/*.json
 Unit=positioncrew-termix-order-alert.service
 
 [Install]
 WantedBy=multi-user.target
-

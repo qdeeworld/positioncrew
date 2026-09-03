@@ -34,6 +34,7 @@
     "capture:listing-media": "node scripts/capture-listing-media.mjs",
     "runtime:termix": "tsx src/cli/run-termix-runtime.ts",
     "watch:termix-orders": "tsx src/cli/watch-termix-orders.ts",
+    "notify:termix-orders": "tsx src/cli/notify-termix-orders.ts",
     "preflight:termix": "tsx src/cli/termix-onboarding-preflight.ts",
     "evidence:venus-testnet-supply": "tsx src/cli/venus-testnet-native-supply.ts",
     "activate:grant-altana-venus-session": "tsx src/cli/grant-altana-venus-session.ts",
