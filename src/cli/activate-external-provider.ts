@@ -409,7 +409,7 @@ if (!resumeDeliveryValidation) {
   preflight.swap.requiredAdditionalWrapWei = requiredWrapInput;
   preflight.gasAlreadySpentWei = exactGasAlreadySpent;
   preflight.remainingGasCeilingWei = exactRemainingGasCeiling;
-  if (tokenBalance < acceptedPrice && minimumOutput < acceptedPrice) throw new Error("Bounded swap cannot acquire the accepted provider quote");
+  if (tokenBalance < acceptedPrice && minimumOutput < acceptedPrice - tokenBalance) throw new Error("Bounded swap cannot cover the accepted provider quote shortfall");
   if (nativeBalance < requiredWrapInput + exactRemainingGasCeiling) throw new Error("Operator wallet cannot preserve the quoted swap input and gas ceiling");
 }
 if (!capabilityProofArgument && !paidCapabilityTrial) {
