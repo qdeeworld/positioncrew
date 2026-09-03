@@ -633,8 +633,13 @@ function LendingProviderAuditionPanel({
             </span>
             <span>
               <b>ERC-8183 job #{audition.externalProviderAudit.commerce.jobId}</b>
-              {audition.externalProviderAudit.commerce.escrowedAmount} funded; seven-day optimistic
-              settlement remains pending
+              {audition.externalProviderAudit.commerce.escrowedAmount} funded; settlement was pending
+              in the {new Date(audition.externalProviderAudit.recordedAt).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                timeZone: "UTC",
+              })} evidence snapshot
             </span>
           </div>
 

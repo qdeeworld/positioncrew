@@ -76,7 +76,7 @@ const ExternalProviderAuditionEvidenceSchema = z.object({
     deliverableHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
     contentHashMatchesOnchain: z.literal(true),
     escrowedAmount: z.literal("0.10 U"),
-    settlementStatus: z.literal("PENDING_OPTIMISTIC_WINDOW"),
+    settlementStatus: z.literal("PENDING_OPTIMISTIC_WINDOW").optional(),
   }).strict(),
   job: z.object({
     service: z.literal("HEALTH_FACTOR_MONITORING"),
@@ -99,7 +99,7 @@ const ExternalProviderAuditionEvidenceSchema = z.object({
       ]),
       status: z.enum(["PASS", "FAIL"]),
       detail: z.string().min(1).max(280),
-    }).strict()).length(6),
+    }).strict()).min(5).max(6),
     boundary: z.string().min(1).max(500),
   }).strict(),
 }).strict();

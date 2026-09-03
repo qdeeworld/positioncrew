@@ -94,4 +94,23 @@ describe("external provider audition evidence", () => {
     });
     await expect(verifyLendingProviderAuditionCommitment(tampered)).resolves.toBe(false);
   });
+
+  it("continues to parse persisted v1 evidence from before settlement snapshots", async () => {
+    const result = await audition();
+    const evidence = result.externalProviderAudit!;
+    const { settlementStatus: _settlementStatus, ...legacyCommerce } = evidence.commerce;
+    const legacyChecks = evidence.validation.checks.filter((check) => check.code !== "PROTOCOL_BINDING");
+
+    expect(() => LendingProviderAuditionSchema.parse({
+      ...result,
+      externalProviderAudit: {
+        ...evidence,
+        commerce: legacyCommerce,
+        validation: {
+          ...evidence.validation,
+          checks: legacyChecks,
+        },
+      },
+    })).not.toThrow();
+  });
 });

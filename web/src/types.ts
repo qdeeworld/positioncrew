@@ -551,7 +551,7 @@ export interface ExternalProviderAuditionEvidence {
     deliverableHash: string;
     contentHashMatchesOnchain: true;
     escrowedAmount: "0.10 U";
-    settlementStatus: "PENDING_OPTIMISTIC_WINDOW";
+    settlementStatus?: "PENDING_OPTIMISTIC_WINDOW";
   };
   job: {
     service: "HEALTH_FACTOR_MONITORING";
