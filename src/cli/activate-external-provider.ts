@@ -91,8 +91,16 @@ function json(value: unknown): string {
   return JSON.stringify(value, (_, item) => typeof item === "bigint" ? item.toString() : item, 2);
 }
 
-async function boundedDocument(url: string, maximumBytes = 128 * 1024): Promise<{ document: unknown; raw: string }> {
-  const response = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(12_000) });
+async function boundedDocument(url: string, expectedOrigin: string, maximumBytes = 128 * 1024): Promise<{ document: unknown; raw: string }> {
+  const requestedUrl = new URL(url);
+  if (requestedUrl.protocol !== "https:" || requestedUrl.origin !== expectedOrigin) {
+    throw new Error("Deliverable URL is outside the frozen provider HTTPS origin");
+  }
+  const response = await fetch(url, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(12_000) });
+  const finalUrl = new URL(response.url);
+  if (finalUrl.protocol !== "https:" || finalUrl.origin !== expectedOrigin) {
+    throw new Error("Deliverable redirect left the frozen provider HTTPS origin");
+  }
   if (!response.ok || !response.body) throw new Error(`Deliverable fetch failed with HTTP ${response.status}`);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -168,19 +176,19 @@ const quotedOutput = resumeDeliveryValidation
   })).result[0];
 if (chainId !== 56) throw new Error(`RPC chain mismatch: expected 56, received ${chainId}`);
 const minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
-const existingCommittedSwapInput = resumeDeliveryValidation
+let existingCommittedSwapInput = resumeDeliveryValidation
   ? 0n
   : tokenBalance >= PAYMENT_BUDGET
   ? SWAP_INPUT
   : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
-const requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - existingCommittedSwapInput;
+let requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - existingCommittedSwapInput;
 const nativeDecrease = resumeDeliveryValidation ? 0n : CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
 if (!resumeDeliveryValidation && nativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
 const gasAlreadySpent = resumeDeliveryValidation ? 0n : nativeDecrease - existingCommittedSwapInput;
-if (!resumeDeliveryValidation && gasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
+if (!resumeDeliveryValidation && !broadcast && gasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
 const remainingGasCeiling = MAX_TOTAL_GAS - gasAlreadySpent;
-if (!resumeDeliveryValidation && minimumOutput < PAYMENT_BUDGET) throw new Error("Bounded swap cannot acquire the external provider budget");
-if (!resumeDeliveryValidation && nativeBalance < requiredWrapInput + remainingGasCeiling) throw new Error("Operator wallet cannot preserve the remaining swap input and gas ceiling");
+if (!resumeDeliveryValidation && !broadcast && minimumOutput < PAYMENT_BUDGET) throw new Error("Bounded swap cannot acquire the external provider maximum budget");
+if (!resumeDeliveryValidation && !broadcast && nativeBalance < requiredWrapInput + remainingGasCeiling) throw new Error("Operator wallet cannot preserve the maximum swap input and gas ceiling");
 
 const preflight = {
   schemaVersion: "positioncrew.live-match.activation-preflight.v1",
@@ -341,6 +349,20 @@ if (resumeJobId !== null && resumeCheckpointPath) {
   quote = await requestBrainHealthFactorQuote(frozenJob);
 }
 const acceptedPrice = BigInt(quote.quote.price);
+if (!resumeDeliveryValidation) {
+  existingCommittedSwapInput = tokenBalance >= acceptedPrice
+    ? SWAP_INPUT
+    : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
+  committedSwapInput = existingCommittedSwapInput;
+  requiredWrapInput = tokenBalance >= acceptedPrice ? 0n : SWAP_INPUT - existingCommittedSwapInput;
+  const exactNativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
+  if (exactNativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
+  const exactGasAlreadySpent = exactNativeDecrease - existingCommittedSwapInput;
+  if (exactGasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
+  const exactRemainingGasCeiling = MAX_TOTAL_GAS - exactGasAlreadySpent;
+  if (minimumOutput < acceptedPrice) throw new Error("Bounded swap cannot acquire the accepted provider quote");
+  if (nativeBalance < requiredWrapInput + exactRemainingGasCeiling) throw new Error("Operator wallet cannot preserve the quoted swap input and gas ceiling");
+}
 if (!capabilityProofArgument && !paidCapabilityTrial) {
   throw new Error(
     "Broadcast blocked: supply --capability-proof=<provider-native zero-value challenge manifest> or explicitly choose --paid-capability-trial.",
@@ -533,7 +555,7 @@ if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) 
   try {
     deliverableUrl = await client.getDeliverableUrl(commerceJobId);
     if (!deliverableUrl) throw new Error("Submitted job has no deliverable URL");
-    const fetched = await boundedDocument(deliverableUrl);
+    const fetched = await boundedDocument(deliverableUrl, new URL(quote.endpoint).origin);
     deliveryContentHash = `0x${createHash("sha256").update(fetched.raw).digest("hex")}`;
     const submittedJob = await client.getJob(commerceJobId);
     submittedDeliverableHash = submittedJob.deliverable;
