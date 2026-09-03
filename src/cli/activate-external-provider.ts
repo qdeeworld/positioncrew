@@ -20,6 +20,7 @@ import {
   HealthFactorLiveMatchJobSchema,
   notifyBrainHealthFactorFunded,
   requestBrainHealthFactorQuote,
+  validateBrainHealthFactorDelivery,
   verifyBrainPrepaymentCapabilityProof,
 } from "../marketplace/a2a-live-match.js";
 
@@ -129,6 +130,7 @@ const resumeJobId = argument("resume-job-id") ? BigInt(argument("resume-job-id")
 const resumeCheckpointArgument = argument("resume-checkpoint");
 const capabilityProofArgument = argument("capability-proof");
 const challengeCheckpointArgument = argument("challenge-checkpoint");
+const paidCapabilityTrial = process.argv.includes("--paid-capability-trial");
 if (resumeJobId !== null && !resumeCheckpointArgument) {
   throw new Error("--resume-job-id requires --resume-checkpoint=<original activation checkpoint>");
 }
@@ -318,17 +320,17 @@ if (resumeJobId !== null && resumeCheckpointPath) {
   }
   quote = await requestBrainHealthFactorQuote(frozenJob);
 }
-if (!capabilityProofArgument) {
+if (!capabilityProofArgument && !paidCapabilityTrial) {
   throw new Error(
-    "Broadcast blocked: a signed quote is not compatibility evidence. Supply --capability-proof=<provider-native zero-value challenge manifest>.",
+    "Broadcast blocked: supply --capability-proof=<provider-native zero-value challenge manifest> or explicitly choose --paid-capability-trial.",
   );
 }
-const capabilityProofPath = resolve(capabilityProofArgument);
-const capabilityProofInput = JSON.parse(await readFile(capabilityProofPath, "utf8")) as unknown;
-const capabilityProof = await verifyBrainPrepaymentCapabilityProof(
-  frozenJob,
-  capabilityProofInput,
-);
+const capabilityProof = capabilityProofArgument
+  ? await verifyBrainPrepaymentCapabilityProof(
+      frozenJob,
+      JSON.parse(await readFile(resolve(capabilityProofArgument), "utf8")) as unknown,
+    )
+  : null;
 const sdkWallet = new EVMWalletProvider({ password: randomBytes(32).toString("hex"), privateKey, persist: false });
 const client = await ERC8183Client.create({ walletProvider: sdkWallet, network: "bsc-mainnet" });
 if (client.address !== EXPECTED_WALLET) throw new Error("SDK wallet identity changed after preflight");
@@ -340,7 +342,8 @@ const descriptionBinding = {
   account: frozenJob.account,
   service: quote.quote.service,
   quotedPrice: quote.quote.price,
-  capabilityProofHash: canonicalHash(capabilityProof.proof),
+  capabilityMode: capabilityProof ? "PREPAYMENT_ZERO_VALUE_PROOF" : "PAID_DELIVERY_VALIDATION",
+  capabilityProofHash: capabilityProof ? canonicalHash(capabilityProof.proof) : null,
 };
 const description = JSON.stringify(descriptionBinding);
 let commerceJobId: bigint;
@@ -459,6 +462,10 @@ const deliverableUrl = finalStatus === JobStatus.SUBMITTED || finalStatus === Jo
   ? await client.getDeliverableUrl(commerceJobId)
   : null;
 const deliverable = deliverableUrl ? await boundedJson(deliverableUrl) : null;
+const compatibility = deliverable
+  ? validateBrainHealthFactorDelivery(frozenJob, deliverable)
+  : null;
+const compatible = compatibility?.status === "COMPATIBLE";
 const evidence = {
   schemaVersion: "positioncrew.live-match.external-activation.v1",
   recordedAt: new Date().toISOString(),
@@ -475,15 +482,22 @@ const evidence = {
   finalStatus: JobStatus[finalStatus],
   deliverableUrl,
   deliverable,
+  compatibility,
   states: {
     identity: "REGISTRY_OBSERVED",
     liveness: "A2A_RESPONDED",
     activation: "MAINNET_ERC8183_FUNDED",
-    delivery: deliverable ? "DELIVERED_UNVALIDATED" : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
-    compatibility: "PENDING_POSITIONCREW_OUTPUT_VALIDATOR",
-    selection: "NOT_ELIGIBLE_YET",
+    delivery: deliverable ? "DELIVERED" : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
+    compatibility: compatible
+      ? "EXACT_JOB_COMPATIBLE"
+      : deliverable
+        ? "EXACT_JOB_INCOMPATIBLE"
+        : "PENDING_PROVIDER_DELIVERY",
+    selection: compatible ? "SELECTED_FOR_FUNDED_JOB" : "NOT_ELIGIBLE_YET",
   },
-  boundary: "Funding proves attributable mainnet activation only. The provider is not PositionCrew-compatible or eligible until its delivered output passes a category-specific validator without invented fields.",
+  boundary: compatible
+    ? "The buyer funded this provider for the frozen job and its attributable delivery passed every PositionCrew category check. This proves selection for this job, not general provider superiority, protocol execution, or investment performance."
+    : "Funding proves attributable mainnet activation only. The provider remains ineligible because no delivered output passed every category-specific check without invented fields.",
 };
 await writeFile(outputPath, `${json(evidence)}\n`, { mode: 0o600 });
 process.stdout.write(`${json({ outputPath, commerceJobId, finalStatus: JobStatus[finalStatus], deliverableUrl, cumulativeGasWei: cumulativeGas, transactions })}\n`);
