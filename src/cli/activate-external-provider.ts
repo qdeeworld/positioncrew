@@ -1,10 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { EVMWalletProvider, ERC8183Client, JobStatus } from "@bnbagent/sdk";
 import {
   createPublicClient,
   createWalletClient,
+  decodeFunctionData,
   formatEther,
   getAddress,
   http,
@@ -20,6 +21,7 @@ import {
   HealthFactorLiveMatchJobSchema,
   notifyBrainHealthFactorFunded,
   requestBrainHealthFactorQuote,
+  validateBrainHealthFactorDelivery,
   verifyBrainPrepaymentCapabilityProof,
 } from "../marketplace/a2a-live-match.js";
 
@@ -90,8 +92,16 @@ function json(value: unknown): string {
   return JSON.stringify(value, (_, item) => typeof item === "bigint" ? item.toString() : item, 2);
 }
 
-async function boundedJson(url: string, maximumBytes = 128 * 1024): Promise<unknown> {
-  const response = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(12_000) });
+async function boundedDocument(url: string, expectedOrigin: string, maximumBytes = 128 * 1024): Promise<{ document: unknown; raw: string }> {
+  const requestedUrl = new URL(url);
+  if (requestedUrl.protocol !== "https:" || requestedUrl.origin !== expectedOrigin) {
+    throw new Error("Deliverable URL is outside the frozen provider HTTPS origin");
+  }
+  const response = await fetch(url, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(12_000) });
+  const finalUrl = new URL(response.url);
+  if (finalUrl.protocol !== "https:" || finalUrl.origin !== expectedOrigin) {
+    throw new Error("Deliverable redirect left the frozen provider HTTPS origin");
+  }
   if (!response.ok || !response.body) throw new Error(`Deliverable fetch failed with HTTP ${response.status}`);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -112,7 +122,15 @@ async function boundedJson(url: string, maximumBytes = 128 * 1024): Promise<unkn
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return JSON.parse(new TextDecoder().decode(body));
+  const raw = new TextDecoder().decode(body);
+  return { document: JSON.parse(raw), raw };
+}
+
+function unwrapBrainResult(document: unknown): unknown {
+  if (typeof document !== "object" || document === null || !("result" in document)) {
+    throw new Error("Brain delivery envelope has no result field");
+  }
+  return (document as { result: unknown }).result;
 }
 
 async function loadPrivateKey(path: string): Promise<Hex> {
@@ -129,41 +147,47 @@ const resumeJobId = argument("resume-job-id") ? BigInt(argument("resume-job-id")
 const resumeCheckpointArgument = argument("resume-checkpoint");
 const capabilityProofArgument = argument("capability-proof");
 const challengeCheckpointArgument = argument("challenge-checkpoint");
+const paidCapabilityTrial = process.argv.includes("--paid-capability-trial");
+const resumeDeliveryValidation = process.argv.includes("--resume-delivery-validation");
 if (resumeJobId !== null && !resumeCheckpointArgument) {
   throw new Error("--resume-job-id requires --resume-checkpoint=<original activation checkpoint>");
+}
+if (resumeDeliveryValidation && resumeJobId === null) {
+  throw new Error("--resume-delivery-validation requires --resume-job-id and its checkpoint");
 }
 const accountToInspect = getAddress(argument("account") ?? DEFAULT_ACCOUNT);
 const rpcUrl = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org";
 const payment = brainOnBnbPaymentContract();
 const paymentToken = getAddress(payment.paymentToken);
 const publicClient = createPublicClient({ chain: bsc, transport: http(rpcUrl) });
-const [chainId, nativeBalance, tokenBalance, wrappedBalance, quoted] = await Promise.all([
+const [chainId, nativeBalance, tokenBalance, wrappedBalance] = await Promise.all([
   publicClient.getChainId(),
   publicClient.getBalance({ address: EXPECTED_WALLET }),
   publicClient.readContract({ address: paymentToken, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] }),
   publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] }),
-  publicClient.simulateContract({
+]);
+let quotedOutput = resumeDeliveryValidation || broadcast
+  ? 0n
+  : (await publicClient.simulateContract({
     account: EXPECTED_WALLET,
     address: PANCAKE_V3_QUOTER,
     abi: quoterAbi,
     functionName: "quoteExactInputSingle",
     args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: SWAP_INPUT, fee: FEE, sqrtPriceLimitX96: 0n }],
-  }),
-]);
+  })).result[0];
 if (chainId !== 56) throw new Error(`RPC chain mismatch: expected 56, received ${chainId}`);
-const [quotedOutput] = quoted.result;
-const minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
-const existingCommittedSwapInput = tokenBalance >= PAYMENT_BUDGET
-  ? SWAP_INPUT
+let minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
+let existingCommittedSwapInput = resumeDeliveryValidation
+  ? 0n
   : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
-const requiredWrapInput = tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - existingCommittedSwapInput;
-const nativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
-if (nativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
-const gasAlreadySpent = nativeDecrease - existingCommittedSwapInput;
-if (gasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
+let requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - existingCommittedSwapInput;
+const nativeDecrease = resumeDeliveryValidation ? 0n : CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
+if (!resumeDeliveryValidation && nativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
+const gasAlreadySpent = resumeDeliveryValidation ? 0n : nativeDecrease - existingCommittedSwapInput;
+if (!resumeDeliveryValidation && !broadcast && gasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
 const remainingGasCeiling = MAX_TOTAL_GAS - gasAlreadySpent;
-if (minimumOutput < PAYMENT_BUDGET) throw new Error("Bounded swap cannot acquire the external provider budget");
-if (nativeBalance < requiredWrapInput + remainingGasCeiling) throw new Error("Operator wallet cannot preserve the remaining swap input and gas ceiling");
+if (!resumeDeliveryValidation && !broadcast && minimumOutput < PAYMENT_BUDGET) throw new Error("Bounded swap cannot acquire the external provider maximum budget");
+if (!resumeDeliveryValidation && !broadcast && nativeBalance < requiredWrapInput + remainingGasCeiling) throw new Error("Operator wallet cannot preserve the maximum swap input and gas ceiling");
 
 const preflight = {
   schemaVersion: "positioncrew.live-match.activation-preflight.v1",
@@ -180,7 +204,7 @@ const preflight = {
     maximumSlippageBps: MAX_SLIPPAGE_BPS,
     route: { tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, router: PANCAKE_V3_ROUTER },
   },
-  activation: { provider: payment.provider, kernel: payment.kernel, budgetAtomic: PAYMENT_BUDGET },
+  activation: { provider: payment.provider, kernel: payment.kernel, maximumBudgetAtomic: PAYMENT_BUDGET },
   maximumTotalGasWei: MAX_TOTAL_GAS,
   gasAlreadySpentWei: gasAlreadySpent,
   remainingGasCeilingWei: remainingGasCeiling,
@@ -244,13 +268,53 @@ await writeFile(outputPath, `${json({
 
 let frozenJob;
 let quote;
+let resumeCheckpointState: string | null = null;
+let resumeCheckpointNotification: unknown = null;
+let checkpointCommittedSwapInput = 0n;
 if (resumeJobId !== null && resumeCheckpointPath) {
   const checkpoint = JSON.parse(await readFile(resumeCheckpointPath, "utf8")) as Record<string, unknown>;
+  resumeCheckpointState = typeof checkpoint.state === "string" ? checkpoint.state : null;
+  resumeCheckpointNotification = checkpoint.notification ?? null;
+  const recordedSwap = Array.isArray(checkpoint.transactions)
+    ? checkpoint.transactions.find((entry) =>
+      typeof entry === "object" && entry !== null &&
+      (entry as Record<string, unknown>).phase === "swap-wbnb-for-u" &&
+      typeof (entry as Record<string, unknown>).hash === "string" &&
+      /^0x[0-9a-fA-F]{64}$/.test((entry as Record<string, unknown>).hash as string)
+    ) as Record<string, unknown> | undefined
+    : undefined;
+  if (recordedSwap && !resumeDeliveryValidation) {
+    const swapHash = recordedSwap.hash as Hex;
+    const [swapTransaction, swapReceipt] = await Promise.all([
+      publicClient.getTransaction({ hash: swapHash }),
+      publicClient.getTransactionReceipt({ hash: swapHash }),
+    ]);
+    const decodedSwap = decodeFunctionData({ abi: routerAbi, data: swapTransaction.input });
+    const [swapParameters] = decodedSwap.args;
+    if (
+      swapReceipt.status !== "success" ||
+      swapTransaction.from.toLowerCase() !== EXPECTED_WALLET.toLowerCase() ||
+      swapTransaction.to?.toLowerCase() !== PANCAKE_V3_ROUTER.toLowerCase() ||
+      decodedSwap.functionName !== "exactInputSingle" ||
+      swapParameters.amountIn !== SWAP_INPUT ||
+      swapParameters.tokenIn.toLowerCase() !== WBNB.toLowerCase() ||
+      swapParameters.tokenOut.toLowerCase() !== paymentToken.toLowerCase()
+    ) {
+      throw new Error("Resume checkpoint swap transaction does not match the frozen acquisition");
+    }
+    checkpointCommittedSwapInput = SWAP_INPUT;
+    transactions.push({
+      phase: "swap-wbnb-for-u",
+      hash: swapHash,
+      gasWei: swapReceipt.gasUsed * swapReceipt.effectiveGasPrice,
+    });
+  }
   if (String(checkpoint.commerceJobId) !== resumeJobId.toString()) {
     throw new Error("Resume checkpoint does not bind the requested ERC-8183 job ID");
   }
-  const checkpointQuote = typeof checkpoint.reaffirmationQuote === "object" && checkpoint.reaffirmationQuote !== null
-    ? checkpoint.reaffirmationQuote as Record<string, unknown>
+  const storedQuote = checkpoint.reaffirmationQuote ?? checkpoint.quote;
+  const checkpointQuote = typeof storedQuote === "object" && storedQuote !== null
+    ? storedQuote as Record<string, unknown>
     : null;
   if (!checkpointQuote) throw new Error("Resume checkpoint has no immutable accepted quote");
   frozenJob = HealthFactorLiveMatchJobSchema.parse(checkpoint.frozenJob ?? checkpointQuote.frozenJob);
@@ -263,7 +327,7 @@ if (resumeJobId !== null && resumeCheckpointPath) {
   ) {
     throw new Error("Resume checkpoint payment boundary does not match the frozen activation budget and token");
   }
-  if (Date.parse(frozenJob.deadline) <= Date.now()) {
+  if (!resumeDeliveryValidation && Date.parse(frozenJob.deadline) <= Date.now()) {
     throw new Error("Resume checkpoint frozen request is past its delivery deadline");
   }
   if (checkpointQuote.frozenJobHash !== canonicalHash(frozenJob)) {
@@ -318,17 +382,47 @@ if (resumeJobId !== null && resumeCheckpointPath) {
   }
   quote = await requestBrainHealthFactorQuote(frozenJob);
 }
-if (!capabilityProofArgument) {
+const acceptedPrice = BigInt(quote.quote.price);
+if (!resumeDeliveryValidation) {
+  if (tokenBalance < acceptedPrice && quotedOutput === 0n) {
+    quotedOutput = (await publicClient.simulateContract({
+      account: EXPECTED_WALLET,
+      address: PANCAKE_V3_QUOTER,
+      abi: quoterAbi,
+      functionName: "quoteExactInputSingle",
+      args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: SWAP_INPUT, fee: FEE, sqrtPriceLimitX96: 0n }],
+    })).result[0];
+    minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
+    preflight.swap.quotedOutputAtomic = quotedOutput;
+    preflight.swap.minimumOutputAtomic = minimumOutput;
+  }
+  existingCommittedSwapInput = checkpointCommittedSwapInput > 0n
+    ? checkpointCommittedSwapInput
+    : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
+  committedSwapInput = existingCommittedSwapInput;
+  requiredWrapInput = tokenBalance >= acceptedPrice ? 0n : SWAP_INPUT - existingCommittedSwapInput;
+  const exactNativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
+  if (exactNativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
+  const exactGasAlreadySpent = exactNativeDecrease - existingCommittedSwapInput;
+  if (exactGasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
+  const exactRemainingGasCeiling = MAX_TOTAL_GAS - exactGasAlreadySpent;
+  preflight.swap.requiredAdditionalWrapWei = requiredWrapInput;
+  preflight.gasAlreadySpentWei = exactGasAlreadySpent;
+  preflight.remainingGasCeilingWei = exactRemainingGasCeiling;
+  if (tokenBalance < acceptedPrice && minimumOutput < acceptedPrice - tokenBalance) throw new Error("Bounded swap cannot cover the accepted provider quote shortfall");
+  if (nativeBalance < requiredWrapInput + exactRemainingGasCeiling) throw new Error("Operator wallet cannot preserve the quoted swap input and gas ceiling");
+}
+if (!capabilityProofArgument && !paidCapabilityTrial) {
   throw new Error(
-    "Broadcast blocked: a signed quote is not compatibility evidence. Supply --capability-proof=<provider-native zero-value challenge manifest>.",
+    "Broadcast blocked: supply --capability-proof=<provider-native zero-value challenge manifest> or explicitly choose --paid-capability-trial.",
   );
 }
-const capabilityProofPath = resolve(capabilityProofArgument);
-const capabilityProofInput = JSON.parse(await readFile(capabilityProofPath, "utf8")) as unknown;
-const capabilityProof = await verifyBrainPrepaymentCapabilityProof(
-  frozenJob,
-  capabilityProofInput,
-);
+const capabilityProof = capabilityProofArgument
+  ? await verifyBrainPrepaymentCapabilityProof(
+      frozenJob,
+      JSON.parse(await readFile(resolve(capabilityProofArgument), "utf8")) as unknown,
+    )
+  : null;
 const sdkWallet = new EVMWalletProvider({ password: randomBytes(32).toString("hex"), privateKey, persist: false });
 const client = await ERC8183Client.create({ walletProvider: sdkWallet, network: "bsc-mainnet" });
 if (client.address !== EXPECTED_WALLET) throw new Error("SDK wallet identity changed after preflight");
@@ -340,31 +434,58 @@ const descriptionBinding = {
   account: frozenJob.account,
   service: quote.quote.service,
   quotedPrice: quote.quote.price,
-  capabilityProofHash: canonicalHash(capabilityProof.proof),
+  capabilityMode: capabilityProof ? "PREPAYMENT_ZERO_VALUE_PROOF" : "PAID_DELIVERY_VALIDATION",
+  capabilityProofHash: capabilityProof ? canonicalHash(capabilityProof.proof) : null,
 };
+const legacyDescriptionBinding = capabilityProof
+  ? {
+      schema: frozenJob.schemaVersion,
+      requestHash: quote.frozenJobHash,
+      account: frozenJob.account,
+      service: quote.quote.service,
+      quotedPrice: quote.quote.price,
+      capabilityProofHash: canonicalHash(capabilityProof.proof),
+    }
+  : null;
 const description = JSON.stringify(descriptionBinding);
 let commerceJobId: bigint;
 let originalOnchainDescription: string;
 let resumedJobBudget: bigint | null = null;
+let resumedJobStatus: JobStatus | null = null;
 if (resumeJobId !== null) {
   const existingJob = await client.getJob(resumeJobId);
   if (existingJob.client.toLowerCase() !== EXPECTED_WALLET.toLowerCase()) throw new Error("Resumed job client does not match the frozen wallet");
   if (existingJob.provider.toLowerCase() !== payment.provider.toLowerCase()) throw new Error("Resumed job provider does not match the accepted quote");
-  if (existingJob.status !== JobStatus.OPEN) throw new Error("Resumed job is not OPEN");
-  if (existingJob.budget !== 0n && existingJob.budget !== PAYMENT_BUDGET) throw new Error("Resumed job has an unexpected budget");
-  if (existingJob.expiredAt <= BigInt(Math.floor(Date.now() / 1000)) + disputeWindow) throw new Error("Resumed job cannot clear the policy dispute window");
+  const resumableForDelivery = existingJob.status === JobStatus.FUNDED ||
+    existingJob.status === JobStatus.SUBMITTED ||
+    existingJob.status === JobStatus.COMPLETED;
+  if (resumeDeliveryValidation ? !resumableForDelivery : existingJob.status !== JobStatus.OPEN) {
+    throw new Error(resumeDeliveryValidation
+      ? "Delivery-validation resume requires a FUNDED, SUBMITTED, or COMPLETED job"
+      : "Transaction resume requires an OPEN job");
+  }
+  const legacyMaximumBudget = existingJob.budget === PAYMENT_BUDGET &&
+    (resumeDeliveryValidation || existingJob.status === JobStatus.OPEN);
+  if (existingJob.budget !== 0n && existingJob.budget !== acceptedPrice && !legacyMaximumBudget) {
+    throw new Error("Resumed job budget does not match the accepted quote");
+  }
+  if (!resumeDeliveryValidation && existingJob.expiredAt <= BigInt(Math.floor(Date.now() / 1000)) + disputeWindow) throw new Error("Resumed job cannot clear the policy dispute window");
   let existingDescription: unknown;
   try {
     existingDescription = JSON.parse(existingJob.description) as unknown;
   } catch {
     throw new Error("Resumed job description is not valid JSON");
   }
-  if (canonicalHash(existingDescription) !== canonicalHash(descriptionBinding)) {
+  if (
+    canonicalHash(existingDescription) !== canonicalHash(descriptionBinding) &&
+    (!legacyDescriptionBinding || canonicalHash(existingDescription) !== canonicalHash(legacyDescriptionBinding))
+  ) {
     throw new Error("Resumed job description does not bind the current account, request hash, service, and quote");
   }
   commerceJobId = resumeJobId;
   originalOnchainDescription = existingJob.description;
   resumedJobBudget = existingJob.budget;
+  resumedJobStatus = existingJob.status;
 } else {
   const creation = await client.createJob({ provider: payment.provider, expiredAt, description });
   await enforceTotalGas("create-job");
@@ -387,78 +508,126 @@ await writeFile(outputPath, `${json({
   cumulativeGasWei: cumulativeGas,
   boundary: "The exact job terms and commerce job ID are durable. Registration, budget setup, funding, and provider notification may still be pending.",
 })}\n`, { mode: 0o600 });
-if (resumeJobId !== null) {
-  if (resumedJobBudget === 0n) {
-    await client.setBudget(commerceJobId, PAYMENT_BUDGET);
+let notification: Awaited<ReturnType<typeof notifyBrainHealthFactorFunded>> | null = null;
+if (!resumeDeliveryValidation) {
+  if (resumeJobId !== null) {
+    if (resumedJobBudget !== acceptedPrice) {
+      await client.setBudget(commerceJobId, acceptedPrice);
+      await enforceTotalGas("set-budget");
+    }
+  } else {
+    await client.registerJob(commerceJobId);
+    await enforceTotalGas("register-job");
+    await client.setBudget(commerceJobId, acceptedPrice);
     await enforceTotalGas("set-budget");
   }
-} else {
-  await client.registerJob(commerceJobId);
-  await enforceTotalGas("register-job");
-  await client.setBudget(commerceJobId, PAYMENT_BUDGET);
-  await enforceTotalGas("set-budget");
-}
-if (tokenBalance < PAYMENT_BUDGET) {
-  if (requiredWrapInput > 0n) {
-    committedSwapInput += requiredWrapInput;
-    await record("wrap-bnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrapInput }));
+  if (tokenBalance < acceptedPrice) {
+    if (requiredWrapInput > 0n) {
+      committedSwapInput += requiredWrapInput;
+      await record("wrap-bnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrapInput }));
+    }
+    const allowance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "allowance", args: [EXPECTED_WALLET, PANCAKE_V3_ROUTER] });
+    if (allowance < SWAP_INPUT) {
+      await record("approve-wbnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, SWAP_INPUT] }));
+    }
+    await record("swap-wbnb-for-u", await walletClient.writeContract({
+      account,
+      chain: bsc,
+      address: PANCAKE_V3_ROUTER,
+      abi: routerAbi,
+      functionName: "exactInputSingle",
+      args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, recipient: EXPECTED_WALLET, amountIn: SWAP_INPUT, amountOutMinimum: minimumOutput, sqrtPriceLimitX96: 0n }],
+    }));
   }
-  const allowance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "allowance", args: [EXPECTED_WALLET, PANCAKE_V3_ROUTER] });
-  if (allowance < SWAP_INPUT) {
-    await record("approve-wbnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, SWAP_INPUT] }));
-  }
-  await record("swap-wbnb-for-u", await walletClient.writeContract({
-    account,
-    chain: bsc,
-    address: PANCAKE_V3_ROUTER,
-    abi: routerAbi,
-    functionName: "exactInputSingle",
-    args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, recipient: EXPECTED_WALLET, amountIn: SWAP_INPUT, amountOutMinimum: minimumOutput, sqrtPriceLimitX96: 0n }],
-  }));
+  await writeFile(outputPath, `${json({
+    schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
+    recordedAt: new Date().toISOString(),
+    state: "ESCROW_FUNDING_PENDING",
+    preflight,
+    commerceJobId,
+    resumedExistingJob: resumeJobId !== null,
+    originalOnchainDescription,
+    frozenJob,
+    reaffirmationQuote: quote,
+    capabilityProof,
+    transactions,
+    cumulativeGasWei: cumulativeGas,
+    boundary: "The exact job terms are verified and the recovery checkpoint is durable. Escrow funding and provider notification have not started.",
+  })}\n`, { mode: 0o600 });
+  await client.fund(commerceJobId, acceptedPrice, { approveFloor: 0n });
+  await enforceTotalGas("fund-job");
+  await writeFile(outputPath, `${json({
+    schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
+    recordedAt: new Date().toISOString(),
+    state: "FUNDED_NOTIFICATION_PENDING",
+    preflight,
+    commerceJobId,
+    resumedExistingJob: resumeJobId !== null,
+    originalOnchainDescription,
+    reaffirmationQuote: quote,
+    capabilityProof,
+    transactions,
+    cumulativeGasWei: cumulativeGas,
+    boundary: "Escrow funding is confirmed, but provider notification, delivery and PositionCrew output compatibility remain pending.",
+  })}\n`, { mode: 0o600 });
+  notification = await notifyBrainHealthFactorFunded({ messageId: frozenJob.jobId, commerceJobId, account: accountToInspect });
 }
-await writeFile(outputPath, `${json({
-  schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
-  recordedAt: new Date().toISOString(),
-  state: "ESCROW_FUNDING_PENDING",
-  preflight,
-  commerceJobId,
-  resumedExistingJob: resumeJobId !== null,
-  originalOnchainDescription,
-  frozenJob,
-  reaffirmationQuote: quote,
-  capabilityProof,
-  transactions,
-  cumulativeGasWei: cumulativeGas,
-  boundary: "The exact job terms are verified and the recovery checkpoint is durable. Escrow funding and provider notification have not started.",
-})}\n`, { mode: 0o600 });
-await client.fund(commerceJobId, PAYMENT_BUDGET, { approveFloor: 0n });
-await enforceTotalGas("fund-job");
-await writeFile(outputPath, `${json({
-  schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
-  recordedAt: new Date().toISOString(),
-  state: "FUNDED_NOTIFICATION_PENDING",
-  preflight,
-  commerceJobId,
-  resumedExistingJob: resumeJobId !== null,
-  originalOnchainDescription,
-  reaffirmationQuote: quote,
-  capabilityProof,
-  transactions,
-  cumulativeGasWei: cumulativeGas,
-  boundary: "Escrow funding is confirmed, but provider notification, delivery and PositionCrew output compatibility remain pending.",
-})}\n`, { mode: 0o600 });
-const notification = await notifyBrainHealthFactorFunded({ messageId: frozenJob.jobId, commerceJobId, account: accountToInspect });
 
-let finalStatus = await client.getJobStatus(commerceJobId);
-const pollDeadline = Date.now() + 5 * 60_000;
+let finalStatus = resumeDeliveryValidation && resumedJobStatus !== null
+  ? resumedJobStatus
+  : await client.getJobStatus(commerceJobId);
+if (
+  resumeDeliveryValidation &&
+  finalStatus === JobStatus.FUNDED &&
+  resumeCheckpointState !== null &&
+  ["ESCROW_SETUP_PENDING", "ESCROW_FUNDING_PENDING", "FUNDED_NOTIFICATION_PENDING"].includes(resumeCheckpointState) &&
+  resumeCheckpointNotification === null
+) {
+  notification = await notifyBrainHealthFactorFunded({ messageId: frozenJob.jobId, commerceJobId, account: accountToInspect });
+}
+const pollDeadline = resumeDeliveryValidation
+  ? Date.parse(frozenJob.deadline)
+  : Math.min(Date.now() + 5 * 60_000, Date.parse(frozenJob.deadline));
 while (finalStatus === JobStatus.FUNDED && Date.now() < pollDeadline) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000));
   finalStatus = await client.getJobStatus(commerceJobId);
 }
-const deliverableUrl = finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED
-  ? await client.getDeliverableUrl(commerceJobId)
+let deliverableUrl: string | null = null;
+let deliverable: unknown = null;
+let deliveryRetrievalError: string | null = null;
+let deliveryContentHash: `0x${string}` | null = null;
+let submittedDeliverableHash: `0x${string}` | null = null;
+let deliveryHashMatches = false;
+let deliveryReceived = false;
+let deliverySubmittedAt: string | null = null;
+let deliverySubmittedWithinDeadline = false;
+if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) {
+  try {
+    deliverableUrl = await client.getDeliverableUrl(commerceJobId);
+    if (!deliverableUrl) throw new Error("Submitted job has no deliverable URL");
+    const fetched = await boundedDocument(deliverableUrl, new URL(quote.endpoint).origin);
+    deliveryContentHash = `0x${createHash("sha256").update(fetched.raw).digest("hex")}`;
+    const submittedJob = await client.getJob(commerceJobId);
+    submittedDeliverableHash = submittedJob.deliverable;
+    deliverySubmittedAt = submittedJob.submittedAt > 0n
+      ? new Date(Number(submittedJob.submittedAt) * 1_000).toISOString()
+      : null;
+    deliverySubmittedWithinDeadline = submittedJob.submittedAt > 0n &&
+      submittedJob.submittedAt <= BigInt(Math.floor(Date.parse(frozenJob.deadline) / 1_000));
+    deliveryHashMatches = deliveryContentHash.toLowerCase() === submittedDeliverableHash.toLowerCase();
+    if (!deliveryHashMatches) throw new Error(`Fetched delivery hash ${deliveryContentHash} does not match onchain submission ${submittedDeliverableHash}`);
+    if (!deliverySubmittedWithinDeadline) throw new Error(`Onchain delivery was submitted at ${deliverySubmittedAt ?? "an unknown time"}, after the frozen deadline ${frozenJob.deadline}`);
+    deliveryReceived = true;
+    deliverable = unwrapBrainResult(fetched.document);
+  } catch (error) {
+    deliveryRetrievalError = error instanceof Error ? error.message : "Unknown delivery retrieval failure";
+  }
+}
+const compatibility = deliveryReceived && deliveryHashMatches
+  ? validateBrainHealthFactorDelivery(frozenJob, deliverable, deliverySubmittedAt ?? undefined)
   : null;
-const deliverable = deliverableUrl ? await boundedJson(deliverableUrl) : null;
+const compatible = compatibility?.status === "COMPATIBLE";
+const deliveryWindowExpired = Date.now() >= Date.parse(frozenJob.deadline);
 const evidence = {
   schemaVersion: "positioncrew.live-match.external-activation.v1",
   recordedAt: new Date().toISOString(),
@@ -475,15 +644,38 @@ const evidence = {
   finalStatus: JobStatus[finalStatus],
   deliverableUrl,
   deliverable,
+  deliveryRetrievalError,
+  deliveryContentHash,
+  submittedDeliverableHash,
+  deliveryHashMatches,
+  deliveryReceived,
+  deliverySubmittedAt,
+  deliverySubmittedWithinDeadline,
+  deliveryWindowExpired,
+  compatibility,
   states: {
     identity: "REGISTRY_OBSERVED",
     liveness: "A2A_RESPONDED",
     activation: "MAINNET_ERC8183_FUNDED",
-    delivery: deliverable ? "DELIVERED_UNVALIDATED" : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
-    compatibility: "PENDING_POSITIONCREW_OUTPUT_VALIDATOR",
-    selection: "NOT_ELIGIBLE_YET",
+    delivery: deliveryReceived
+      ? "DELIVERED"
+      : deliveryRetrievalError
+        ? "DELIVERY_RETRIEVAL_FAILED"
+        : deliveryWindowExpired
+          ? "NOT_DELIVERED_BY_DEADLINE"
+          : "NOT_DELIVERED_WITHIN_POLL_WINDOW",
+    compatibility: compatible
+      ? "EXACT_JOB_COMPATIBLE"
+      : deliveryReceived
+        ? "EXACT_JOB_INCOMPATIBLE"
+        : deliveryWindowExpired
+          ? "DELIVERY_DEADLINE_EXPIRED"
+          : "PENDING_PROVIDER_DELIVERY",
+    selection: compatible ? "SELECTED_FOR_FUNDED_JOB" : "NOT_ELIGIBLE_YET",
   },
-  boundary: "Funding proves attributable mainnet activation only. The provider is not PositionCrew-compatible or eligible until its delivered output passes a category-specific validator without invented fields.",
+  boundary: compatible
+    ? "The buyer funded this provider for the frozen job and its attributable delivery passed every PositionCrew category check. This proves selection for this job, not general provider superiority, protocol execution, or investment performance."
+    : "Funding proves attributable mainnet activation only. The provider remains ineligible because no delivered output passed every category-specific check without invented fields.",
 };
 await writeFile(outputPath, `${json(evidence)}\n`, { mode: 0o600 });
 process.stdout.write(`${json({ outputPath, commerceJobId, finalStatus: JobStatus[finalStatus], deliverableUrl, cumulativeGasWei: cumulativeGas, transactions })}\n`);

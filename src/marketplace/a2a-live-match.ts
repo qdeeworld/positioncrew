@@ -334,6 +334,7 @@ export function brainOnBnbPaymentContract(): {
 export function validateBrainHealthFactorDelivery(
   input: HealthFactorLiveMatchJob,
   deliveryInput: unknown,
+  authoritativeSubmittedAt?: string,
 ): {
   status: "COMPATIBLE" | "INCOMPATIBLE";
   checks: Array<{ id: string; passed: boolean; detail: string }>;
@@ -352,6 +353,12 @@ export function validateBrainHealthFactorDelivery(
   }
   const delivery = parsed.data;
   const stress = delivery.drawdown.stress;
+  const measuredAt = Date.parse(delivery.position.measured_at);
+  const submittedAt = authoritativeSubmittedAt ? Date.parse(authoritativeSubmittedAt) : null;
+  const normalizeProtocol = (value: string) => value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const normalizedProtocol = normalizeProtocol(delivery.position.protocol);
+  const requestedProtocol = normalizeProtocol(job.protocol);
+  const protocolMatches = normalizedProtocol === requestedProtocol;
   const monotonicStress = stress.every((row, index) => index === 0 || row.collateral_drop_pct > stress[index - 1]!.collateral_drop_pct)
     && stress.every((row, index) => index === 0 || row.health_factor <= stress[index - 1]!.health_factor);
   const observedBlock = delivery.position.block_number ?? delivery.position.observed_block;
@@ -359,12 +366,15 @@ export function validateBrainHealthFactorDelivery(
     { id: "OUTPUT_SCHEMA", passed: true, detail: "Provider result parses under the frozen Brain health-factor adapter schema." },
     { id: "ACCOUNT_BINDING", passed: delivery.position.account.toLowerCase() === job.account.toLowerCase(), detail: `Expected ${job.account}; received ${delivery.position.account}.` },
     { id: "CHAIN_BINDING", passed: delivery.position.chain === "eip155:56", detail: `Received ${delivery.position.chain}.` },
+    { id: "PROTOCOL_BINDING", passed: protocolMatches, detail: `Expected ${job.protocol}; received ${delivery.position.protocol}.` },
+    { id: "POSITION_PRESENT", passed: delivery.position.has_position, detail: delivery.position.has_position ? "Provider reports a reconstructable lending position." : "Provider reports that the frozen account has no lending position." },
     { id: "CURRENT_HEALTH_FACTOR", passed: Number.isFinite(delivery.position.health_factor), detail: `Received ${delivery.position.health_factor}.` },
     { id: "LIQUIDATION_DISTANCE", passed: Number.isFinite(delivery.drawdown.tolerable_collateral_drop_pct), detail: `Received ${delivery.drawdown.tolerable_collateral_drop_pct}%.` },
     { id: "COLLATERAL_STRESS_TABLE", passed: monotonicStress, detail: monotonicStress ? `${stress.length} monotonic stress rows received.` : "Stress rows are not strictly increasing in drawdown with non-increasing health factor." },
     { id: "PROTOCOL_CROSS_CHECK", passed: delivery.position.cross_check.agrees && delivery.position.cross_check.venus_error_code === 0, detail: `agrees=${delivery.position.cross_check.agrees}; differenceUsd=${delivery.position.cross_check.difference_usd}; venusErrorCode=${delivery.position.cross_check.venus_error_code}.` },
     { id: "BLOCK_ATTRIBUTION", passed: observedBlock !== undefined, detail: observedBlock === undefined ? "No BSC block number was returned." : `Observed at BSC block ${observedBlock}.` },
-    { id: "DELIVERY_DEADLINE", passed: Date.parse(delivery.position.measured_at) <= Date.parse(job.deadline), detail: `Measured at ${delivery.position.measured_at}; deadline ${job.deadline}.` },
+    { id: "DELIVERY_WINDOW", passed: measuredAt >= Date.parse(job.requestedAt) && measuredAt <= Date.parse(job.deadline), detail: `Measured at ${delivery.position.measured_at}; required window ${job.requestedAt} through ${job.deadline}.` },
+    { id: "SUBMISSION_CAUSALITY", passed: submittedAt === null || Math.floor(measuredAt / 1_000) <= Math.floor(submittedAt / 1_000), detail: submittedAt === null ? "No authoritative submission timestamp was supplied for this prepayment check." : `Measured at ${delivery.position.measured_at}; submitted onchain at ${authoritativeSubmittedAt} (second precision).` },
   ];
   const compatible = checks.every((check) => check.passed);
   return {
