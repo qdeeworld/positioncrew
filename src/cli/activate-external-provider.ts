@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { EVMWalletProvider, ERC8183Client, JobStatus } from "@bnbagent/sdk";
@@ -91,7 +91,7 @@ function json(value: unknown): string {
   return JSON.stringify(value, (_, item) => typeof item === "bigint" ? item.toString() : item, 2);
 }
 
-async function boundedJson(url: string, maximumBytes = 128 * 1024): Promise<unknown> {
+async function boundedDocument(url: string, maximumBytes = 128 * 1024): Promise<{ document: unknown; raw: string }> {
   const response = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(12_000) });
   if (!response.ok || !response.body) throw new Error(`Deliverable fetch failed with HTTP ${response.status}`);
   const reader = response.body.getReader();
@@ -113,7 +113,15 @@ async function boundedJson(url: string, maximumBytes = 128 * 1024): Promise<unkn
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return JSON.parse(new TextDecoder().decode(body));
+  const raw = new TextDecoder().decode(body);
+  return { document: JSON.parse(raw), raw };
+}
+
+function unwrapBrainResult(document: unknown): unknown {
+  if (typeof document !== "object" || document === null || !("result" in document)) {
+    throw new Error("Brain delivery envelope has no result field");
+  }
+  return (document as { result: unknown }).result;
 }
 
 async function loadPrivateKey(path: string): Promise<Hex> {
@@ -131,8 +139,12 @@ const resumeCheckpointArgument = argument("resume-checkpoint");
 const capabilityProofArgument = argument("capability-proof");
 const challengeCheckpointArgument = argument("challenge-checkpoint");
 const paidCapabilityTrial = process.argv.includes("--paid-capability-trial");
+const resumeDeliveryValidation = process.argv.includes("--resume-delivery-validation");
 if (resumeJobId !== null && !resumeCheckpointArgument) {
   throw new Error("--resume-job-id requires --resume-checkpoint=<original activation checkpoint>");
+}
+if (resumeDeliveryValidation && resumeJobId === null) {
+  throw new Error("--resume-delivery-validation requires --resume-job-id and its checkpoint");
 }
 const accountToInspect = getAddress(argument("account") ?? DEFAULT_ACCOUNT);
 const rpcUrl = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org";
@@ -162,10 +174,10 @@ const requiredWrapInput = tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - exi
 const nativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
 if (nativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
 const gasAlreadySpent = nativeDecrease - existingCommittedSwapInput;
-if (gasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
+if (!resumeDeliveryValidation && gasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
 const remainingGasCeiling = MAX_TOTAL_GAS - gasAlreadySpent;
-if (minimumOutput < PAYMENT_BUDGET) throw new Error("Bounded swap cannot acquire the external provider budget");
-if (nativeBalance < requiredWrapInput + remainingGasCeiling) throw new Error("Operator wallet cannot preserve the remaining swap input and gas ceiling");
+if (!resumeDeliveryValidation && minimumOutput < PAYMENT_BUDGET) throw new Error("Bounded swap cannot acquire the external provider budget");
+if (!resumeDeliveryValidation && nativeBalance < requiredWrapInput + remainingGasCeiling) throw new Error("Operator wallet cannot preserve the remaining swap input and gas ceiling");
 
 const preflight = {
   schemaVersion: "positioncrew.live-match.activation-preflight.v1",
@@ -265,7 +277,7 @@ if (resumeJobId !== null && resumeCheckpointPath) {
   ) {
     throw new Error("Resume checkpoint payment boundary does not match the frozen activation budget and token");
   }
-  if (Date.parse(frozenJob.deadline) <= Date.now()) {
+  if (!resumeDeliveryValidation && Date.parse(frozenJob.deadline) <= Date.now()) {
     throw new Error("Resume checkpoint frozen request is past its delivery deadline");
   }
   if (checkpointQuote.frozenJobHash !== canonicalHash(frozenJob)) {
@@ -359,13 +371,21 @@ const description = JSON.stringify(descriptionBinding);
 let commerceJobId: bigint;
 let originalOnchainDescription: string;
 let resumedJobBudget: bigint | null = null;
+let resumedJobStatus: JobStatus | null = null;
 if (resumeJobId !== null) {
   const existingJob = await client.getJob(resumeJobId);
   if (existingJob.client.toLowerCase() !== EXPECTED_WALLET.toLowerCase()) throw new Error("Resumed job client does not match the frozen wallet");
   if (existingJob.provider.toLowerCase() !== payment.provider.toLowerCase()) throw new Error("Resumed job provider does not match the accepted quote");
-  if (existingJob.status !== JobStatus.OPEN) throw new Error("Resumed job is not OPEN");
+  const resumableForDelivery = existingJob.status === JobStatus.FUNDED ||
+    existingJob.status === JobStatus.SUBMITTED ||
+    existingJob.status === JobStatus.COMPLETED;
+  if (resumeDeliveryValidation ? !resumableForDelivery : existingJob.status !== JobStatus.OPEN) {
+    throw new Error(resumeDeliveryValidation
+      ? "Delivery-validation resume requires a FUNDED, SUBMITTED, or COMPLETED job"
+      : "Transaction resume requires an OPEN job");
+  }
   if (existingJob.budget !== 0n && existingJob.budget !== PAYMENT_BUDGET) throw new Error("Resumed job has an unexpected budget");
-  if (existingJob.expiredAt <= BigInt(Math.floor(Date.now() / 1000)) + disputeWindow) throw new Error("Resumed job cannot clear the policy dispute window");
+  if (!resumeDeliveryValidation && existingJob.expiredAt <= BigInt(Math.floor(Date.now() / 1000)) + disputeWindow) throw new Error("Resumed job cannot clear the policy dispute window");
   let existingDescription: unknown;
   try {
     existingDescription = JSON.parse(existingJob.description) as unknown;
@@ -381,6 +401,7 @@ if (resumeJobId !== null) {
   commerceJobId = resumeJobId;
   originalOnchainDescription = existingJob.description;
   resumedJobBudget = existingJob.budget;
+  resumedJobStatus = existingJob.status;
 } else {
   const creation = await client.createJob({ provider: payment.provider, expiredAt, description });
   await enforceTotalGas("create-job");
@@ -403,70 +424,77 @@ await writeFile(outputPath, `${json({
   cumulativeGasWei: cumulativeGas,
   boundary: "The exact job terms and commerce job ID are durable. Registration, budget setup, funding, and provider notification may still be pending.",
 })}\n`, { mode: 0o600 });
-if (resumeJobId !== null) {
-  if (resumedJobBudget === 0n) {
+let notification: Awaited<ReturnType<typeof notifyBrainHealthFactorFunded>> | null = null;
+if (!resumeDeliveryValidation) {
+  if (resumeJobId !== null) {
+    if (resumedJobBudget === 0n) {
+      await client.setBudget(commerceJobId, PAYMENT_BUDGET);
+      await enforceTotalGas("set-budget");
+    }
+  } else {
+    await client.registerJob(commerceJobId);
+    await enforceTotalGas("register-job");
     await client.setBudget(commerceJobId, PAYMENT_BUDGET);
     await enforceTotalGas("set-budget");
   }
-} else {
-  await client.registerJob(commerceJobId);
-  await enforceTotalGas("register-job");
-  await client.setBudget(commerceJobId, PAYMENT_BUDGET);
-  await enforceTotalGas("set-budget");
-}
-if (tokenBalance < PAYMENT_BUDGET) {
-  if (requiredWrapInput > 0n) {
-    committedSwapInput += requiredWrapInput;
-    await record("wrap-bnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrapInput }));
+  if (tokenBalance < PAYMENT_BUDGET) {
+    if (requiredWrapInput > 0n) {
+      committedSwapInput += requiredWrapInput;
+      await record("wrap-bnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrapInput }));
+    }
+    const allowance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "allowance", args: [EXPECTED_WALLET, PANCAKE_V3_ROUTER] });
+    if (allowance < SWAP_INPUT) {
+      await record("approve-wbnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, SWAP_INPUT] }));
+    }
+    await record("swap-wbnb-for-u", await walletClient.writeContract({
+      account,
+      chain: bsc,
+      address: PANCAKE_V3_ROUTER,
+      abi: routerAbi,
+      functionName: "exactInputSingle",
+      args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, recipient: EXPECTED_WALLET, amountIn: SWAP_INPUT, amountOutMinimum: minimumOutput, sqrtPriceLimitX96: 0n }],
+    }));
   }
-  const allowance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "allowance", args: [EXPECTED_WALLET, PANCAKE_V3_ROUTER] });
-  if (allowance < SWAP_INPUT) {
-    await record("approve-wbnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, SWAP_INPUT] }));
-  }
-  await record("swap-wbnb-for-u", await walletClient.writeContract({
-    account,
-    chain: bsc,
-    address: PANCAKE_V3_ROUTER,
-    abi: routerAbi,
-    functionName: "exactInputSingle",
-    args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, recipient: EXPECTED_WALLET, amountIn: SWAP_INPUT, amountOutMinimum: minimumOutput, sqrtPriceLimitX96: 0n }],
-  }));
+  await writeFile(outputPath, `${json({
+    schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
+    recordedAt: new Date().toISOString(),
+    state: "ESCROW_FUNDING_PENDING",
+    preflight,
+    commerceJobId,
+    resumedExistingJob: resumeJobId !== null,
+    originalOnchainDescription,
+    frozenJob,
+    reaffirmationQuote: quote,
+    capabilityProof,
+    transactions,
+    cumulativeGasWei: cumulativeGas,
+    boundary: "The exact job terms are verified and the recovery checkpoint is durable. Escrow funding and provider notification have not started.",
+  })}\n`, { mode: 0o600 });
+  await client.fund(commerceJobId, PAYMENT_BUDGET, { approveFloor: 0n });
+  await enforceTotalGas("fund-job");
+  await writeFile(outputPath, `${json({
+    schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
+    recordedAt: new Date().toISOString(),
+    state: "FUNDED_NOTIFICATION_PENDING",
+    preflight,
+    commerceJobId,
+    resumedExistingJob: resumeJobId !== null,
+    originalOnchainDescription,
+    reaffirmationQuote: quote,
+    capabilityProof,
+    transactions,
+    cumulativeGasWei: cumulativeGas,
+    boundary: "Escrow funding is confirmed, but provider notification, delivery and PositionCrew output compatibility remain pending.",
+  })}\n`, { mode: 0o600 });
+  notification = await notifyBrainHealthFactorFunded({ messageId: frozenJob.jobId, commerceJobId, account: accountToInspect });
 }
-await writeFile(outputPath, `${json({
-  schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
-  recordedAt: new Date().toISOString(),
-  state: "ESCROW_FUNDING_PENDING",
-  preflight,
-  commerceJobId,
-  resumedExistingJob: resumeJobId !== null,
-  originalOnchainDescription,
-  frozenJob,
-  reaffirmationQuote: quote,
-  capabilityProof,
-  transactions,
-  cumulativeGasWei: cumulativeGas,
-  boundary: "The exact job terms are verified and the recovery checkpoint is durable. Escrow funding and provider notification have not started.",
-})}\n`, { mode: 0o600 });
-await client.fund(commerceJobId, PAYMENT_BUDGET, { approveFloor: 0n });
-await enforceTotalGas("fund-job");
-await writeFile(outputPath, `${json({
-  schemaVersion: "positioncrew.live-match.external-activation-checkpoint.v1",
-  recordedAt: new Date().toISOString(),
-  state: "FUNDED_NOTIFICATION_PENDING",
-  preflight,
-  commerceJobId,
-  resumedExistingJob: resumeJobId !== null,
-  originalOnchainDescription,
-  reaffirmationQuote: quote,
-  capabilityProof,
-  transactions,
-  cumulativeGasWei: cumulativeGas,
-  boundary: "Escrow funding is confirmed, but provider notification, delivery and PositionCrew output compatibility remain pending.",
-})}\n`, { mode: 0o600 });
-const notification = await notifyBrainHealthFactorFunded({ messageId: frozenJob.jobId, commerceJobId, account: accountToInspect });
 
-let finalStatus = await client.getJobStatus(commerceJobId);
-const pollDeadline = Date.now() + 5 * 60_000;
+let finalStatus = resumeDeliveryValidation && resumedJobStatus !== null
+  ? resumedJobStatus
+  : await client.getJobStatus(commerceJobId);
+const pollDeadline = resumeDeliveryValidation
+  ? Date.parse(frozenJob.deadline)
+  : Math.min(Date.now() + 5 * 60_000, Date.parse(frozenJob.deadline));
 while (finalStatus === JobStatus.FUNDED && Date.now() < pollDeadline) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000));
   finalStatus = await client.getJobStatus(commerceJobId);
@@ -474,15 +502,24 @@ while (finalStatus === JobStatus.FUNDED && Date.now() < pollDeadline) {
 let deliverableUrl: string | null = null;
 let deliverable: unknown = null;
 let deliveryRetrievalError: string | null = null;
+let deliveryContentHash: `0x${string}` | null = null;
+let submittedDeliverableHash: `0x${string}` | null = null;
+let deliveryHashMatches = false;
 if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) {
   try {
     deliverableUrl = await client.getDeliverableUrl(commerceJobId);
-    if (deliverableUrl) deliverable = await boundedJson(deliverableUrl);
+    if (!deliverableUrl) throw new Error("Submitted job has no deliverable URL");
+    const fetched = await boundedDocument(deliverableUrl);
+    deliveryContentHash = `0x${createHash("sha256").update(fetched.raw).digest("hex")}`;
+    submittedDeliverableHash = (await client.getJob(commerceJobId)).deliverable;
+    deliveryHashMatches = deliveryContentHash.toLowerCase() === submittedDeliverableHash.toLowerCase();
+    if (!deliveryHashMatches) throw new Error(`Fetched delivery hash ${deliveryContentHash} does not match onchain submission ${submittedDeliverableHash}`);
+    deliverable = unwrapBrainResult(fetched.document);
   } catch (error) {
     deliveryRetrievalError = error instanceof Error ? error.message : "Unknown delivery retrieval failure";
   }
 }
-const compatibility = deliverable
+const compatibility = deliverable && deliveryHashMatches
   ? validateBrainHealthFactorDelivery(frozenJob, deliverable)
   : null;
 const compatible = compatibility?.status === "COMPATIBLE";
@@ -503,6 +540,9 @@ const evidence = {
   deliverableUrl,
   deliverable,
   deliveryRetrievalError,
+  deliveryContentHash,
+  submittedDeliverableHash,
+  deliveryHashMatches,
   compatibility,
   states: {
     identity: "REGISTRY_OBSERVED",
