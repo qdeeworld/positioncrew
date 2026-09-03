@@ -287,4 +287,15 @@ describe("BNB LP Range signed quote adapter", () => {
       "REFUSED_STALE_DATA",
     );
   });
+
+  it("rejects a future-dated frozen request", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+      new Response(JSON.stringify(responseFor(String(init?.body))), { status: 200 })) as typeof fetch;
+    const futureRequest: LpRebalanceRequest = {
+      ...request,
+      requestedAt: "2026-09-03T14:34:40.000Z",
+      deadline: "2026-09-03T14:36:40.000Z",
+    };
+    await expect(requestBnbLpRangeQuote(futureRequest, { fetchImpl, now })).rejects.toThrow("future-dated");
+  });
 });

@@ -320,6 +320,9 @@ export async function requestBnbLpRangeQuote(
   }
   const verificationTime = options.now ?? new Date();
   const verificationMilliseconds = verificationTime.getTime();
+  if (Date.parse(frozenRequest.requestedAt) > verificationMilliseconds) {
+    throw new Error("Frozen PositionCrew LP request is future-dated at quote verification");
+  }
   const evidence = validateEvidence({
     sources: frozenRequest.sources,
     observations: [frozenRequest.marketState],
