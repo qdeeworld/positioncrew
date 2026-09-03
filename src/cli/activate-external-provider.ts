@@ -29,9 +29,9 @@ const EXPECTED_WALLET = getAddress("0xADd748C416E8A7efd7d65D18Abb121dea268ddF9")
 const WBNB = getAddress("0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c");
 const PANCAKE_V3_QUOTER = getAddress("0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997");
 const PANCAKE_V3_ROUTER = getAddress("0x13f4EA83D0bd40E75C8222255bc855a974568Dd4");
-const SWAP_INPUT = parseEther("0.00025");
-const MAX_TOTAL_GAS = parseEther("0.00035");
-const CAMPAIGN_STARTING_NATIVE_BALANCE = 977_552_965_000_000n;
+const DEFAULT_SWAP_INPUT = parseEther("0.00014");
+const DEFAULT_MAX_TOTAL_GAS = parseEther("0.00024");
+const LEGACY_CAMPAIGN_STARTING_NATIVE_BALANCE = 977_552_965_000_000n;
 const PAYMENT_BUDGET = 100_000_000_000_000_000n;
 const FEE = 500;
 const MAX_SLIPPAGE_BPS = 100n;
@@ -155,6 +155,22 @@ if (resumeJobId !== null && !resumeCheckpointArgument) {
 if (resumeDeliveryValidation && resumeJobId === null) {
   throw new Error("--resume-delivery-validation requires --resume-job-id and its checkpoint");
 }
+const resumeCheckpointPath = resumeCheckpointArgument ? resolve(resumeCheckpointArgument) : null;
+const resumeCheckpointDocument = resumeCheckpointPath
+  ? JSON.parse(await readFile(resumeCheckpointPath, "utf8")) as Record<string, unknown>
+  : null;
+const storedPreflight = typeof resumeCheckpointDocument?.preflight === "object" && resumeCheckpointDocument.preflight !== null
+  ? resumeCheckpointDocument.preflight as Record<string, unknown>
+  : null;
+const storedSwap = typeof storedPreflight?.swap === "object" && storedPreflight.swap !== null
+  ? storedPreflight.swap as Record<string, unknown>
+  : null;
+const frozenSwapInput = storedSwap && typeof storedSwap.inputWei === "string" && /^\d+$/.test(storedSwap.inputWei)
+  ? BigInt(storedSwap.inputWei)
+  : DEFAULT_SWAP_INPUT;
+const frozenMaximumTotalGas = storedPreflight && typeof storedPreflight.maximumTotalGasWei === "string" && /^\d+$/.test(storedPreflight.maximumTotalGasWei)
+  ? BigInt(storedPreflight.maximumTotalGasWei)
+  : DEFAULT_MAX_TOTAL_GAS;
 const accountToInspect = getAddress(argument("account") ?? DEFAULT_ACCOUNT);
 const rpcUrl = process.env.BSC_RPC_URL ?? "https://bsc-dataseed.bnbchain.org";
 const payment = brainOnBnbPaymentContract();
@@ -173,20 +189,25 @@ let quotedOutput = resumeDeliveryValidation || broadcast
     address: PANCAKE_V3_QUOTER,
     abi: quoterAbi,
     functionName: "quoteExactInputSingle",
-    args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: SWAP_INPUT, fee: FEE, sqrtPriceLimitX96: 0n }],
+    args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: frozenSwapInput, fee: FEE, sqrtPriceLimitX96: 0n }],
   })).result[0];
 if (chainId !== 56) throw new Error(`RPC chain mismatch: expected 56, received ${chainId}`);
 let minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
+const campaignStartingNativeBalance = resumeCheckpointDocument
+  ? storedPreflight && typeof storedPreflight.campaignStartingNativeBalanceWei === "string" && /^\d+$/.test(storedPreflight.campaignStartingNativeBalanceWei)
+    ? BigInt(storedPreflight.campaignStartingNativeBalanceWei)
+    : LEGACY_CAMPAIGN_STARTING_NATIVE_BALANCE
+  : nativeBalance;
 let existingCommittedSwapInput = resumeDeliveryValidation
   ? 0n
-  : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
-let requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - existingCommittedSwapInput;
-const nativeDecrease = resumeDeliveryValidation ? 0n : CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
+  : wrappedBalance < frozenSwapInput ? wrappedBalance : frozenSwapInput;
+let requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : frozenSwapInput - existingCommittedSwapInput;
+const nativeDecrease = resumeDeliveryValidation ? 0n : campaignStartingNativeBalance - nativeBalance;
 if (!resumeDeliveryValidation && nativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
 const gasAlreadySpent = resumeDeliveryValidation ? 0n : nativeDecrease - existingCommittedSwapInput;
-if (!resumeDeliveryValidation && !broadcast && gasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
-const remainingGasCeiling = MAX_TOTAL_GAS - gasAlreadySpent;
-if (!resumeDeliveryValidation && !broadcast && minimumOutput < PAYMENT_BUDGET) throw new Error("Bounded swap cannot acquire the external provider maximum budget");
+if (!resumeDeliveryValidation && !broadcast && gasAlreadySpent > frozenMaximumTotalGas) throw new Error("Campaign gas ceiling was already exceeded");
+const remainingGasCeiling = frozenMaximumTotalGas - gasAlreadySpent;
+if (!resumeDeliveryValidation && !broadcast && tokenBalance < PAYMENT_BUDGET && minimumOutput < PAYMENT_BUDGET - tokenBalance) throw new Error("Bounded swap cannot acquire the external provider maximum-budget shortfall");
 if (!resumeDeliveryValidation && !broadcast && nativeBalance < requiredWrapInput + remainingGasCeiling) throw new Error("Operator wallet cannot preserve the maximum swap input and gas ceiling");
 
 const preflight = {
@@ -197,7 +218,7 @@ const preflight = {
   accountToInspect,
   balances: { nativeWei: nativeBalance, wrappedNativeWei: wrappedBalance, paymentTokenAtomic: tokenBalance },
   swap: {
-    inputWei: SWAP_INPUT,
+    inputWei: frozenSwapInput,
     requiredAdditionalWrapWei: requiredWrapInput,
     quotedOutputAtomic: quotedOutput,
     minimumOutputAtomic: minimumOutput,
@@ -205,7 +226,8 @@ const preflight = {
     route: { tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, router: PANCAKE_V3_ROUTER },
   },
   activation: { provider: payment.provider, kernel: payment.kernel, maximumBudgetAtomic: PAYMENT_BUDGET },
-  maximumTotalGasWei: MAX_TOTAL_GAS,
+  campaignStartingNativeBalanceWei: campaignStartingNativeBalance,
+  maximumTotalGasWei: frozenMaximumTotalGas,
   gasAlreadySpentWei: gasAlreadySpent,
   remainingGasCeilingWei: remainingGasCeiling,
   boundary: "Dry-run proves current balances, chain binding, contract addresses and swap output only. It does not prove delivery compatibility or authorize a transaction.",
@@ -230,12 +252,12 @@ const transactions: Array<{ phase: string; hash: Hex; gasWei: bigint }> = [];
 
 async function enforceTotalGas(phase: string): Promise<void> {
   const currentNativeBalance = await publicClient.getBalance({ address: EXPECTED_WALLET });
-  const totalNativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - currentNativeBalance;
+  const totalNativeDecrease = campaignStartingNativeBalance - currentNativeBalance;
   if (totalNativeDecrease < committedSwapInput) {
     throw new Error(`${phase} native-balance accounting is inconsistent`);
   }
   cumulativeGas = totalNativeDecrease - committedSwapInput;
-  if (cumulativeGas > MAX_TOTAL_GAS) {
+  if (cumulativeGas > frozenMaximumTotalGas) {
     throw new Error(`${phase} exceeded the frozen total gas ceiling`);
   }
 }
@@ -252,7 +274,6 @@ const outputPath = resolve(
   argument("output") ??
     `positioncrew-external-activation-${resumeJobId?.toString() ?? crypto.randomUUID()}.json`,
 );
-const resumeCheckpointPath = resumeCheckpointArgument ? resolve(resumeCheckpointArgument) : null;
 if (resumeCheckpointPath === outputPath) {
   throw new Error("Resume checkpoint and new output checkpoint must use different paths");
 }
@@ -272,7 +293,7 @@ let resumeCheckpointState: string | null = null;
 let resumeCheckpointNotification: unknown = null;
 let checkpointCommittedSwapInput = 0n;
 if (resumeJobId !== null && resumeCheckpointPath) {
-  const checkpoint = JSON.parse(await readFile(resumeCheckpointPath, "utf8")) as Record<string, unknown>;
+  const checkpoint = resumeCheckpointDocument!;
   resumeCheckpointState = typeof checkpoint.state === "string" ? checkpoint.state : null;
   resumeCheckpointNotification = checkpoint.notification ?? null;
   const recordedSwap = Array.isArray(checkpoint.transactions)
@@ -296,13 +317,13 @@ if (resumeJobId !== null && resumeCheckpointPath) {
       swapTransaction.from.toLowerCase() !== EXPECTED_WALLET.toLowerCase() ||
       swapTransaction.to?.toLowerCase() !== PANCAKE_V3_ROUTER.toLowerCase() ||
       decodedSwap.functionName !== "exactInputSingle" ||
-      swapParameters.amountIn !== SWAP_INPUT ||
+      swapParameters.amountIn !== frozenSwapInput ||
       swapParameters.tokenIn.toLowerCase() !== WBNB.toLowerCase() ||
       swapParameters.tokenOut.toLowerCase() !== paymentToken.toLowerCase()
     ) {
       throw new Error("Resume checkpoint swap transaction does not match the frozen acquisition");
     }
-    checkpointCommittedSwapInput = SWAP_INPUT;
+    checkpointCommittedSwapInput = frozenSwapInput;
     transactions.push({
       phase: "swap-wbnb-for-u",
       hash: swapHash,
@@ -390,7 +411,7 @@ if (!resumeDeliveryValidation) {
       address: PANCAKE_V3_QUOTER,
       abi: quoterAbi,
       functionName: "quoteExactInputSingle",
-      args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: SWAP_INPUT, fee: FEE, sqrtPriceLimitX96: 0n }],
+      args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: frozenSwapInput, fee: FEE, sqrtPriceLimitX96: 0n }],
     })).result[0];
     minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
     preflight.swap.quotedOutputAtomic = quotedOutput;
@@ -398,14 +419,14 @@ if (!resumeDeliveryValidation) {
   }
   existingCommittedSwapInput = checkpointCommittedSwapInput > 0n
     ? checkpointCommittedSwapInput
-    : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
+    : wrappedBalance < frozenSwapInput ? wrappedBalance : frozenSwapInput;
   committedSwapInput = existingCommittedSwapInput;
-  requiredWrapInput = tokenBalance >= acceptedPrice ? 0n : SWAP_INPUT - existingCommittedSwapInput;
-  const exactNativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
+  requiredWrapInput = tokenBalance >= acceptedPrice ? 0n : frozenSwapInput - existingCommittedSwapInput;
+  const exactNativeDecrease = campaignStartingNativeBalance - nativeBalance;
   if (exactNativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
   const exactGasAlreadySpent = exactNativeDecrease - existingCommittedSwapInput;
-  if (exactGasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
-  const exactRemainingGasCeiling = MAX_TOTAL_GAS - exactGasAlreadySpent;
+  if (exactGasAlreadySpent > frozenMaximumTotalGas) throw new Error("Campaign gas ceiling was already exceeded");
+  const exactRemainingGasCeiling = frozenMaximumTotalGas - exactGasAlreadySpent;
   preflight.swap.requiredAdditionalWrapWei = requiredWrapInput;
   preflight.gasAlreadySpentWei = exactGasAlreadySpent;
   preflight.remainingGasCeilingWei = exactRemainingGasCeiling;
@@ -527,8 +548,8 @@ if (!resumeDeliveryValidation) {
       await record("wrap-bnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: wbnbAbi, functionName: "deposit", value: requiredWrapInput }));
     }
     const allowance = await publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "allowance", args: [EXPECTED_WALLET, PANCAKE_V3_ROUTER] });
-    if (allowance < SWAP_INPUT) {
-      await record("approve-wbnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, SWAP_INPUT] }));
+    if (allowance < frozenSwapInput) {
+      await record("approve-wbnb", await walletClient.writeContract({ account, chain: bsc, address: WBNB, abi: erc20Abi, functionName: "approve", args: [PANCAKE_V3_ROUTER, frozenSwapInput] }));
     }
     await record("swap-wbnb-for-u", await walletClient.writeContract({
       account,
@@ -536,7 +557,7 @@ if (!resumeDeliveryValidation) {
       address: PANCAKE_V3_ROUTER,
       abi: routerAbi,
       functionName: "exactInputSingle",
-      args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, recipient: EXPECTED_WALLET, amountIn: SWAP_INPUT, amountOutMinimum: minimumOutput, sqrtPriceLimitX96: 0n }],
+      args: [{ tokenIn: WBNB, tokenOut: paymentToken, fee: FEE, recipient: EXPECTED_WALLET, amountIn: frozenSwapInput, amountOutMinimum: minimumOutput, sqrtPriceLimitX96: 0n }],
     }));
   }
   await writeFile(outputPath, `${json({
