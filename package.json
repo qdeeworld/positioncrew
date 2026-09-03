@@ -45,6 +45,7 @@
     "spike:heyanon-beefy": "tsx src/cli/spike-heyanon-beefy.ts",
     "spike:heyanon-v3-position": "tsx src/cli/spike-heyanon-v3-position.ts",
     "spike:heyanon-v3-lp-job": "tsx src/cli/spike-heyanon-v3-lp-job.ts",
+    "spike:bnb-lp-signed-quote": "tsx src/cli/spike-bnb-lp-range-a2a.ts",
     "spike:validate-external-provider": "tsx src/cli/validate-external-provider-delivery.ts",
     "activate:external-provider": "tsx src/cli/activate-external-provider.ts",
     "provider:export-kit": "tsx src/cli/provider-conformance.ts export",
