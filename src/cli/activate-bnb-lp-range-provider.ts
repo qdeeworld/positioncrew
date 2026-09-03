@@ -120,6 +120,7 @@ interface ApprovalEnvelope {
   swap: { tokenIn: string; tokenOut: string; router: string; maximumInputWei: string; minimumOutputAtomic: string; maximumSlippageBps: string };
   gas: { maximumTotalGasWei: string; gasPriceCeilingWei: string; gasUnitsEnvelope: string };
   lifecycle: { requestDeadline: string; disputeWindowSeconds: string; onchainExpiredAt: string };
+  declaredEstimatedCompletionSeconds: number;
   frozenRequestHash: string;
   jobDescriptionHash: string;
   quoteExpiresAt: number;
@@ -320,6 +321,7 @@ async function buildPreflight(): Promise<ActivationPreflight> {
     swap: { tokenIn: WBNB, tokenOut: paymentToken, router: PANCAKE_V3_ROUTER, maximumInputWei: swapInput.toString(), minimumOutputAtomic: minimumOutput.toString(), maximumSlippageBps: MAXIMUM_SLIPPAGE_BPS.toString() },
     gas: { maximumTotalGasWei: maximumTotalGasWei.toString(), gasPriceCeilingWei: gasPriceCeiling.toString(), gasUnitsEnvelope: gasUnitsEnvelope.toString() },
     lifecycle: { requestDeadline: frozenRequest.deadline, disputeWindowSeconds: disputeWindow.toString(), onchainExpiredAt: onchainExpiredAt.toString() },
+    declaredEstimatedCompletionSeconds: quote.declaredEstimatedCompletionSeconds,
     frozenRequestHash: canonicalHash(frozenRequest),
     jobDescriptionHash: quote.jobDescriptionHash,
     quoteExpiresAt: quote.quoteExpiresAt,
@@ -359,6 +361,7 @@ async function readPreflight(path: string): Promise<ActivationPreflight> {
   if (preflight.quote.jobDescriptionHash !== canonicalHash(preflight.quote.jobDescription)) throw new Error("Stored SDK job description hash mismatch");
   if (preflight.quote.jobDescriptionHash !== preflight.approvalEnvelope.jobDescriptionHash) throw new Error("Stored SDK job description differs from the approved envelope");
   if (preflight.quote.quoteExpiresAt !== preflight.approvalEnvelope.quoteExpiresAt) throw new Error("Stored quote expiry differs from the approved envelope");
+  if (preflight.quote.declaredEstimatedCompletionSeconds !== preflight.approvalEnvelope.declaredEstimatedCompletionSeconds) throw new Error("Stored provider delivery estimate differs from the approved envelope");
   if (preflight.approvalEnvelope.frozenRequestHash !== canonicalHash(preflight.frozenRequest)) throw new Error("Approval does not bind the frozen LP request");
   if (
     preflight.approvalEnvelope.lifecycle.requestDeadline !== preflight.frozenRequest.deadline ||
