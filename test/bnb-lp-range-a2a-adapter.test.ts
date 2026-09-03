@@ -325,6 +325,8 @@ describe("BNB LP Range signed quote adapter", () => {
       response.result.parts[0].data.response.negotiated_at = Math.floor(
         Date.parse("2026-09-03T14:32:00.000Z") / 1_000,
       );
+      response.result.parts[0].data.response.quote_expires_at =
+        response.result.parts[0].data.response.negotiated_at + 900;
       rehash(response.result.parts[0].data);
       return new Response(JSON.stringify(response), { status: 200 });
     }) as typeof fetch;
