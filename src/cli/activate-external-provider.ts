@@ -505,15 +505,24 @@ let deliveryRetrievalError: string | null = null;
 let deliveryContentHash: `0x${string}` | null = null;
 let submittedDeliverableHash: `0x${string}` | null = null;
 let deliveryHashMatches = false;
+let deliverySubmittedAt: string | null = null;
+let deliverySubmittedWithinDeadline = false;
 if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) {
   try {
     deliverableUrl = await client.getDeliverableUrl(commerceJobId);
     if (!deliverableUrl) throw new Error("Submitted job has no deliverable URL");
     const fetched = await boundedDocument(deliverableUrl);
     deliveryContentHash = `0x${createHash("sha256").update(fetched.raw).digest("hex")}`;
-    submittedDeliverableHash = (await client.getJob(commerceJobId)).deliverable;
+    const submittedJob = await client.getJob(commerceJobId);
+    submittedDeliverableHash = submittedJob.deliverable;
+    deliverySubmittedAt = submittedJob.submittedAt > 0n
+      ? new Date(Number(submittedJob.submittedAt) * 1_000).toISOString()
+      : null;
+    deliverySubmittedWithinDeadline = submittedJob.submittedAt > 0n &&
+      submittedJob.submittedAt <= BigInt(Math.floor(Date.parse(frozenJob.deadline) / 1_000));
     deliveryHashMatches = deliveryContentHash.toLowerCase() === submittedDeliverableHash.toLowerCase();
     if (!deliveryHashMatches) throw new Error(`Fetched delivery hash ${deliveryContentHash} does not match onchain submission ${submittedDeliverableHash}`);
+    if (!deliverySubmittedWithinDeadline) throw new Error(`Onchain delivery was submitted at ${deliverySubmittedAt ?? "an unknown time"}, after the frozen deadline ${frozenJob.deadline}`);
     deliverable = unwrapBrainResult(fetched.document);
   } catch (error) {
     deliveryRetrievalError = error instanceof Error ? error.message : "Unknown delivery retrieval failure";
@@ -543,6 +552,8 @@ const evidence = {
   deliveryContentHash,
   submittedDeliverableHash,
   deliveryHashMatches,
+  deliverySubmittedAt,
+  deliverySubmittedWithinDeadline,
   compatibility,
   states: {
     identity: "REGISTRY_OBSERVED",
