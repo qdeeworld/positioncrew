@@ -406,6 +406,9 @@ if (!resumeDeliveryValidation) {
   const exactGasAlreadySpent = exactNativeDecrease - existingCommittedSwapInput;
   if (exactGasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
   const exactRemainingGasCeiling = MAX_TOTAL_GAS - exactGasAlreadySpent;
+  preflight.swap.requiredAdditionalWrapWei = requiredWrapInput;
+  preflight.gasAlreadySpentWei = exactGasAlreadySpent;
+  preflight.remainingGasCeilingWei = exactRemainingGasCeiling;
   if (tokenBalance < acceptedPrice && minimumOutput < acceptedPrice) throw new Error("Bounded swap cannot acquire the accepted provider quote");
   if (nativeBalance < requiredWrapInput + exactRemainingGasCeiling) throw new Error("Operator wallet cannot preserve the quoted swap input and gas ceiling");
 }
