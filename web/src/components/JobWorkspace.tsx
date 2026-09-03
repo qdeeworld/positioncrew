@@ -629,17 +629,23 @@ function LendingProviderAuditionPanel({
             </span>
             <span>
               <b>{audition.externalProviderAudit.validation.failedChecks} checks failed</b>
-              Wrong protocol binding, no BSC block number, and a $43.13 protocol difference
+              {audition.externalProviderAudit.validation.checks
+                .filter((check) => check.status === "FAIL")
+                .map((check) => check.detail)
+                .join(" ")}
             </span>
             <span>
               <b>ERC-8183 job #{audition.externalProviderAudit.commerce.jobId}</b>
-              {audition.externalProviderAudit.commerce.escrowedAmount} funded; settlement was pending
-              in the {new Date(audition.externalProviderAudit.recordedAt).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-                timeZone: "UTC",
-              })} evidence snapshot
+              {audition.externalProviderAudit.commerce.settlementStatus === "PENDING_OPTIMISTIC_WINDOW"
+                ? `${audition.externalProviderAudit.commerce.escrowedAmount} funded; settlement was pending in the ${new Date(
+                  audition.externalProviderAudit.recordedAt,
+                ).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                  timeZone: "UTC",
+                })} evidence snapshot`
+                : `${audition.externalProviderAudit.commerce.escrowedAmount} recorded in the funded job; this snapshot makes no settlement-state claim`}
             </span>
           </div>
 
