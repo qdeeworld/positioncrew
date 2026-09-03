@@ -393,7 +393,10 @@ if (resumeJobId !== null) {
       ? "Delivery-validation resume requires a FUNDED, SUBMITTED, or COMPLETED job"
       : "Transaction resume requires an OPEN job");
   }
-  if (existingJob.budget !== 0n && existingJob.budget !== acceptedPrice) throw new Error("Resumed job budget does not match the accepted quote");
+  const legacyMaximumBudget = resumeDeliveryValidation && existingJob.budget === PAYMENT_BUDGET;
+  if (existingJob.budget !== 0n && existingJob.budget !== acceptedPrice && !legacyMaximumBudget) {
+    throw new Error("Resumed job budget does not match the accepted quote");
+  }
   if (!resumeDeliveryValidation && existingJob.expiredAt <= BigInt(Math.floor(Date.now() / 1000)) + disputeWindow) throw new Error("Resumed job cannot clear the policy dispute window");
   let existingDescription: unknown;
   try {
