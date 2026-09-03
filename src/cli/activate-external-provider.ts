@@ -178,8 +178,6 @@ if (chainId !== 56) throw new Error(`RPC chain mismatch: expected 56, received $
 const minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
 let existingCommittedSwapInput = resumeDeliveryValidation
   ? 0n
-  : tokenBalance >= PAYMENT_BUDGET
-  ? SWAP_INPUT
   : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
 let requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : SWAP_INPUT - existingCommittedSwapInput;
 const nativeDecrease = resumeDeliveryValidation ? 0n : CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
@@ -350,9 +348,7 @@ if (resumeJobId !== null && resumeCheckpointPath) {
 }
 const acceptedPrice = BigInt(quote.quote.price);
 if (!resumeDeliveryValidation) {
-  existingCommittedSwapInput = tokenBalance >= acceptedPrice
-    ? SWAP_INPUT
-    : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
+  existingCommittedSwapInput = wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
   committedSwapInput = existingCommittedSwapInput;
   requiredWrapInput = tokenBalance >= acceptedPrice ? 0n : SWAP_INPUT - existingCommittedSwapInput;
   const exactNativeDecrease = CAMPAIGN_STARTING_NATIVE_BALANCE - nativeBalance;
