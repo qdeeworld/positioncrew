@@ -270,8 +270,9 @@ if (resumeJobId !== null && resumeCheckpointPath) {
   if (String(checkpoint.commerceJobId) !== resumeJobId.toString()) {
     throw new Error("Resume checkpoint does not bind the requested ERC-8183 job ID");
   }
-  const checkpointQuote = typeof checkpoint.reaffirmationQuote === "object" && checkpoint.reaffirmationQuote !== null
-    ? checkpoint.reaffirmationQuote as Record<string, unknown>
+  const storedQuote = checkpoint.reaffirmationQuote ?? checkpoint.quote;
+  const checkpointQuote = typeof storedQuote === "object" && storedQuote !== null
+    ? storedQuote as Record<string, unknown>
     : null;
   if (!checkpointQuote) throw new Error("Resume checkpoint has no immutable accepted quote");
   frozenJob = HealthFactorLiveMatchJobSchema.parse(checkpoint.frozenJob ?? checkpointQuote.frozenJob);
