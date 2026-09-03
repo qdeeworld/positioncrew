@@ -324,4 +324,17 @@ describe("BNB LP Range signed quote adapter", () => {
       "negotiation predates",
     );
   });
+
+  it("rejects a quote whose expiry does not follow its negotiation", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const response = responseFor(String(init?.body)) as any;
+      response.result.parts[0].data.response.negotiated_at = Math.floor(now.getTime() / 1_000) + 30;
+      response.result.parts[0].data.response.quote_expires_at = Math.floor(now.getTime() / 1_000) + 1;
+      rehash(response.result.parts[0].data);
+      return new Response(JSON.stringify(response), { status: 200 });
+    }) as typeof fetch;
+    await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow(
+      "expiry is not later",
+    );
+  });
 });
