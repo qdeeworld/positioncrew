@@ -166,7 +166,7 @@ const [chainId, nativeBalance, tokenBalance, wrappedBalance] = await Promise.all
   publicClient.readContract({ address: paymentToken, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] }),
   publicClient.readContract({ address: WBNB, abi: erc20Abi, functionName: "balanceOf", args: [EXPECTED_WALLET] }),
 ]);
-const quotedOutput = resumeDeliveryValidation
+let quotedOutput = resumeDeliveryValidation || broadcast
   ? 0n
   : (await publicClient.simulateContract({
     account: EXPECTED_WALLET,
@@ -176,7 +176,7 @@ const quotedOutput = resumeDeliveryValidation
     args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: SWAP_INPUT, fee: FEE, sqrtPriceLimitX96: 0n }],
   })).result[0];
 if (chainId !== 56) throw new Error(`RPC chain mismatch: expected 56, received ${chainId}`);
-const minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
+let minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
 let existingCommittedSwapInput = resumeDeliveryValidation
   ? 0n
   : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
@@ -384,6 +384,18 @@ if (resumeJobId !== null && resumeCheckpointPath) {
 }
 const acceptedPrice = BigInt(quote.quote.price);
 if (!resumeDeliveryValidation) {
+  if (tokenBalance < acceptedPrice && quotedOutput === 0n) {
+    quotedOutput = (await publicClient.simulateContract({
+      account: EXPECTED_WALLET,
+      address: PANCAKE_V3_QUOTER,
+      abi: quoterAbi,
+      functionName: "quoteExactInputSingle",
+      args: [{ tokenIn: WBNB, tokenOut: paymentToken, amountIn: SWAP_INPUT, fee: FEE, sqrtPriceLimitX96: 0n }],
+    })).result[0];
+    minimumOutput = quotedOutput * (10_000n - MAX_SLIPPAGE_BPS) / 10_000n;
+    preflight.swap.quotedOutputAtomic = quotedOutput;
+    preflight.swap.minimumOutputAtomic = minimumOutput;
+  }
   existingCommittedSwapInput = checkpointCommittedSwapInput > 0n
     ? checkpointCommittedSwapInput
     : wrappedBalance < SWAP_INPUT ? wrappedBalance : SWAP_INPUT;
@@ -394,7 +406,7 @@ if (!resumeDeliveryValidation) {
   const exactGasAlreadySpent = exactNativeDecrease - existingCommittedSwapInput;
   if (exactGasAlreadySpent > MAX_TOTAL_GAS) throw new Error("Campaign gas ceiling was already exceeded");
   const exactRemainingGasCeiling = MAX_TOTAL_GAS - exactGasAlreadySpent;
-  if (minimumOutput < acceptedPrice) throw new Error("Bounded swap cannot acquire the accepted provider quote");
+  if (tokenBalance < acceptedPrice && minimumOutput < acceptedPrice) throw new Error("Bounded swap cannot acquire the accepted provider quote");
   if (nativeBalance < requiredWrapInput + exactRemainingGasCeiling) throw new Error("Operator wallet cannot preserve the quoted swap input and gas ceiling");
 }
 if (!capabilityProofArgument && !paidCapabilityTrial) {
