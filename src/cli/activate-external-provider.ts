@@ -258,8 +258,12 @@ await writeFile(outputPath, `${json({
 
 let frozenJob;
 let quote;
+let resumeCheckpointState: string | null = null;
+let resumeCheckpointNotification: unknown = null;
 if (resumeJobId !== null && resumeCheckpointPath) {
   const checkpoint = JSON.parse(await readFile(resumeCheckpointPath, "utf8")) as Record<string, unknown>;
+  resumeCheckpointState = typeof checkpoint.state === "string" ? checkpoint.state : null;
+  resumeCheckpointNotification = checkpoint.notification ?? null;
   if (String(checkpoint.commerceJobId) !== resumeJobId.toString()) {
     throw new Error("Resume checkpoint does not bind the requested ERC-8183 job ID");
   }
@@ -492,6 +496,14 @@ if (!resumeDeliveryValidation) {
 let finalStatus = resumeDeliveryValidation && resumedJobStatus !== null
   ? resumedJobStatus
   : await client.getJobStatus(commerceJobId);
+if (
+  resumeDeliveryValidation &&
+  finalStatus === JobStatus.FUNDED &&
+  resumeCheckpointState === "FUNDED_NOTIFICATION_PENDING" &&
+  resumeCheckpointNotification === null
+) {
+  notification = await notifyBrainHealthFactorFunded({ messageId: frozenJob.jobId, commerceJobId, account: accountToInspect });
+}
 const pollDeadline = resumeDeliveryValidation
   ? Date.parse(frozenJob.deadline)
   : Math.min(Date.now() + 5 * 60_000, Date.parse(frozenJob.deadline));
@@ -529,7 +541,7 @@ if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) 
   }
 }
 const compatibility = deliverable && deliveryHashMatches
-  ? validateBrainHealthFactorDelivery(frozenJob, deliverable)
+  ? validateBrainHealthFactorDelivery(frozenJob, deliverable, deliverySubmittedAt ?? undefined)
   : null;
 const compatible = compatibility?.status === "COMPATIBLE";
 const evidence = {

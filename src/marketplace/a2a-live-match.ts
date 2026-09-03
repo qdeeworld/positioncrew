@@ -334,6 +334,7 @@ export function brainOnBnbPaymentContract(): {
 export function validateBrainHealthFactorDelivery(
   input: HealthFactorLiveMatchJob,
   deliveryInput: unknown,
+  authoritativeSubmittedAt?: string,
 ): {
   status: "COMPATIBLE" | "INCOMPATIBLE";
   checks: Array<{ id: string; passed: boolean; detail: string }>;
@@ -353,6 +354,7 @@ export function validateBrainHealthFactorDelivery(
   const delivery = parsed.data;
   const stress = delivery.drawdown.stress;
   const measuredAt = Date.parse(delivery.position.measured_at);
+  const submittedAt = authoritativeSubmittedAt ? Date.parse(authoritativeSubmittedAt) : null;
   const normalizedProtocol = delivery.position.protocol.trim().toLowerCase();
   const protocolMatches = normalizedProtocol === "venus" ||
     normalizedProtocol === "venus classic" ||
@@ -371,6 +373,7 @@ export function validateBrainHealthFactorDelivery(
     { id: "PROTOCOL_CROSS_CHECK", passed: delivery.position.cross_check.agrees && delivery.position.cross_check.venus_error_code === 0, detail: `agrees=${delivery.position.cross_check.agrees}; differenceUsd=${delivery.position.cross_check.difference_usd}; venusErrorCode=${delivery.position.cross_check.venus_error_code}.` },
     { id: "BLOCK_ATTRIBUTION", passed: observedBlock !== undefined, detail: observedBlock === undefined ? "No BSC block number was returned." : `Observed at BSC block ${observedBlock}.` },
     { id: "DELIVERY_WINDOW", passed: measuredAt >= Date.parse(job.requestedAt) && measuredAt <= Date.parse(job.deadline), detail: `Measured at ${delivery.position.measured_at}; required window ${job.requestedAt} through ${job.deadline}.` },
+    { id: "SUBMISSION_CAUSALITY", passed: submittedAt === null || Math.floor(measuredAt / 1_000) <= Math.floor(submittedAt / 1_000), detail: submittedAt === null ? "No authoritative submission timestamp was supplied for this prepayment check." : `Measured at ${delivery.position.measured_at}; submitted onchain at ${authoritativeSubmittedAt} (second precision).` },
   ];
   const compatible = checks.every((check) => check.passed);
   return {
