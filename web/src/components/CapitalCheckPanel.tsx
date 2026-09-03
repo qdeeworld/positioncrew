@@ -64,10 +64,10 @@ const PROVIDER_ROUTES: Record<ServiceId, ProviderRoute> = {
   },
   BOUNDED_GRID: {
     providers: "PositionCrew Grid + Brain on BNB Grid Planner",
-    status: "Two-provider exact-job audition",
-    detail: "Both providers evaluate the same live pool. The external range is admitted only when it passes the buyer's economics and loss limits.",
+    status: "1 native provider · 1 conditional external audition",
+    detail: "Both evaluate the same live pool. Brain on BNB does not accept the native job contract; its range becomes eligible only if PositionCrew binds it to pinned evidence, applies every buyer limit, and produces a valid bounded deliverable.",
     action: "Compare providers for this job",
-    outcome: "Compare grid plans and reject any range that breaks your loss or cost caps.",
+    outcome: "Compare the native plan with an external range only when it passes your inventory, loss, cost, and expiry limits.",
   },
 };
 
