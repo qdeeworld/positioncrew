@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAddress, keccak256, toBytes } from "viem";
 
 import type { LpRebalanceRequest } from "../src/contracts/lp-rebalance.js";
-import { requestBnbLpRangeQuote } from "../src/marketplace/bnb-lp-range-a2a-adapter.js";
+import {
+  buildBnbLpRangeQuoteRequest,
+  requestBnbLpRangeQuote,
+} from "../src/marketplace/bnb-lp-range-a2a-adapter.js";
 
 const verifyMessageMock = vi.hoisted(() => vi.fn());
 vi.mock("ethers", () => ({ verifyMessage: verifyMessageMock }));
@@ -336,5 +339,20 @@ describe("BNB LP Range signed quote adapter", () => {
     await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow(
       "expiry is not later",
     );
+  });
+
+  it("creates distinct lossless signed tasks for bracket-normalization collisions", () => {
+    const bracketed = buildBnbLpRangeQuoteRequest(
+      { ...request, protocol: "foo[bar]" },
+      "00000000-0000-4000-8000-000000000001",
+    ) as any;
+    const parenthesized = buildBnbLpRangeQuoteRequest(
+      { ...request, protocol: "foo(bar)" },
+      "00000000-0000-4000-8000-000000000002",
+    ) as any;
+    const bracketedTask = bracketed.params.message.parts[0].data.task_description as string;
+    const parenthesizedTask = parenthesized.params.message.parts[0].data.task_description as string;
+    expect(bracketedTask).not.toBe(parenthesizedTask);
+    expect(sanitize(bracketedTask)).not.toBe(sanitize(parenthesizedTask));
   });
 });

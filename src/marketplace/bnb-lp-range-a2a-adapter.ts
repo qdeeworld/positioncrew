@@ -170,7 +170,7 @@ function authenticatedQuote(quote: BnbLpSignedQuote): Record<string, unknown> {
 }
 
 function taskDescription(request: LpRebalanceRequest): string {
-  return `Evaluate this exact PositionCrew LP_REBALANCE request without changing its fields: ${JSON.stringify(request)}`;
+  return `Evaluate this exact PositionCrew LP_REBALANCE request without changing its fields. Canonical raw-request hash: ${canonicalHash(request)}. Request: ${JSON.stringify(request)}`;
 }
 
 export function buildBnbLpRangeQuoteRequest(
