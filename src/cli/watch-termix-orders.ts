@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -100,10 +100,10 @@ async function loadState(path: string, agentId: string): Promise<WatchState> {
   }
 }
 
-async function atomicJson(path: string, value: unknown): Promise<void> {
+async function atomicJson(path: string, value: unknown, mode = 0o600): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode, flag: "wx" });
   await rename(temporary, path);
 }
 
@@ -153,7 +153,8 @@ async function main(): Promise<void> {
   if (transition.changed.length) {
     for (const order of transition.changed) {
       const fingerprint = orderFingerprint(order);
-      const id = createHash("sha256").update(`${order.id}\n${fingerprint}`).digest("hex");
+      const occurrence = `${transition.state.lastPollAt}\n${randomUUID()}`;
+      const id = createHash("sha256").update(`${order.id}\n${fingerprint}\n${occurrence}`).digest("hex");
       await atomicJson(resolve(outboxPath, `${id}.json`), {
         schemaVersion: "positioncrew.termix-order-alert.v1",
         observedAt: transition.state.lastPollAt,
@@ -165,7 +166,7 @@ async function main(): Promise<void> {
           availableActions: order.availableActions ?? {},
         },
         boundary: "Operator attention only. No acceptance, delivery, settlement, signing, or transaction was performed.",
-      });
+      }, 0o640);
     }
   }
   // Persist the deduplication cursor only after the alert outbox is durable.

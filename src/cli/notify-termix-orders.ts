@@ -39,14 +39,15 @@ async function main(): Promise<void> {
     name,
     alert: AlertSchema.parse(JSON.parse(await readFile(resolve(outbox, name), "utf8"))),
   })));
-  const lines = alerts.slice(0, 12).map(({ alert }) =>
+  const batch = alerts.slice(0, 12);
+  const lines = batch.map(({ alert }) =>
     `${alert.order.orderId}: ${alert.order.status}, due ${alert.order.deliveryDueAt ?? "not reported"}`
   );
-  const overflow = alerts.length > lines.length ? `\n+${alerts.length - lines.length} more queued order transitions.` : "";
+  const overflow = alerts.length > batch.length ? `\n+${alerts.length - batch.length} more queued for the next alert.` : "";
   await sendTelegram(
-    `PositionCrew has ${alerts.length} TermiX order transition(s) requiring attention:\n${lines.join("\n")}${overflow}\nNo transaction was performed automatically.`,
+    `PositionCrew has ${alerts.length} queued TermiX order transition(s); this alert covers ${batch.length}:\n${lines.join("\n")}${overflow}\nNo transaction was performed automatically.`,
   );
-  for (const { name } of alerts) await unlink(resolve(outbox, name));
+  for (const { name } of batch) await unlink(resolve(outbox, name));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

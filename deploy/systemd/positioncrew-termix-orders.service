@@ -8,8 +8,8 @@ OnFailure=crosswind-alert@positioncrew-termix-orders.service
 
 [Service]
 Type=oneshot
-User=crosswind
-Group=crosswind
+User=positioncrew-orders
+Group=positioncrew-orders
 Environment=TERMIX_AGENT_ID=cmt4dzxvcli4tw70125nd5ra8
 Environment=TERMIX_BASE_URL=https://platform-backend.prod.termix.live
 Environment=TERMIX_SESSION_TOKEN_FILE=%d/session-token
@@ -25,7 +25,7 @@ PrivateDevices=true
 ProtectHome=read-only
 ProtectSystem=strict
 StateDirectory=positioncrew-termix-orders
-StateDirectoryMode=0700
+StateDirectoryMode=0770
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

@@ -11,6 +11,7 @@ StartLimitIntervalSec=0
 Type=oneshot
 User=crosswind
 Group=crosswind
+SupplementaryGroups=positioncrew-orders
 WorkingDirectory=/opt/crosswind
 Environment=HOME=/home/crosswind
 Environment=PATH=/home/crosswind/.local/bin:/usr/local/bin:/usr/bin:/bin
