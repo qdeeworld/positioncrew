@@ -7,6 +7,7 @@ import {
   type LpRebalanceRequest,
 } from "../contracts/lp-rebalance.js";
 import { canonicalHash } from "../core/canonical.js";
+import { validateEvidence } from "../providers/provider-utils.js";
 
 const BNB_LP_RANGE_PROVIDER = {
   agentTokenId: 265375,
@@ -161,22 +162,8 @@ function responseHashContent(quote: BnbLpSignedQuote): Record<string, unknown> {
 }
 
 function authenticatedQuote(quote: BnbLpSignedQuote): Record<string, unknown> {
-  const terms: Record<string, unknown> = {
-    deliverables: quote.response.terms.deliverables,
-    quality_standards: quote.response.terms.quality_standards,
-    price: quote.response.terms.price,
-    currency: quote.response.terms.currency,
-  };
-  if (Array.isArray(quote.response.terms.success_criteria) && quote.response.terms.success_criteria.length > 0) {
-    terms.success_criteria = quote.response.terms.success_criteria;
-  }
   return {
-    task_description: quote.request.task_description,
-    terms,
-    negotiated_at: quote.response.negotiated_at,
-    quote_expires_at: quote.response.quote_expires_at,
-    chain_id: quote.chain_id,
-    verifying_contract: getAddress(quote.verifying_contract),
+    ...signedDescriptionContent(quote),
     negotiation_hash: quote.negotiation_hash,
     provider_sig: quote.provider_sig,
   };
@@ -333,14 +320,18 @@ export async function requestBnbLpRangeQuote(
   }
   const verificationTime = options.now ?? new Date();
   const verificationMilliseconds = verificationTime.getTime();
-  if (Date.parse(frozenRequest.deadline) <= verificationMilliseconds) {
-    throw new Error("Frozen PositionCrew LP request expired before quote verification");
-  }
-  if (
-    Date.parse(frozenRequest.marketState.observedAt) + frozenRequest.maxDataAgeSeconds * 1_000 <
-    verificationMilliseconds
-  ) {
-    throw new Error("Frozen PositionCrew LP observation is stale at quote verification");
+  const evidence = validateEvidence({
+    sources: frozenRequest.sources,
+    observations: [frozenRequest.marketState],
+    requestedAt: frozenRequest.requestedAt,
+    deadline: frozenRequest.deadline,
+    maxDataAgeSeconds: frozenRequest.maxDataAgeSeconds,
+    now: verificationTime,
+  });
+  if (evidence.status !== "OK") {
+    throw new Error(
+      `Frozen PositionCrew LP request evidence failed at quote verification: ${evidence.status}: ${evidence.reasons.join(" ")}`,
+    );
   }
   const recomputedRequestHash = keccakCanonical(quote.request);
   if (recomputedRequestHash.toLowerCase() !== quote.request_hash.toLowerCase()) {

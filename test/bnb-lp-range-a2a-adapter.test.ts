@@ -171,7 +171,7 @@ describe("BNB LP Range signed quote adapter", () => {
     const trace = await requestBnbLpRangeQuote(request, { fetchImpl, now });
     expect(trace.states.identity).toBe("FROZEN_REGISTRY_OWNER_SIGNATURE_MATCHED");
     expect(trace.states.selection).toBe("NOT_ELIGIBLE_YET");
-    expect((trace.authenticatedQuote.terms as Record<string, unknown>).price).toBe("100000000000000000");
+    expect(trace.authenticatedQuote.price).toBe("100000000000000000");
     expect(verifyMessageMock).toHaveBeenCalledWith(
       trace.authenticatedQuote.negotiation_hash,
       trace.authenticatedQuote.provider_sig,
@@ -217,7 +217,7 @@ describe("BNB LP Range signed quote adapter", () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
       new Response(JSON.stringify(responseFor(String(init?.body))), { status: 200 })) as typeof fetch;
     const afterDeadline = new Date("2026-09-03T14:35:37.000Z");
-    await expect(requestBnbLpRangeQuote(request, { fetchImpl, now: afterDeadline })).rejects.toThrow("request expired");
+    await expect(requestBnbLpRangeQuote(request, { fetchImpl, now: afterDeadline })).rejects.toThrow("REFUSED_EXPIRED");
   });
 
   it("rejects a mainnet provider quote for a testnet request", async () => {
@@ -240,5 +240,51 @@ describe("BNB LP Range signed quote adapter", () => {
     expect(trace.authenticatedQuote).not.toHaveProperty("estimated_completion_seconds");
     expect(trace.authenticatedQuote.terms).not.toHaveProperty("unsigned_extension");
     expect(trace.protocolIntegrity.boundary).toContain("not covered by the provider owner signature");
+  });
+
+  it("exposes the normalized strings covered by the owner signature", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const response = responseFor(String(init?.body)) as any;
+      response.result.parts[0].data.request.task_description = response.result.parts[0].data.request.task_description.replace(
+        "PositionCrew",
+        "PositionCrew[exact]",
+      );
+      response.result.parts[0].data.response.terms.success_criteria = ["Return [bounded] output"];
+      rehash(response.result.parts[0].data);
+      return new Response(JSON.stringify(response), { status: 200 });
+    }) as typeof fetch;
+    await expect(requestBnbLpRangeQuote(request, { fetchImpl, now })).rejects.toThrow("changed the frozen job");
+
+    const normalFetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const response = responseFor(String(init?.body)) as any;
+      response.result.parts[0].data.response.terms.success_criteria = ["Return [bounded] output"];
+      rehash(response.result.parts[0].data);
+      return new Response(JSON.stringify(response), { status: 200 });
+    }) as typeof fetch;
+    const trace = await requestBnbLpRangeQuote(request, { fetchImpl: normalFetch, now });
+    expect((trace.authenticatedQuote.terms as Record<string, unknown>).success_criteria).toEqual([
+      "Return (bounded) output",
+    ]);
+    expect(String(trace.authenticatedQuote.task)).not.toContain("[");
+  });
+
+  it("rejects a stale frozen source even when the market observation is fresh", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+      new Response(JSON.stringify(responseFor(String(init?.body))), { status: 200 })) as typeof fetch;
+    const staleSourceRequest: LpRebalanceRequest = {
+      ...request,
+      sources: [
+        ...request.sources,
+        {
+          sourceId: "stale-extra-source",
+          label: "Stale supplemental evidence",
+          uri: "https://bscscan.com/block/119743000",
+          observedAt: "2026-09-03T14:30:00.000Z",
+        },
+      ],
+    };
+    await expect(requestBnbLpRangeQuote(staleSourceRequest, { fetchImpl, now })).rejects.toThrow(
+      "REFUSED_STALE_DATA",
+    );
   });
 });
