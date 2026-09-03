@@ -303,6 +303,11 @@ if (resumeJobId !== null && resumeCheckpointPath) {
       throw new Error("Resume checkpoint swap transaction does not match the frozen acquisition");
     }
     checkpointCommittedSwapInput = SWAP_INPUT;
+    transactions.push({
+      phase: "swap-wbnb-for-u",
+      hash: swapHash,
+      gasWei: swapReceipt.gasUsed * swapReceipt.effectiveGasPrice,
+    });
   }
   if (String(checkpoint.commerceJobId) !== resumeJobId.toString()) {
     throw new Error("Resume checkpoint does not bind the requested ERC-8183 job ID");
