@@ -320,8 +320,24 @@ export async function requestBnbLpRangeQuote(
   }
   const verificationTime = options.now ?? new Date();
   const verificationMilliseconds = verificationTime.getTime();
-  if (Date.parse(frozenRequest.requestedAt) > verificationMilliseconds) {
+  const requestedAtMilliseconds = Date.parse(frozenRequest.requestedAt);
+  if (requestedAtMilliseconds > verificationMilliseconds) {
     throw new Error("Frozen PositionCrew LP request is future-dated at quote verification");
+  }
+  const postRequestEvidence = [
+    ...frozenRequest.sources.map((source) => ({
+      label: `source ${source.sourceId}`,
+      observedAt: source.observedAt,
+    })),
+    {
+      label: `market observation ${frozenRequest.marketState.sourceId}`,
+      observedAt: frozenRequest.marketState.observedAt,
+    },
+  ].filter((item) => Date.parse(item.observedAt) > requestedAtMilliseconds);
+  if (postRequestEvidence.length > 0) {
+    throw new Error(
+      `Frozen PositionCrew LP evidence was captured after request creation: ${postRequestEvidence.map((item) => item.label).join(", ")}`,
+    );
   }
   const evidence = validateEvidence({
     sources: frozenRequest.sources,

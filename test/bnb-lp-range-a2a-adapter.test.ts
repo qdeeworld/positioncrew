@@ -298,4 +298,16 @@ describe("BNB LP Range signed quote adapter", () => {
     };
     await expect(requestBnbLpRangeQuote(futureRequest, { fetchImpl, now })).rejects.toThrow("future-dated");
   });
+
+  it("rejects evidence captured after request creation", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+      new Response(JSON.stringify(responseFor(String(init?.body))), { status: 200 })) as typeof fetch;
+    const predatedRequest: LpRebalanceRequest = {
+      ...request,
+      requestedAt: "2026-09-03T14:33:30.000Z",
+    };
+    await expect(requestBnbLpRangeQuote(predatedRequest, { fetchImpl, now })).rejects.toThrow(
+      "captured after request creation",
+    );
+  });
 });
