@@ -367,6 +367,7 @@ export function validateBrainHealthFactorDelivery(
     { id: "ACCOUNT_BINDING", passed: delivery.position.account.toLowerCase() === job.account.toLowerCase(), detail: `Expected ${job.account}; received ${delivery.position.account}.` },
     { id: "CHAIN_BINDING", passed: delivery.position.chain === "eip155:56", detail: `Received ${delivery.position.chain}.` },
     { id: "PROTOCOL_BINDING", passed: protocolMatches, detail: `Expected ${job.protocol}; received ${delivery.position.protocol}.` },
+    { id: "POSITION_PRESENT", passed: delivery.position.has_position, detail: delivery.position.has_position ? "Provider reports a reconstructable lending position." : "Provider reports that the frozen account has no lending position." },
     { id: "CURRENT_HEALTH_FACTOR", passed: Number.isFinite(delivery.position.health_factor), detail: `Received ${delivery.position.health_factor}.` },
     { id: "LIQUIDATION_DISTANCE", passed: Number.isFinite(delivery.drawdown.tolerable_collateral_drop_pct), detail: `Received ${delivery.drawdown.tolerable_collateral_drop_pct}%.` },
     { id: "COLLATERAL_STRESS_TABLE", passed: monotonicStress, detail: monotonicStress ? `${stress.length} monotonic stress rows received.` : "Stress rows are not strictly increasing in drawdown with non-increasing health factor." },
