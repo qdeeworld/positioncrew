@@ -165,6 +165,12 @@ const storedPreflight = typeof resumeCheckpointDocument?.preflight === "object" 
 const storedSwap = typeof storedPreflight?.swap === "object" && storedPreflight.swap !== null
   ? storedPreflight.swap as Record<string, unknown>
   : null;
+const storedBalances = typeof storedPreflight?.balances === "object" && storedPreflight.balances !== null
+  ? storedPreflight.balances as Record<string, unknown>
+  : null;
+const usesPerCampaignBaseline = storedPreflight !== null &&
+  typeof storedPreflight.campaignStartingNativeBalanceWei === "string" &&
+  /^\d+$/.test(storedPreflight.campaignStartingNativeBalanceWei);
 const frozenSwapInput = storedSwap && typeof storedSwap.inputWei === "string" && /^\d+$/.test(storedSwap.inputWei)
   ? BigInt(storedSwap.inputWei)
   : DEFAULT_SWAP_INPUT;
@@ -198,10 +204,27 @@ const campaignStartingNativeBalance = resumeCheckpointDocument
     ? BigInt(storedPreflight.campaignStartingNativeBalanceWei)
     : LEGACY_CAMPAIGN_STARTING_NATIVE_BALANCE
   : nativeBalance;
+const campaignStartingWrappedBalance = resumeCheckpointDocument && usesPerCampaignBaseline &&
+  storedBalances && typeof storedBalances.wrappedNativeWei === "string" && /^\d+$/.test(storedBalances.wrappedNativeWei)
+  ? BigInt(storedBalances.wrappedNativeWei)
+  : wrappedBalance;
+const newlyWrappedBalance = wrappedBalance > campaignStartingWrappedBalance
+  ? wrappedBalance - campaignStartingWrappedBalance
+  : 0n;
+const storedCommittedSwapInput = typeof resumeCheckpointDocument?.committedSwapInputWei === "string" &&
+  /^\d+$/.test(resumeCheckpointDocument.committedSwapInputWei)
+  ? BigInt(resumeCheckpointDocument.committedSwapInputWei)
+  : 0n;
 let existingCommittedSwapInput = resumeDeliveryValidation
   ? 0n
-  : wrappedBalance < frozenSwapInput ? wrappedBalance : frozenSwapInput;
-let requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : frozenSwapInput - existingCommittedSwapInput;
+  : resumeCheckpointDocument && usesPerCampaignBaseline
+    ? (storedCommittedSwapInput > newlyWrappedBalance ? storedCommittedSwapInput : newlyWrappedBalance)
+    : resumeCheckpointDocument
+      ? wrappedBalance < frozenSwapInput ? wrappedBalance : frozenSwapInput
+      : 0n;
+if (existingCommittedSwapInput > frozenSwapInput) existingCommittedSwapInput = frozenSwapInput;
+const usableWrappedBalance = wrappedBalance < frozenSwapInput ? wrappedBalance : frozenSwapInput;
+let requiredWrapInput = resumeDeliveryValidation || tokenBalance >= PAYMENT_BUDGET ? 0n : frozenSwapInput - usableWrappedBalance;
 const nativeDecrease = resumeDeliveryValidation ? 0n : campaignStartingNativeBalance - nativeBalance;
 if (!resumeDeliveryValidation && nativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
 const gasAlreadySpent = resumeDeliveryValidation ? 0n : nativeDecrease - existingCommittedSwapInput;
@@ -227,6 +250,7 @@ const preflight = {
   },
   activation: { provider: payment.provider, kernel: payment.kernel, maximumBudgetAtomic: PAYMENT_BUDGET },
   campaignStartingNativeBalanceWei: campaignStartingNativeBalance,
+  campaignStartingWrappedBalanceWei: campaignStartingWrappedBalance,
   maximumTotalGasWei: frozenMaximumTotalGas,
   gasAlreadySpentWei: gasAlreadySpent,
   remainingGasCeilingWei: remainingGasCeiling,
@@ -283,6 +307,7 @@ await writeFile(outputPath, `${json({
   recordedAt: new Date().toISOString(),
   state: "BROADCAST_NOT_STARTED",
   preflight,
+  committedSwapInputWei: committedSwapInput,
   resumeJobId,
   boundary: "The output path is writable and the dry-run passed. No transaction represented by this checkpoint has been broadcast.",
 })}\n`, { mode: 0o600, flag: "wx" });
@@ -323,7 +348,12 @@ if (resumeJobId !== null && resumeCheckpointPath) {
     ) {
       throw new Error("Resume checkpoint swap transaction does not match the frozen acquisition");
     }
-    checkpointCommittedSwapInput = frozenSwapInput;
+    const checkpointRequiredWrap = storedSwap && typeof storedSwap.requiredAdditionalWrapWei === "string" && /^\d+$/.test(storedSwap.requiredAdditionalWrapWei)
+      ? BigInt(storedSwap.requiredAdditionalWrapWei)
+      : frozenSwapInput;
+    checkpointCommittedSwapInput = usesPerCampaignBaseline
+      ? (storedCommittedSwapInput > checkpointRequiredWrap ? storedCommittedSwapInput : checkpointRequiredWrap)
+      : frozenSwapInput;
     transactions.push({
       phase: "swap-wbnb-for-u",
       hash: swapHash,
@@ -419,9 +449,9 @@ if (!resumeDeliveryValidation) {
   }
   existingCommittedSwapInput = checkpointCommittedSwapInput > 0n
     ? checkpointCommittedSwapInput
-    : wrappedBalance < frozenSwapInput ? wrappedBalance : frozenSwapInput;
+    : existingCommittedSwapInput;
   committedSwapInput = existingCommittedSwapInput;
-  requiredWrapInput = tokenBalance >= acceptedPrice ? 0n : frozenSwapInput - existingCommittedSwapInput;
+  requiredWrapInput = tokenBalance >= acceptedPrice ? 0n : frozenSwapInput - usableWrappedBalance;
   const exactNativeDecrease = campaignStartingNativeBalance - nativeBalance;
   if (exactNativeDecrease < existingCommittedSwapInput) throw new Error("Campaign native-balance accounting is inconsistent");
   const exactGasAlreadySpent = exactNativeDecrease - existingCommittedSwapInput;
@@ -519,6 +549,7 @@ await writeFile(outputPath, `${json({
   recordedAt: new Date().toISOString(),
   state: "ESCROW_SETUP_PENDING",
   preflight,
+  committedSwapInputWei: committedSwapInput,
   commerceJobId,
   resumedExistingJob: resumeJobId !== null,
   originalOnchainDescription,
@@ -565,6 +596,7 @@ if (!resumeDeliveryValidation) {
     recordedAt: new Date().toISOString(),
     state: "ESCROW_FUNDING_PENDING",
     preflight,
+    committedSwapInputWei: committedSwapInput,
     commerceJobId,
     resumedExistingJob: resumeJobId !== null,
     originalOnchainDescription,
@@ -582,6 +614,7 @@ if (!resumeDeliveryValidation) {
     recordedAt: new Date().toISOString(),
     state: "FUNDED_NOTIFICATION_PENDING",
     preflight,
+    committedSwapInputWei: committedSwapInput,
     commerceJobId,
     resumedExistingJob: resumeJobId !== null,
     originalOnchainDescription,
@@ -653,6 +686,7 @@ const evidence = {
   schemaVersion: "positioncrew.live-match.external-activation.v1",
   recordedAt: new Date().toISOString(),
   preflight,
+  committedSwapInputWei: committedSwapInput,
   frozenJob,
   quote,
   capabilityProof,
