@@ -121,6 +121,9 @@ interface ApprovalEnvelope {
   gas: { maximumTotalGasWei: string; gasPriceCeilingWei: string; gasUnitsEnvelope: string };
   lifecycle: { requestDeadline: string; disputeWindowSeconds: string; onchainExpiredAt: string };
   declaredEstimatedCompletionSeconds: number;
+  negotiatedAt: number;
+  quoteTraceHash: string;
+  notificationMessageId: string;
   frozenRequestHash: string;
   jobDescriptionHash: string;
   quoteExpiresAt: number;
@@ -305,6 +308,7 @@ async function buildPreflight(): Promise<ActivationPreflight> {
   if (nativeBalance < requiredAdditionalWrap + maximumTotalGasWei) {
     blockers.push(`Native balance is short by ${(requiredAdditionalWrap + maximumTotalGasWei - nativeBalance).toString()} wei for the swap plus gas envelope`);
   }
+  const notificationMessageId = crypto.randomUUID();
   const approvalEnvelope: ApprovalEnvelope = {
     schemaVersion: "positioncrew.live-match.lp-activation-approval.v1",
     chainId: 56,
@@ -322,6 +326,9 @@ async function buildPreflight(): Promise<ActivationPreflight> {
     gas: { maximumTotalGasWei: maximumTotalGasWei.toString(), gasPriceCeilingWei: gasPriceCeiling.toString(), gasUnitsEnvelope: gasUnitsEnvelope.toString() },
     lifecycle: { requestDeadline: frozenRequest.deadline, disputeWindowSeconds: disputeWindow.toString(), onchainExpiredAt: onchainExpiredAt.toString() },
     declaredEstimatedCompletionSeconds: quote.declaredEstimatedCompletionSeconds,
+    negotiatedAt: quote.negotiatedAt,
+    quoteTraceHash: canonicalHash(quote),
+    notificationMessageId,
     frozenRequestHash: canonicalHash(frozenRequest),
     jobDescriptionHash: quote.jobDescriptionHash,
     quoteExpiresAt: quote.quoteExpiresAt,
@@ -342,7 +349,7 @@ async function buildPreflight(): Promise<ActivationPreflight> {
     gas: { currentGasPriceWei: gasPrice.toString(), gasPriceCeilingWei: gasPriceCeiling.toString(), createJobGasEstimate: createJobGasEstimate.toString(), gasUnitsEnvelope: gasUnitsEnvelope.toString(), maximumTotalGasWei: maximumTotalGasWei.toString() },
     approvalEnvelope,
     approvalHash: canonicalHash(approvalEnvelope),
-    notificationMessageId: crypto.randomUUID(),
+    notificationMessageId,
     recovery: { maximumLossAtomic: acceptedPrice.toString(), automaticActions: "NONE", separateApprovalRequired: ["cancel an OPEN job", "dispute an incompatible submission", "claim a refund", "settle a compatible delivery", "execute any LP action"] },
     boundary: "This preflight buys one external LP analysis delivery for at most the exact quoted amount. It performs no LP rebalance and authorizes no /execute call, settlement, dispute, refund, or protocol-capital action. An incompatible submission can still expose the full escrow amount under the optimistic policy unless reviewed before its dispute deadline.",
   };
@@ -362,6 +369,9 @@ async function readPreflight(path: string): Promise<ActivationPreflight> {
   if (preflight.quote.jobDescriptionHash !== preflight.approvalEnvelope.jobDescriptionHash) throw new Error("Stored SDK job description differs from the approved envelope");
   if (preflight.quote.quoteExpiresAt !== preflight.approvalEnvelope.quoteExpiresAt) throw new Error("Stored quote expiry differs from the approved envelope");
   if (preflight.quote.declaredEstimatedCompletionSeconds !== preflight.approvalEnvelope.declaredEstimatedCompletionSeconds) throw new Error("Stored provider delivery estimate differs from the approved envelope");
+  if (preflight.quote.negotiatedAt !== preflight.approvalEnvelope.negotiatedAt) throw new Error("Stored negotiation time differs from the approved envelope");
+  if (canonicalHash(preflight.quote) !== preflight.approvalEnvelope.quoteTraceHash) throw new Error("Stored quote trace differs from the approved envelope");
+  if (preflight.notificationMessageId !== preflight.approvalEnvelope.notificationMessageId) throw new Error("Stored notification identity differs from the approved envelope");
   if (preflight.approvalEnvelope.frozenRequestHash !== canonicalHash(preflight.frozenRequest)) throw new Error("Approval does not bind the frozen LP request");
   if (
     preflight.approvalEnvelope.lifecycle.requestDeadline !== preflight.frozenRequest.deadline ||
