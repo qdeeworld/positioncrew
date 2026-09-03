@@ -133,6 +133,17 @@ function unwrapBrainResult(document: unknown): unknown {
   return (document as { result: unknown }).result;
 }
 
+function notificationDeliverableUrl(notification: unknown, jobId: bigint): string | null {
+  if (typeof notification !== "object" || notification === null || !("result" in notification)) return null;
+  const result = (notification as { result: unknown }).result;
+  if (typeof result !== "object" || result === null) return null;
+  const record = result as Record<string, unknown>;
+  if (record.delivered !== true || String(record.job_id ?? "") !== jobId.toString()) return null;
+  return typeof record.deliverable_url === "string" && record.deliverable_url.length > 0
+    ? record.deliverable_url
+    : null;
+}
+
 async function loadPrivateKey(path: string): Promise<Hex> {
   const metadata = await stat(path);
   if ((metadata.mode & 0o077) !== 0) throw new Error("Operator key file must not be accessible by group or other users");
@@ -657,7 +668,12 @@ let deliverySubmittedAt: string | null = null;
 let deliverySubmittedWithinDeadline = false;
 if (finalStatus === JobStatus.SUBMITTED || finalStatus === JobStatus.COMPLETED) {
   try {
-    deliverableUrl = await client.getDeliverableUrl(commerceJobId);
+    try {
+      deliverableUrl = await client.getDeliverableUrl(commerceJobId);
+    } catch {
+      deliverableUrl = null;
+    }
+    deliverableUrl ??= notificationDeliverableUrl(notification ?? resumeCheckpointNotification, commerceJobId);
     if (!deliverableUrl) throw new Error("Submitted job has no deliverable URL");
     const fetched = await boundedDocument(deliverableUrl, new URL(quote.endpoint).origin);
     deliveryContentHash = `0x${createHash("sha256").update(fetched.raw).digest("hex")}`;
