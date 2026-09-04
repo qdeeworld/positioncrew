@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { mkdir, open, unlink } from "node:fs/promises";
+import { mkdir, open } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
@@ -28,6 +29,7 @@ import { atomicJson } from "./watch-termix-orders.js";
 
 const BASE_URL = "https://platform-backend.prod.termix.live";
 const MAX_JSON_BYTES = 1_048_576;
+const ORDER_LOCK_ENV = "POSITIONCREW_TERMIX_ORDER_LOCK";
 
 const UploadGrantSchema = z.object({
   uploadUrl: z.string().url(),
@@ -201,36 +203,38 @@ function statePaths(orderId: string): { root: string; checkpoint: string; artifa
   };
 }
 
-async function acquireOrderLock(root: string, path: string): Promise<() => Promise<void>> {
+async function rerunUnderOrderLock(root: string, path: string): Promise<boolean> {
+  const heldLock = process.env[ORDER_LOCK_ENV];
+  if (heldLock !== undefined) {
+    if (heldLock !== path) throw new Error("Fulfillment child process has an unexpected order lock");
+    return false;
+  }
   await mkdir(root, { recursive: true, mode: 0o700 });
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(
+  const scriptPath = process.argv[1];
+  if (!scriptPath) throw new Error("Cannot determine the fulfillment CLI entry point");
+  const exitCode = await new Promise<number>((resolveExit, reject) => {
+    const child = spawn("/usr/bin/flock", [
+      "--exclusive",
+      "--nonblock",
+      "--conflict-exit-code",
+      "75",
       path,
-      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-      0o600,
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new Error(`Another fulfillment command already holds the order lock: ${path}`);
-    }
-    throw error;
-  }
-  try {
-    await handle.writeFile(`${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`);
-    await handle.sync();
-  } catch (error) {
-    await handle.close();
-    await unlink(path).catch(() => undefined);
-    throw error;
-  }
-  await handle.close();
-  let released = false;
-  return async () => {
-    if (released) return;
-    released = true;
-    await unlink(path);
-  };
+      process.execPath,
+      scriptPath,
+      ...process.argv.slice(2),
+    ], {
+      stdio: "inherit",
+      env: { ...process.env, [ORDER_LOCK_ENV]: path },
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (signal) reject(new Error(`Fulfillment child process exited on signal ${signal}`));
+      else resolveExit(code ?? 1);
+    });
+  });
+  if (exitCode === 75) throw new Error(`Another fulfillment command already holds the order lock: ${path}`);
+  if (exitCode !== 0) process.exitCode = exitCode;
+  return true;
 }
 
 async function loadCheckpoint(path: string): Promise<TermixFulfillmentCheckpoint | null> {
@@ -321,6 +325,7 @@ async function fetchRuntimeMessage(
   const pageLimit = 100;
   const maxPages = 20;
   let since = locator.since;
+  const seenMessageIds = new Set<string>();
   for (let page = 0; page < maxPages; page += 1) {
     const items = runtimeInboxItems(await apiJson(
       baseUrl,
@@ -341,8 +346,17 @@ async function fetchRuntimeMessage(
     const sinceTime = Date.parse(since);
     let nextTime = sinceTime;
     let nextSince: string | null = null;
+    let unseenMessageCount = 0;
     for (const item of items) {
-      if (item === null || typeof item !== "object" || !("createdAt" in item)) continue;
+      if (item === null || typeof item !== "object") continue;
+      if ("messageId" in item) {
+        const messageId = (item as { messageId?: unknown }).messageId;
+        if (typeof messageId === "string" && !seenMessageIds.has(messageId)) {
+          seenMessageIds.add(messageId);
+          unseenMessageCount += 1;
+        }
+      }
+      if (!("createdAt" in item)) continue;
       const createdAt = (item as { createdAt?: unknown }).createdAt;
       if (typeof createdAt !== "string") continue;
       const createdAtTime = Date.parse(createdAt);
@@ -351,10 +365,14 @@ async function fetchRuntimeMessage(
         nextSince = createdAt;
       }
     }
-    if (!nextSince) {
+    if (unseenMessageCount === 0) {
+      throw new Error("TermiX runtime inbox pagination repeated a page without a stable-ID advance");
+    }
+    if (!nextSince || nextTime <= sinceTime) {
       throw new Error("TermiX runtime inbox pagination made no forward progress");
     }
-    since = nextSince;
+    const overlapTime = nextTime - 1;
+    since = overlapTime > sinceTime ? new Date(overlapTime).toISOString() : since;
   }
   throw new Error(`TermiX runtime inbox did not return buyer message ${locator.messageId} within ${maxPages} pages`);
 }
@@ -463,17 +481,16 @@ async function run(): Promise<void> {
     return;
   }
 
-  const releaseLock = await acquireOrderLock(paths.root, paths.lock);
-  try {
-    const baseUrl = checkedBaseUrl();
-    const token = await readSessionToken();
-    const order = await fetchOrder(baseUrl, token, args.orderId);
-    const previous = await loadCheckpoint(paths.checkpoint);
-    if (previous && (
-      previous.baseUrl !== baseUrl ||
-      previous.providerAgentId !== order.providerAgentId ||
-      previous.listingId !== order.listingId
-    )) throw new Error("Existing fulfillment checkpoint has a different immutable identity");
+  if (await rerunUnderOrderLock(paths.root, paths.lock)) return;
+  const baseUrl = checkedBaseUrl();
+  const token = await readSessionToken();
+  const order = await fetchOrder(baseUrl, token, args.orderId);
+  const previous = await loadCheckpoint(paths.checkpoint);
+  if (previous && (
+    previous.baseUrl !== baseUrl ||
+    previous.providerAgentId !== order.providerAgentId ||
+    previous.listingId !== order.listingId
+  )) throw new Error("Existing fulfillment checkpoint has a different immutable identity");
 
   if (args.command === "observe") {
     const checkpoint = await saveCheckpoint(
@@ -705,9 +722,6 @@ async function run(): Promise<void> {
     ...checkpoint,
     nextAction: "Explicit operator confirmation is required before broadcasting submitDelivery.",
   });
-  } finally {
-    await releaseLock();
-  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
