@@ -389,7 +389,7 @@ async function configuredPancakeLogs(
   let terminalBlockValue: unknown;
   try {
     logs = await rpcRequest(endpoint, call);
-    terminalBlockValue = await rpcRequestOnce(endpoint, {
+    terminalBlockValue = await rpcRequest(endpoint, {
       method: "eth_getBlockByNumber",
       params: [toHex(blockNumber), false],
     });
