@@ -145,12 +145,13 @@ export function firstSuccessfulRpcTransport<T>(
     let settled = false;
     const failures: string[] = [];
     let deterministicError: unknown;
-    let nextCandidate = 0;
+    const launched = new Set<number>();
     const timers: Array<ReturnType<typeof setTimeout>> = [];
     const clearTimers = () => timers.forEach((timer) => clearTimeout(timer));
-    const launchNext = () => {
-      if (settled || nextCandidate >= candidates.length) return;
-      const candidate = candidates[nextCandidate++]!;
+    const launchCandidate = (index: number) => {
+      if (settled || launched.has(index)) return;
+      launched.add(index);
+      const candidate = candidates[index]!;
       void Promise.resolve().then(() => operation(candidate)).then((value) => {
         if (settled) return;
         settled = true;
@@ -172,7 +173,8 @@ export function firstSuccessfulRpcTransport<T>(
           ));
         } else if (hedgeDelayMs > 0) {
           // A failed endpoint should not delay the next available route.
-          launchNext();
+          const next = candidates.findIndex((_candidate, candidateIndex) => !launched.has(candidateIndex));
+          if (next >= 0) launchCandidate(next);
         }
       });
     };
@@ -180,11 +182,11 @@ export function firstSuccessfulRpcTransport<T>(
       // Avoid sending every healthy read to all providers. Slow requests still
       // gain backup routes quickly, without waiting for the transport timeout.
       for (let index = 1; index < candidates.length; index += 1) {
-        timers.push(setTimeout(launchNext, index * hedgeDelayMs));
+        timers.push(setTimeout(() => launchCandidate(index), index * hedgeDelayMs));
       }
-      launchNext();
+      launchCandidate(0);
     } else {
-      for (let index = 0; index < candidates.length; index += 1) launchNext();
+      for (let index = 0; index < candidates.length; index += 1) launchCandidate(index);
     }
   });
 }
