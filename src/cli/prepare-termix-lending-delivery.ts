@@ -66,7 +66,7 @@ function parseArguments(argv: string[]): { command: Command; orderId: string; in
   if (command === "prepare-delivery" && (!intakePath || !isAbsolute(intakePath))) {
     throw new Error("prepare-delivery requires --intake with an absolute JSON path");
   }
-  return { command, orderId, intakePath };
+  return { command, orderId, ...(intakePath ? { intakePath } : {}) };
 }
 
 function checkedBaseUrl(): string {
@@ -142,7 +142,7 @@ async function apiJson(
       authorization: `Bearer ${token}`,
       ...(body === undefined ? {} : { "content-type": "application/json" }),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(15_000),
   });
   return decodeJson(response);

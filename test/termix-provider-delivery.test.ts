@@ -12,8 +12,8 @@ const ABI = parseAbi([
   "function acceptOrder(bytes32 orderId)",
   "function submitDelivery(bytes32 orderId, bytes32 deliveryHash)",
 ]);
-const ORDER_ID = `0x${"11".repeat(32)}`;
-const DELIVERY_HASH = `0x${"22".repeat(32)}`;
+const ORDER_ID = `0x${"11".repeat(32)}` as `0x${string}`;
+const DELIVERY_HASH = `0x${"22".repeat(32)}` as `0x${string}`;
 const ESCROW = "0x6A52ba4C84b348FaEAe13dDC7A97b4F6af23913C";
 const NOW = new Date("2026-09-04T12:00:00.000Z");
 
@@ -89,7 +89,7 @@ describe("TermiX provider delivery guard", () => {
       intent("acceptOrder", encodeFunctionData({
         abi: ABI,
         functionName: "acceptOrder",
-        args: [`0x${"33".repeat(32)}`],
+        args: [`0x${"33".repeat(32)}` as `0x${string}`],
       })),
       "acceptOrder",
       { now: NOW },
