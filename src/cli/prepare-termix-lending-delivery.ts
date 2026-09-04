@@ -425,12 +425,28 @@ async function verifyPublishedArtifact(
   if (declared && declared !== expected.sizeBytes) {
     throw new Error("Registered TermiX artifact has an unexpected Content-Length");
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength !== expected.sizeBytes) {
+  if (!response.body) throw new Error("Registered TermiX artifact response had no body");
+  const digest = createHash("sha256");
+  const reader = response.body.getReader();
+  let receivedBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      receivedBytes += value.byteLength;
+      if (receivedBytes > expected.sizeBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("Registered TermiX artifact exceeded the reviewed byte length");
+      }
+      digest.update(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (receivedBytes !== expected.sizeBytes) {
     throw new Error("Registered TermiX artifact byte length differs from the reviewed artifact");
   }
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  if (digest !== expected.sha256) {
+  if (digest.digest("hex") !== expected.sha256) {
     throw new Error("Registered TermiX artifact bytes differ from the reviewed artifact hash");
   }
 }
