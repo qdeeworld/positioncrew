@@ -127,8 +127,43 @@ describe("TermiX provider delivery guard", () => {
         reference: "conversation-1",
         exactInstruction: "Please check my lending account.",
         capturedAt: NOW.toISOString(),
+        declaredConstraints: {
+          account: "0x0000000000000000000000000000000000000001",
+          targetHealthFactor: "1.25",
+          stressPriceDropBps: 1000,
+          maxActionUsd: "250",
+          maxGasUsd: "0.10",
+          maxSlippageBps: 30,
+        },
       },
     })).toThrow("exact account");
+  });
+
+  it("rejects buyer evidence that changes a consequential rescue limit", () => {
+    expect(() => TermixLendingIntakeSchema.parse({
+      schemaVersion: "positioncrew.termix-lending-intake.v1",
+      orderId: "order-1",
+      account: "0x0000000000000000000000000000000000000001",
+      targetHealthFactor: "1.25",
+      stressPriceDropBps: 1000,
+      maxActionUsd: "250",
+      maxGasUsd: "0.10",
+      maxSlippageBps: 30,
+      buyerEvidence: {
+        kind: "TERMIX_BUYER_ATTACHMENT",
+        reference: "artifact-1",
+        exactInstruction: "Evaluate 0x0000000000000000000000000000000000000001 using the attached constraints.",
+        capturedAt: NOW.toISOString(),
+        declaredConstraints: {
+          account: "0x0000000000000000000000000000000000000001",
+          targetHealthFactor: "1.50",
+          stressPriceDropBps: 1000,
+          maxActionUsd: "250",
+          maxGasUsd: "0.10",
+          maxSlippageBps: 30,
+        },
+      },
+    })).toThrow("every exact rescue constraint");
   });
 
   it("detects checkpoint mutation", () => {

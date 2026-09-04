@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, open } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -12,6 +13,7 @@ import {
   termixDeliveryArtifactDescriptor,
   TermixContractsConfigSchema,
   TermixFulfillmentCheckpointSchema,
+  TermixLendingDeliveryArtifactSchema,
   TermixLendingIntakeSchema,
   TermixProviderOrderSchema,
   verifyTermixFulfillmentCheckpoint,
@@ -42,17 +44,23 @@ type Command = "observe" | "prepare-accept" | "prepare-delivery" | "status" | "i
 
 function usage(): never {
   throw new Error(
-    "Usage: prepare-termix-lending-delivery <observe|prepare-accept|prepare-delivery|status|intake-template> --order <id> [--intake <absolute-json-path>]",
+    "Usage: prepare-termix-lending-delivery <observe|prepare-accept|prepare-delivery|status|intake-template> --order <id> [--intake <absolute-json-path>] [--refresh-expired]",
   );
 }
 
-function parseArguments(argv: string[]): { command: Command; orderId: string; intakePath?: string } {
+function parseArguments(argv: string[]): { command: Command; orderId: string; intakePath?: string; refreshExpired: boolean } {
   const command = argv[0] as Command;
   if (!["observe", "prepare-accept", "prepare-delivery", "status", "intake-template"].includes(command)) usage();
   let orderId: string | undefined;
   let intakePath: string | undefined;
+  let refreshExpired = false;
   for (let index = 1; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (flag === "--refresh-expired") {
+      if (refreshExpired) usage();
+      refreshExpired = true;
+      continue;
+    }
     const value = argv[index + 1];
     if (!value || value.startsWith("--")) usage();
     if (flag === "--order" && !orderId) orderId = value;
@@ -66,7 +74,10 @@ function parseArguments(argv: string[]): { command: Command; orderId: string; in
   if (command === "prepare-delivery" && (!intakePath || !isAbsolute(intakePath))) {
     throw new Error("prepare-delivery requires --intake with an absolute JSON path");
   }
-  return { command, orderId, ...(intakePath ? { intakePath } : {}) };
+  if (refreshExpired && command !== "prepare-delivery") {
+    throw new Error("--refresh-expired is valid only with prepare-delivery");
+  }
+  return { command, orderId, ...(intakePath ? { intakePath } : {}), refreshExpired };
 }
 
 function checkedBaseUrl(): string {
@@ -280,6 +291,34 @@ async function uploadArtifact(grantInput: unknown, content: string, contentType:
   if (!response.ok) throw new Error(`TermiX artifact upload failed with HTTP ${response.status}`);
 }
 
+async function verifyPublishedArtifact(
+  urlValue: string,
+  expected: { sha256: string; sizeBytes: number },
+): Promise<void> {
+  const url = new URL(urlValue);
+  if (url.protocol !== "https:" || !url.hostname.endsWith(".amazonaws.com")) {
+    throw new Error("Registered TermiX artifact did not use an allowed HTTPS S3 host");
+  }
+  const response = await fetch(url, {
+    redirect: "error",
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Registered TermiX artifact read failed with HTTP ${response.status}`);
+  const declared = Number(response.headers.get("content-length") || "0");
+  if (declared && declared !== expected.sizeBytes) {
+    throw new Error("Registered TermiX artifact has an unexpected Content-Length");
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength !== expected.sizeBytes) {
+    throw new Error("Registered TermiX artifact byte length differs from the reviewed artifact");
+  }
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  if (digest !== expected.sha256) {
+    throw new Error("Registered TermiX artifact bytes differ from the reviewed artifact hash");
+  }
+}
+
 async function fetchOrder(baseUrl: string, token: string, orderId: string): Promise<TermixProviderOrder> {
   const expected = identity();
   return assertTermixProviderOrder(
@@ -314,6 +353,14 @@ async function run(): Promise<void> {
         reference: "replace-with-conversation-or-attachment-id",
         exactInstruction: "Replace this text with the buyer's exact instruction containing 0x0000000000000000000000000000000000000000.",
         capturedAt,
+        declaredConstraints: {
+          account: "0x0000000000000000000000000000000000000000",
+          targetHealthFactor: "1.25",
+          stressPriceDropBps: 1000,
+          maxActionUsd: "250",
+          maxGasUsd: "0.10",
+          maxSlippageBps: 30,
+        },
       },
     });
     return;
@@ -348,7 +395,22 @@ async function run(): Promise<void> {
   );
   if (args.command === "prepare-accept") {
     if (previous?.acceptIntent && previous.deliveryRound === (order.redoUsed ? 2 : 1)) {
-      print(previous);
+      const guarded = assertTermixProviderIntent(
+        order,
+        config,
+        previous.acceptIntent,
+        "acceptOrder",
+        { now: new Date() },
+      );
+      if (guarded.intentHash !== previous.acceptIntentHash) {
+        throw new Error("Cached acceptance intent hash differs from the protected checkpoint");
+      }
+      const draft = checkpointDraft(baseUrl, order, "ACCEPT_INTENT_PREPARED", previous, new Date());
+      const checkpoint = await saveCheckpoint(paths.checkpoint, draft);
+      print({
+        ...checkpoint,
+        nextAction: "Explicit operator confirmation is required before broadcasting acceptOrder.",
+      });
       return;
     }
     const prepared = await apiJson(
@@ -380,26 +442,61 @@ async function run(): Promise<void> {
   if (!order.deliveryDueAt || Date.parse(order.deliveryDueAt) - Date.now() < 120_000) {
     throw new Error("Order delivery deadline has less than 120 seconds remaining");
   }
-  const probe = await inspectVenusAccount(intake.account, {
-    targetHealthFactor: intake.targetHealthFactor,
-    stressPriceDropBps: intake.stressPriceDropBps,
-    maxActionUsd: intake.maxActionUsd,
-    maxGasUsd: intake.maxGasUsd,
-    maxSlippageBps: intake.maxSlippageBps,
-  });
-  const now = new Date();
-  if (Date.parse(order.deliveryDueAt) - now.getTime() < 120_000) {
-    throw new Error("Order deadline became unsafe while collecting the Venus observation");
+  const intakeHash = canonicalHash(intake);
+  const sameRound = previous?.deliveryRound === (order.redoUsed ? 2 : 1);
+  if (sameRound && previous.intakeHash && previous.intakeHash !== intakeHash) {
+    throw new Error("Current-round buyer constraints differ from the protected checkpoint");
   }
-  const artifact = createTermixLendingDeliveryArtifact(order, intake, probe, now);
-  const descriptor = termixDeliveryArtifactDescriptor(artifact);
+  const priorArtifact = sameRound ? previous?.artifact ?? null : null;
+  const existingExpired = priorArtifact
+    ? Date.parse(priorArtifact.resultExpiresAt) - Date.now() < 120_000
+    : false;
+  if (args.refreshExpired && (!priorArtifact || !existingExpired)) {
+    throw new Error("--refresh-expired requires an existing current-round artifact with less than 120 seconds remaining");
+  }
+
+  let artifact;
+  let descriptor;
+  if (priorArtifact && !args.refreshExpired) {
+    if (existingExpired) {
+      throw new Error("Prepared artifact is expired; rerun explicitly with --refresh-expired");
+    }
+    const artifactPath = resolve(priorArtifact.localPath);
+    if (!artifactPath.startsWith(`${paths.artifactRoot}/`)) {
+      throw new Error("Checkpoint artifact path escapes the protected artifact directory");
+    }
+    const storedContent = await readBoundedFile(artifactPath, true);
+    artifact = TermixLendingDeliveryArtifactSchema.parse(JSON.parse(storedContent));
+    descriptor = termixDeliveryArtifactDescriptor(artifact);
+    if (
+      storedContent !== descriptor.content ||
+      descriptor.sha256 !== priorArtifact.sha256 ||
+      descriptor.deliveryHash.toLowerCase() !== priorArtifact.deliveryHash.toLowerCase() ||
+      descriptor.sizeBytes !== priorArtifact.sizeBytes
+    ) throw new Error("Current-round artifact differs from the protected checkpoint");
+  } else {
+    const probe = await inspectVenusAccount(intake.account, {
+      targetHealthFactor: intake.targetHealthFactor,
+      stressPriceDropBps: intake.stressPriceDropBps,
+      maxActionUsd: intake.maxActionUsd,
+      maxGasUsd: intake.maxGasUsd,
+      maxSlippageBps: intake.maxSlippageBps,
+    });
+    const now = new Date();
+    if (Date.parse(order.deliveryDueAt) - now.getTime() < 120_000) {
+      throw new Error("Order deadline became unsafe while collecting the Venus observation");
+    }
+    artifact = createTermixLendingDeliveryArtifact(order, intake, probe, now);
+    descriptor = termixDeliveryArtifactDescriptor(artifact);
+  }
+  const now = new Date();
   await mkdir(paths.artifactRoot, { recursive: true, mode: 0o700 });
   const artifactPath = resolve(paths.artifactRoot, descriptor.fileName);
   await atomicJson(artifactPath, artifact);
 
   let draft = checkpointDraft(baseUrl, order, "DELIVERABLE_PREPARED", previous, now);
   draft.intake = intake;
-  draft.intakeHash = canonicalHash(intake);
+  draft.intakeHash = intakeHash;
   draft.artifact = {
     fileName: descriptor.fileName,
     contentType: descriptor.contentType,
@@ -407,11 +504,28 @@ async function run(): Promise<void> {
     sha256: descriptor.sha256,
     deliveryHash: descriptor.deliveryHash,
     localPath: artifactPath,
-    remoteArtifactId: null,
-    publicUrl: null,
+    remoteArtifactId: priorArtifact && !args.refreshExpired ? priorArtifact.remoteArtifactId : null,
+    publicUrl: priorArtifact && !args.refreshExpired ? priorArtifact.publicUrl : null,
     resultExpiresAt: artifact.result.expiresAt,
   };
   await saveCheckpoint(paths.checkpoint, draft);
+
+  if (previous?.submitIntent && previous.submitIntentHash && priorArtifact && !args.refreshExpired) {
+    const guarded = assertTermixProviderIntent(order, config, previous.submitIntent, "submitDelivery", {
+      expectedDeliveryHash: descriptor.deliveryHash,
+      now: new Date(),
+    });
+    if (guarded.intentHash !== previous.submitIntentHash) {
+      throw new Error("Cached delivery intent hash differs from the protected checkpoint");
+    }
+    draft = checkpointDraft(baseUrl, order, "SUBMIT_INTENT_PREPARED", await loadCheckpoint(paths.checkpoint), new Date());
+    const checkpoint = await saveCheckpoint(paths.checkpoint, draft);
+    print({
+      ...checkpoint,
+      nextAction: "Explicit operator confirmation is required before broadcasting submitDelivery.",
+    });
+    return;
+  }
 
   const artifactPathname = `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/artifacts`;
   const listed = remoteArtifacts(await apiJson(baseUrl, token, "GET", artifactPathname));
@@ -441,11 +555,14 @@ async function run(): Promise<void> {
   if (normalizeSha256(registered.sha256) !== descriptor.sha256) {
     throw new Error("Registered TermiX artifact hash differs from the local deliverable");
   }
+  const publicUrl = registered.publicUrl ?? registered.url;
+  if (!publicUrl) throw new Error("Registered TermiX artifact has no public verification URL");
+  await verifyPublishedArtifact(publicUrl, descriptor);
 
   draft = checkpointDraft(baseUrl, order, "ARTIFACT_REGISTERED", await loadCheckpoint(paths.checkpoint), new Date());
   if (!draft.artifact) throw new Error("Prepared artifact disappeared from the checkpoint");
   draft.artifact.remoteArtifactId = registered.id;
-  draft.artifact.publicUrl = registered.publicUrl ?? registered.url ?? null;
+  draft.artifact.publicUrl = publicUrl;
   await saveCheckpoint(paths.checkpoint, draft);
 
   const submitRaw = await apiJson(

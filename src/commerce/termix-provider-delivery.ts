@@ -78,6 +78,14 @@ export const TermixLendingIntakeSchema = z.object({
     reference: z.string().min(1).max(500),
     exactInstruction: z.string().min(1).max(4_000),
     capturedAt: TimestampSchema,
+    declaredConstraints: z.object({
+      account: AddressSchema,
+      targetHealthFactor: PositiveDecimalSchema,
+      stressPriceDropBps: z.number().int().min(0).max(5_000),
+      maxActionUsd: PositiveDecimalSchema,
+      maxGasUsd: UnsignedDecimalSchema,
+      maxSlippageBps: z.number().int().min(0).max(2_000),
+    }).strict(),
   }).strict(),
 }).strict().superRefine((value, context) => {
   if (Number(value.targetHealthFactor) <= 1) {
@@ -92,6 +100,29 @@ export const TermixLendingIntakeSchema = z.object({
       code: "custom",
       path: ["buyerEvidence", "exactInstruction"],
       message: "buyer evidence must contain the exact account being evaluated",
+    });
+  }
+  const declared = value.buyerEvidence.declaredConstraints;
+  const expected = {
+    account: value.account,
+    targetHealthFactor: value.targetHealthFactor,
+    stressPriceDropBps: value.stressPriceDropBps,
+    maxActionUsd: value.maxActionUsd,
+    maxGasUsd: value.maxGasUsd,
+    maxSlippageBps: value.maxSlippageBps,
+  };
+  if (
+    declared.account.toLowerCase() !== expected.account.toLowerCase() ||
+    declared.targetHealthFactor !== expected.targetHealthFactor ||
+    declared.stressPriceDropBps !== expected.stressPriceDropBps ||
+    declared.maxActionUsd !== expected.maxActionUsd ||
+    declared.maxGasUsd !== expected.maxGasUsd ||
+    declared.maxSlippageBps !== expected.maxSlippageBps
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["buyerEvidence", "declaredConstraints"],
+      message: "buyer evidence must bind every exact rescue constraint",
     });
   }
 });
