@@ -16,7 +16,7 @@ WorkingDirectory=/opt/crosswind
 Environment=HOME=/home/crosswind
 Environment=PATH=/home/crosswind/.local/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=/etc/crosswind/crosswind.env
-Environment=TERMIX_ORDER_OUTBOX_PATH=/var/cache/positioncrew-termix-order-outbox
+Environment=TERMIX_ORDER_OUTBOX_PATH=/var/spool/positioncrew-termix-order-outbox
 ExecStart=/usr/bin/node /home/crosswind/apps/positioncrew/dist/cli/notify-termix-orders.js
 TimeoutStartSec=30s
 Restart=on-failure
@@ -26,7 +26,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=full
-ReadWritePaths=/var/cache/positioncrew-termix-order-outbox
+ReadWritePaths=/var/spool/positioncrew-termix-order-outbox
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
