@@ -194,9 +194,10 @@ export async function auditionAiKiVenusYield(
     const externalRoute = parsed.assessment.routes.find((route) => route.market.toLowerCase() === parsed.assessment.recommendedMarket.toLowerCase());
     const externalRate = externalRoute ? Number(externalRoute.simpleAnnualRateBps) : null;
     const localRate = frozenRateLeader.grossApyBps;
-    const pinnedRateBinding = exactMarketSet && parsed.assessment.routes.every((route) =>
-      pinnedState.rates.get(route.market.toLowerCase()) === BigInt(route.supplyRatePerBlock)
+    const mismatchedRateMarkets = parsed.assessment.routes.filter((route) =>
+      pinnedState.rates.get(route.market.toLowerCase()) !== BigInt(route.supplyRatePerBlock)
     );
+    const pinnedRateBinding = exactMarketSet && mismatchedRateMarkets.length === 0;
     const pinnedApyByMarket = new Map([...pinnedState.rates].map(([market, rate]) =>
       [market, annualizedYieldBps(rate, pinnedState.secondsPerBlock)] as const
     ));
@@ -212,7 +213,7 @@ export async function auditionAiKiVenusYield(
       }
       return leader;
     });
-    const samePinnedRateLeader = pinnedRateBinding &&
+    const samePinnedRateLeader =
       pinnedRateLeader.vaultOrMarket.toLowerCase() === parsed.assessment.recommendedMarket.toLowerCase();
     const observedAtMs = Date.parse(parsed.assessment.observedAt);
     const observationFresh = Number.isFinite(observedAtMs) &&
@@ -245,7 +246,7 @@ export async function auditionAiKiVenusYield(
       parsed.evidence.persisted && normalizedContractPass;
     const checks: AiKiYieldComparison["checks"] = [
       { code: "EXACT_MARKET_SET", status: exactMarketSet ? "PASS" : "FAIL", detail: exactMarketSet ? "AiKi evaluated the same frozen Venus market set." : "AiKi returned a different market set." },
-      { code: "PINNED_RATE_BINDING", status: pinnedRateBinding ? "PASS" : "FAIL", detail: pinnedRateBinding ? "Every provider per-block rate matches an independent Venus read at the request's pinned BSC block." : "At least one provider rate does not match the independently pinned Venus state." },
+      { code: "PINNED_RATE_BINDING", status: pinnedRateBinding ? "PASS" : "FAIL", detail: pinnedRateBinding ? "Every provider per-block rate matches an independent Venus read at the request's pinned BSC block." : !exactMarketSet ? "The provider did not return the exact requested market set, so complete pinned-rate agreement cannot be established." : `${mismatchedRateMarkets.length} of ${parsed.assessment.routes.length} provider rates differ from the saved BSC block. Agreement on the best market does not establish agreement on this exact snapshot.` },
       { code: "PINNED_APY_BINDING", status: requestApyBinding ? "PASS" : "FAIL", detail: requestApyBinding ? "Every request APY matches the independently pinned rate annualized with measured BSC block time." : "At least one caller-supplied APY does not match independently annualized pinned state." },
       { code: "SAME_RATE_LEADER", status: sameRateLeader ? "PASS" : "FAIL", detail: sameRateLeader ? "Both providers identified the same highest-rate market." : "The providers identified different rate leaders." },
       { code: "PINNED_RATE_LEADER", status: samePinnedRateLeader ? "PASS" : "FAIL", detail: samePinnedRateLeader ? "The provider recommendation is also the highest-rate market in the independently pinned on-chain state." : "The provider recommendation is not the rate leader in the independently pinned on-chain state." },
