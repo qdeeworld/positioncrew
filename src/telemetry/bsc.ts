@@ -33,6 +33,7 @@ const LEGACY_MAINNET_RPC = "https://bsc-dataseed.bnbchain.org";
 const TESTNET_RPC = "https://bsc-testnet-dataseed.bnbchain.org";
 const RPC_TRANSPORT_ATTEMPTS = 2;
 const RPC_RETRY_DELAY_MS = 150;
+const RPC_HEDGE_DELAY_MS = 150;
 
 const PANCAKE_V3_FACTORY = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865" as Address;
 const PANCAKE_V3_POSITION_MANAGER = "0x46A15B0b27311cedF172AB29E4f4766fbE7F4364" as Address;
@@ -134,6 +135,7 @@ export class RpcTransportError extends Error {
 export function firstSuccessfulRpcTransport<T>(
   candidates: readonly string[],
   operation: (candidate: string) => Promise<T>,
+  hedgeDelayMs = 0,
 ): Promise<T> {
   if (candidates.length === 0) {
     return Promise.reject(new RpcTransportError("No BSC RPC providers are configured"));
@@ -143,10 +145,16 @@ export function firstSuccessfulRpcTransport<T>(
     let settled = false;
     const failures: string[] = [];
     let deterministicError: unknown;
-    for (const candidate of candidates) {
-      void operation(candidate).then((value) => {
+    let nextCandidate = 0;
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    const clearTimers = () => timers.forEach((timer) => clearTimeout(timer));
+    const launchNext = () => {
+      if (settled || nextCandidate >= candidates.length) return;
+      const candidate = candidates[nextCandidate++]!;
+      void Promise.resolve().then(() => operation(candidate)).then((value) => {
         if (settled) return;
         settled = true;
+        clearTimers();
         resolve(value);
       }).catch((error: unknown) => {
         if (settled) return;
@@ -158,11 +166,25 @@ export function firstSuccessfulRpcTransport<T>(
         pending -= 1;
         if (pending === 0) {
           settled = true;
+          clearTimers();
           reject(deterministicError ?? new RpcTransportError(
             `BSC RPC providers unavailable (${failures.join("; ")})`,
           ));
+        } else if (hedgeDelayMs > 0) {
+          // A failed endpoint should not delay the next available route.
+          launchNext();
         }
       });
+    };
+    if (hedgeDelayMs > 0) {
+      // Avoid sending every healthy read to all providers. Slow requests still
+      // gain backup routes quickly, without waiting for the transport timeout.
+      for (let index = 1; index < candidates.length; index += 1) {
+        timers.push(setTimeout(launchNext, index * hedgeDelayMs));
+      }
+      launchNext();
+    } else {
+      for (let index = 0; index < candidates.length; index += 1) launchNext();
     }
   });
 }
@@ -260,6 +282,7 @@ async function rpcBatch(rpcUrl: string, calls: readonly RpcCall[]): Promise<unkn
       return await firstSuccessfulRpcTransport(
         candidates,
         async (candidate) => rpcBatchOnce(candidate, calls),
+        RPC_HEDGE_DELAY_MS,
       );
     } catch (error) {
       if (!(error instanceof RpcTransportError)) throw error;
@@ -304,6 +327,7 @@ async function rpcRequest(rpcUrl: string, call: RpcCall): Promise<unknown> {
       return await firstSuccessfulRpcTransport(
         candidates,
         async (candidate) => rpcRequestOnce(candidate, call),
+        RPC_HEDGE_DELAY_MS,
       );
     } catch (error) {
       if (!(error instanceof RpcTransportError)) throw error;
