@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/etc/crosswind/crosswind.env
 ConditionPathExists=/opt/crosswind/package.json
-ConditionPathExists=/home/crosswind/apps/positioncrew/dist/cli/notify-termix-orders.js
+ConditionFileNotEmpty=/opt/positioncrew-termix-orders/notify-termix-orders.mjs
 StartLimitIntervalSec=0
 
 [Service]
@@ -17,7 +17,7 @@ Environment=HOME=/home/crosswind
 Environment=PATH=/home/crosswind/.local/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=/etc/crosswind/crosswind.env
 Environment=TERMIX_ORDER_OUTBOX_PATH=/var/spool/positioncrew-termix-order-outbox
-ExecStart=/usr/bin/node /home/crosswind/apps/positioncrew/dist/cli/notify-termix-orders.js
+ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/notify-termix-orders.mjs
 TimeoutStartSec=30s
 Restart=on-failure
 RestartSec=1min

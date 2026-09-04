@@ -164,8 +164,43 @@ describe("PositionCrew TermiX A2A runtime", () => {
     );
 
     expect(service).toContain("TimeoutStartSec=5h");
+    expect(service).toContain("WorkingDirectory=/opt/positioncrew-termix-orders");
+    expect(service).toContain(
+      "ConditionFileNotEmpty=/opt/positioncrew-termix-orders/watch-termix-orders.mjs",
+    );
+    expect(service).toContain(
+      "ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/watch-termix-orders.mjs",
+    );
+    expect(service).toContain("ProtectHome=yes");
+    expect(service).not.toContain("/home/crosswind");
     expect(timer).toContain("OnUnitInactiveSec=1min");
     expect(timer).not.toContain("OnUnitActiveSec=");
+  });
+
+  it("installs bundled TermiX order services into an accessible root-owned runtime", () => {
+    const packageJson = JSON.parse(readFileSync(
+      new URL("../package.json", import.meta.url),
+      "utf8",
+    )) as { scripts: Record<string, string> };
+    const alertService = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-order-alert.service", import.meta.url),
+      "utf8",
+    );
+    const installer = readFileSync(
+      new URL("../deploy/install-positioncrew-termix-orders.sh", import.meta.url),
+      "utf8",
+    );
+
+    expect(packageJson.scripts.build).toContain("npm run build:termix-orders");
+    expect(packageJson.scripts["build:termix-orders"]).toContain("--bundle");
+    expect(packageJson.scripts["build:termix-orders"]).toContain("src/cli/watch-termix-orders.ts");
+    expect(packageJson.scripts["build:termix-orders"]).toContain("src/cli/notify-termix-orders.ts");
+    expect(alertService).toContain(
+      "ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/notify-termix-orders.mjs",
+    );
+    expect(installer).toContain("/usr/bin/install -d -o root -g root -m 0755");
+    expect(installer).toContain("/usr/bin/install -T -o root -g root -m 0555");
+    expect(installer).toContain("/usr/bin/systemctl daemon-reload");
   });
 
   it.each([
