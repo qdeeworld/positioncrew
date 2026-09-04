@@ -36,6 +36,7 @@ import {
 } from "../src/cli/run-termix-runtime.js";
 import {
   actionableOrders,
+  atomicJson,
   unseenOrderTransitions,
 } from "../src/cli/watch-termix-orders.js";
 
@@ -94,6 +95,53 @@ describe("PositionCrew TermiX A2A runtime", () => {
       availableActions: { canSubmitDelivery: true },
     }]);
     expect(advanced.changed.map((order) => order.id)).toEqual(["order-1"]);
+  });
+
+  it("publishes an alert durably before the watcher may advance its cursor", async () => {
+    const operations: string[] = [];
+    let openCount = 0;
+    await atomicJson("/var/spool/positioncrew-termix-order-outbox/alert.json", { orderId: "order-1" }, 0o640, {
+      mkdir: async () => {
+        operations.push("mkdir");
+      },
+      open: async () => {
+        openCount += 1;
+        operations.push(openCount === 1 ? "open-temporary" : "open-directory");
+        return {
+          writeFile: openCount === 1
+            ? async () => {
+              operations.push("write-temporary");
+            }
+            : undefined,
+          sync: async () => {
+            operations.push(openCount === 1 ? "fsync-temporary" : "fsync-directory");
+          },
+          close: async () => {
+            operations.push(openCount === 1 ? "close-temporary" : "close-directory");
+          },
+        };
+      },
+      rename: async () => {
+        operations.push("rename");
+      },
+      unlink: async () => {
+        operations.push("unlink");
+      },
+    });
+    operations.push("persist-cursor");
+
+    expect(operations).toEqual([
+      "mkdir",
+      "open-temporary",
+      "write-temporary",
+      "fsync-temporary",
+      "close-temporary",
+      "rename",
+      "open-directory",
+      "fsync-directory",
+      "close-directory",
+      "persist-cursor",
+    ]);
   });
 
   it.each([
