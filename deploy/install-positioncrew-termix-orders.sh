@@ -11,6 +11,7 @@ artifact_root=/opt/positioncrew-termix-orders
 session_renewer_artifact_root=/opt/positioncrew-termix-session-renew
 observer_source=${release_root}/dist/runtime/watch-termix-orders.mjs
 notifier_source=${release_root}/dist/runtime/notify-termix-orders.mjs
+fulfillment_source=${release_root}/dist/runtime/prepare-termix-lending-delivery.mjs
 session_renewer_source=${release_root}/dist/termix-session-renew/renew-termix-session-token.mjs
 owner_key=/etc/positioncrew-runtime/credentials/dedicated-lending.owner-key
 session_token=/var/lib/positioncrew-termix-session-renew/termix-session.token
@@ -49,6 +50,7 @@ preflight_root_secret "${owner_key}" "TermiX owner key"
 for required_file in \
   "${observer_source}" \
   "${notifier_source}" \
+  "${fulfillment_source}" \
   "${session_renewer_source}" \
   "${release_root}/deploy/sysusers.d/positioncrew-termix-orders.conf" \
   "${release_root}/deploy/sysusers.d/positioncrew-termix-session-renew.conf" \
@@ -105,6 +107,9 @@ preflight_renewed_session_token
 /usr/bin/install -T -o root -g root -m 0555 \
   "${notifier_source}" \
   "${artifact_root}/notify-termix-orders.mjs"
+/usr/bin/install -T -o root -g root -m 0555 \
+  "${fulfillment_source}" \
+  "${artifact_root}/prepare-termix-lending-delivery.mjs"
 /usr/bin/install -T -o root -g root -m 0644 \
   "${release_root}/deploy/tmpfiles.d/positioncrew-termix-orders.conf" \
   /etc/tmpfiles.d/positioncrew-termix-orders.conf
