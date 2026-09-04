@@ -198,7 +198,18 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(alertService).toContain(
       "ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/notify-termix-orders.mjs",
     );
-    expect(installer).toContain("/usr/bin/install -d -o root -g root -m 0755");
+    expect(installer).toContain(
+      "/usr/bin/install -d -o root -g root -m 0755 \"${artifact_root}\"",
+    );
+    expect(installer).toContain(
+      "/usr/bin/install -d -o root -g root -m 0755 /etc/sysusers.d",
+    );
+    expect(installer).toContain(
+      "/usr/bin/install -d -o root -g root -m 0755 /etc/tmpfiles.d",
+    );
+    expect(installer).toContain(
+      "/usr/bin/install -d -o root -g root -m 0755 /etc/systemd/system",
+    );
     expect(installer).toContain("/usr/bin/install -T -o root -g root -m 0555");
     expect(installer).toContain("/usr/bin/systemctl daemon-reload");
     expect(installer).toContain(
