@@ -34,6 +34,7 @@
     "capture:listing-media": "node scripts/capture-listing-media.mjs",
     "runtime:termix": "tsx src/cli/run-termix-runtime.ts",
     "watch:termix-orders": "tsx src/cli/watch-termix-orders.ts",
+    "prepare:termix-lending-delivery": "tsx src/cli/prepare-termix-lending-delivery.ts",
     "notify:termix-orders": "tsx src/cli/notify-termix-orders.ts",
     "preflight:termix": "tsx src/cli/termix-onboarding-preflight.ts",
     "evidence:venus-testnet-supply": "tsx src/cli/venus-testnet-native-supply.ts",
@@ -56,7 +57,7 @@
     "provider:verify-result": "tsx src/cli/provider-conformance.ts verify-result",
     "provider:verify-bundle": "tsx src/cli/provider-conformance.ts verify-bundle",
     "build:termix-renewer": "esbuild src/cli/renew-termix-runtime-token.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/runtime/renew-termix-runtime-token.mjs",
-    "build:termix-orders": "esbuild src/cli/watch-termix-orders.ts src/cli/notify-termix-orders.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist/runtime --out-extension:.js=.mjs",
+    "build:termix-orders": "esbuild src/cli/watch-termix-orders.ts src/cli/notify-termix-orders.ts src/cli/prepare-termix-lending-delivery.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist/runtime --out-extension:.js=.mjs",
     "build:termix-session-renewer": "esbuild src/cli/renew-termix-session-token.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/termix-session-renew/renew-termix-session-token.mjs"
   },
   "engines": {

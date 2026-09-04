@@ -223,6 +223,12 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(packageJson.scripts["build:termix-orders"]).toContain("--bundle");
     expect(packageJson.scripts["build:termix-orders"]).toContain("src/cli/watch-termix-orders.ts");
     expect(packageJson.scripts["build:termix-orders"]).toContain("src/cli/notify-termix-orders.ts");
+    expect(packageJson.scripts["build:termix-orders"]).toContain(
+      "src/cli/prepare-termix-lending-delivery.ts",
+    );
+    expect(installer).toContain(
+      '"${fulfillment_source}" \\\n  "${artifact_root}/prepare-termix-lending-delivery.mjs"',
+    );
     expect(packageJson.scripts["build:termix-session-renewer"]).toContain(
       "--outfile=dist/termix-session-renew/renew-termix-session-token.mjs",
     );
