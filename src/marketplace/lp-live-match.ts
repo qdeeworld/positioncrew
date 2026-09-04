@@ -142,11 +142,28 @@ export async function createLpLiveMatchAudition(
   const externalStarted = performance.now();
   let externalProviderComparison: Record<string, unknown>;
   try {
-    const assessment = await auditionHeyAnonV3LpJob(request, positionTokenId, {
-      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-      ...(options.rpcUrl ? { rpcUrl: options.rpcUrl } : {}),
-      now,
-    });
+    const controller = new AbortController();
+    const fetchImpl = options.fetchImpl ?? fetch;
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+    let assessment: Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>;
+    try {
+      assessment = await boundedExternalInvocation(
+        auditionHeyAnonV3LpJob(request, positionTokenId, {
+          fetchImpl: (resource, init) => fetchImpl(resource, {
+            ...init,
+            signal: init?.signal
+              ? AbortSignal.any([init.signal, controller.signal])
+              : controller.signal,
+          }),
+          ...(options.rpcUrl ? { rpcUrl: options.rpcUrl } : {}),
+          now,
+        }),
+        8_000,
+      );
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+    }
     const selectable = assessment.eligibleForLpRebalance &&
       assessment.checks.every((check) => check.status === "PASS");
     candidates.push({
