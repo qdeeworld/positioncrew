@@ -52,6 +52,7 @@ import {
   FreshMarketplaceHireRequestSchema,
   HistoricalFixtureEvidenceSchema,
   LendingProviderAuditionHireRequestSchema,
+  LpLiveMatchRunRequestSchema,
   canonicalJson,
   sha256Commitment,
   type FreshMarketplaceChain,
@@ -90,9 +91,12 @@ import {
   isNoEligibleLendingProviderError,
 } from "../src/marketplace/lending-provider-audition.js";
 import {
-  HEYANON_V3_POOLS,
-} from "../src/marketplace/heyanon-v3pools-adapter.js";
-import { auditionHeyAnonV3LpJob } from "../src/marketplace/heyanon-v3pools-lp-job-adapter.js";
+  LpLiveMatchSelectionError,
+  createLpLiveMatchAudition,
+  executeLpLiveMatchProvider,
+  selectLpLiveMatchProvider,
+} from "../src/marketplace/lp-live-match.js";
+import type { LpLiveMatchProviderSelection } from "../src/marketplace/lp-live-match-schema.js";
 import {
   AIKI_VENUS_GUARDIAN,
   auditionAiKiVenusGuardian,
@@ -107,7 +111,6 @@ import {
 } from "../src/marketplace/aiki-venus-yield-adapter.js";
 import { createBoundedGridDeliverable } from "../src/providers/bounded-grid.js";
 import { createLendingRescueDeliverable } from "../src/providers/lending-rescue.js";
-import { createLpRebalanceDeliverable } from "../src/providers/lp-rebalance.js";
 import { createYieldOptimizationDeliverable } from "../src/providers/yield-optimization.js";
 import {
   parseProductionTrackRecordSnapshot,
@@ -538,6 +541,7 @@ async function createCurrentGridHireForShadowRun(
         chain.job.jobId,
         claimed.claimToken,
         chain.hire,
+        null,
         claimed.chain.job.startedAt,
         started,
       );
@@ -1397,92 +1401,17 @@ async function createFreshMarketplaceHire(
       parsed.benchmarkSlug === "lending-rescue"
       ? await createLendingProviderAudition(parsed.request, parsed.observation, new Date(createdAt))
       : undefined;
-  const externalProviderComparison =
+  const lpLiveMatch =
     parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
       parsed.benchmarkSlug === "lp-rebalance"
-      ? await (async () => {
-          const positionTokenId = /^pancake-position-([1-9]\d*)-/.exec(
-            parsed.request.requestId,
-          )?.[1];
-          if (!positionTokenId) return undefined;
-          const firstParty = createLpRebalanceDeliverable(parsed.request, new Date(createdAt));
-          try {
-            const comparison = await auditionHeyAnonV3LpJob(
-              parsed.request,
-              positionTokenId,
-              { now: new Date(createdAt) },
-            );
-            return {
-              schemaVersion: "positioncrew.external-lp-comparison-summary.v1" as const,
-              provider: {
-                name: HEYANON_V3_POOLS.name,
-                erc8004TokenId: String(HEYANON_V3_POOLS.agentTokenId),
-                endpoint: HEYANON_V3_POOLS.endpoint,
-              },
-              evaluatedAt: createdAt,
-              positionTokenId,
-              outcome: comparison.eligibleForLpRebalance
-                ? "SEMANTICALLY_COMPARABLE" as const
-                : "INCOMPATIBLE" as const,
-              attributableResult: comparison.attributableResult,
-              completedSamePositionAssessment: true,
-              persistedByProvider: false,
-              externalDecision: comparison.normalizedDeliverable.decision === "HOLD"
-                ? "HOLD" as const
-                : "REBALANCE" as const,
-              firstPartyDecision: firstParty.decision,
-              exactRequestAccepted: false as const,
-              eligibleForPositionAssessmentActivation: comparison.eligibleForLpRebalance,
-              eligibleForLiveMatch: comparison.eligibleForLpRebalance,
-              adapterNormalized: true,
-              externalRange: {
-                lowerTick: comparison.recommendation.lowerTick,
-                upperTick: comparison.recommendation.upperTick,
-                widthTicks: comparison.recommendation.widthTicks,
-              },
-              normalizedDeliverable: comparison.normalizedDeliverable,
-              selection: {
-                selectedProvider: "POSITIONCREW" as const,
-                externalEligible: comparison.eligibleForLpRebalance,
-                basis: comparison.eligibleForLpRebalance
-                  ? "The first-party provider won the native exact-contract tiebreak; the external range remains attributable and comparable."
-                  : "The external range failed at least one buyer or compatibility constraint.",
-              },
-              checks: comparison.checks,
-              boundary: comparison.claimBoundary.join(" "),
-            };
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "External provider unavailable";
-            return {
-              schemaVersion: "positioncrew.external-lp-comparison-summary.v1" as const,
-              provider: {
-                name: HEYANON_V3_POOLS.name,
-                erc8004TokenId: String(HEYANON_V3_POOLS.agentTokenId),
-                endpoint: HEYANON_V3_POOLS.endpoint,
-              },
-              evaluatedAt: createdAt,
-              positionTokenId,
-              outcome: "UNAVAILABLE" as const,
-              attributableResult: false,
-              completedSamePositionAssessment: false,
-              persistedByProvider: false,
-              externalDecision: "UNKNOWN" as const,
-              firstPartyDecision: firstParty.decision,
-              exactRequestAccepted: false as const,
-              eligibleForPositionAssessmentActivation: false,
-              eligibleForLiveMatch: false,
-              adapterNormalized: false,
-              selection: {
-                selectedProvider: "POSITIONCREW" as const,
-                externalEligible: false,
-                basis: "The external provider was unavailable; the first-party hire remained available.",
-              },
-              checks: [{ code: "REMOTE_PROVIDER_AVAILABLE", status: "FAIL" as const, detail: message }],
-              boundary: "The external outage did not block the first-party LP hire. No external result or ranking is claimed.",
-            };
-          }
-        })()
+      ? await createLpLiveMatchAudition(
+          parsed.request,
+          parsed.observation,
+          requestHash,
+          new Date(createdAt),
+        )
       : undefined;
+  const externalProviderComparison = lpLiveMatch?.externalProviderComparison;
   const externalLendingComparison =
     parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2" &&
       parsed.benchmarkSlug === "lending-rescue"
@@ -1630,6 +1559,9 @@ async function createFreshMarketplaceHire(
         ...(externalProviderComparison
           ? { externalProviderComparison }
           : {}),
+        ...(lpLiveMatch
+          ? { lpLiveMatchAudition: lpLiveMatch.audition }
+          : {}),
         ...(externalGridComparison
           ? { externalGridComparison }
           : {}),
@@ -1693,13 +1625,30 @@ async function finishFreshMarketplaceJob(
   jobId: string,
   claimToken: string,
   hire: FreshMarketplaceChain["hire"],
+  providerSelection: LpLiveMatchProviderSelection | null,
   executionStartedAt: string,
   startedAtPerformance: number,
 ): Promise<void> {
   const store = freshStore(env);
   try {
     const task = FRESH_MARKETPLACE_TASKS[hire.benchmarkSlug];
-    const response = hire.evidenceMode === "CURRENT_BLOCK_PINNED"
+    const persistedEvidence = hire.evidence;
+    const lpLiveMatchAudition = persistedEvidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
+      ? persistedEvidence.lpLiveMatchAudition
+      : undefined;
+    const response = lpLiveMatchAudition
+      ? await executeLpLiveMatchProvider({
+          hireId,
+          jobId,
+          requestHash: hire.requestHash,
+          evidenceHash: hire.evidenceHash!,
+          source: lpLiveMatchAudition.source,
+          request: hire.request as never,
+          audition: lpLiveMatchAudition,
+          selection: providerSelection!,
+          now: new Date(executionStartedAt),
+        })
+      : hire.evidenceMode === "CURRENT_BLOCK_PINNED"
       ? await runCurrentBlockPinnedProviderRequest(hire.request, new Date(executionStartedAt))
       : await runFrozenFixture(task.service);
     if (
@@ -1716,7 +1665,6 @@ async function finishFreshMarketplaceJob(
     ) {
       throw new Error("Current provider response did not match the persisted request commitment");
     }
-    const persistedEvidence = hire.evidence;
     const providerAudition = persistedEvidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
       ? persistedEvidence.providerAudition
       : undefined;
@@ -1725,6 +1673,14 @@ async function finishFreshMarketplaceJob(
       await sha256Commitment(response.result.request) !== providerAudition.requestHash
     )) {
       throw new Error("Provider result did not match the persisted audition selection");
+    }
+    if (lpLiveMatchAudition && (
+      !providerSelection ||
+      !response.liveMatchExecution ||
+      response.liveMatchExecution.selection.selectedProvider !== providerSelection.selectedProvider ||
+      response.result.job.providerId !== providerSelection.providerId
+    )) {
+      throw new Error("LP provider result did not match the persisted explicit selection");
     }
     const deliverable = response.result.job.deliverable;
     const responseJson = canonicalJson(response);
@@ -1762,8 +1718,58 @@ async function runFreshMarketplaceHire(
   if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
   const startedAtPerformance = performance.now();
   const store = freshStore(env);
-  const claimed = await store.claimJob(hireId, new Date().toISOString());
+  const existing = await store.getHire(hireId);
+  if (!existing) return apiError(404, "HIRE_NOT_FOUND", ["Unknown persisted hire ID."]);
+  const evidence = existing.hire.evidence;
+  const lpLiveMatchAudition = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
+    ? evidence.lpLiveMatchAudition
+    : undefined;
+  let providerSelection = existing.job.providerSelection;
+  let providerSelectionHash = existing.job.providerSelectionHash;
+  if (lpLiveMatchAudition) {
+    const selectionRequest = LpLiveMatchRunRequestSchema.parse(await boundedJson(request));
+    if (providerSelection) {
+      if (
+        providerSelection.selectedProvider !== selectionRequest.selectedProvider ||
+        providerSelection.auditionHash !== selectionRequest.auditionHash
+      ) {
+        return apiError(409, "LP_PROVIDER_SELECTION_CONFLICT", [
+          "This job is already bound to a different immutable provider selection.",
+        ]);
+      }
+    } else {
+      try {
+        providerSelection = selectLpLiveMatchProvider(
+          lpLiveMatchAudition,
+          selectionRequest,
+          existing.hire.evidenceHash!,
+          new Date(),
+        );
+      } catch (error) {
+        if (error instanceof LpLiveMatchSelectionError) {
+          return apiError(409, error.code, [error.message]);
+        }
+        throw error;
+      }
+      providerSelectionHash = await sha256Commitment(providerSelection);
+    }
+  }
+  const claimed = await store.claimJob(
+    hireId,
+    new Date().toISOString(),
+    providerSelection && providerSelectionHash
+      ? { json: canonicalJson(providerSelection), hash: providerSelectionHash }
+      : undefined,
+  );
   if (!claimed.chain) return apiError(404, "HIRE_NOT_FOUND", ["Unknown persisted hire ID."]);
+  if (
+    providerSelection &&
+    claimed.chain.job.providerSelection?.selectedProvider !== providerSelection.selectedProvider
+  ) {
+    return apiError(409, "LP_PROVIDER_SELECTION_CONFLICT", [
+      "A concurrent request already selected a different provider for this job.",
+    ]);
+  }
   if (!claimed.claimed) return json(claimed.chain, claimed.chain.job.state === "RUNNING" ? 202 : 200);
   if (!claimed.claimToken) throw new Error("Claimed fresh marketplace job did not return a claim token");
   if (!claimed.chain.job.startedAt || claimed.chain.job.startedAt !== claimed.claimToken) {
@@ -1775,6 +1781,7 @@ async function runFreshMarketplaceHire(
     claimed.chain.job.jobId,
     claimed.claimToken,
     claimed.chain.hire,
+    claimed.chain.job.providerSelection,
     claimed.chain.job.startedAt,
     startedAtPerformance,
   ));
@@ -2416,7 +2423,7 @@ async function api(
       /^\/api\/benchmark-hires\/([0-9a-f-]{36})\/jobs$/,
     );
     if (freshHireJobRoute) {
-      return runFreshMarketplaceHire(request, env, context, freshHireJobRoute[1]!);
+      return await runFreshMarketplaceHire(request, env, context, freshHireJobRoute[1]!);
     }
 
     const freshHireRoute = url.pathname.match(/^\/api\/benchmark-hires\/([0-9a-f-]{36})$/);

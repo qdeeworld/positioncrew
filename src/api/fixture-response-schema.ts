@@ -3,6 +3,7 @@ import { JobRecordSchema } from "../commerce/job-record-schema.js";
 import { PositionCrewDeliverableSchema, PositionCrewRequestSchema } from "../contracts/index.js";
 import { HashSchema, TimestampSchema } from "../contracts/common.js";
 import { EvaluationReceiptSchema } from "../commerce/types.js";
+import { LpLiveMatchExecutionSchema } from "../marketplace/lp-live-match-schema.js";
 
 const BenchmarkLockSchema = z
   .object({
@@ -42,5 +43,6 @@ export const FixtureJobResponseSchema = z
         evaluation: EvaluationReceiptSchema,
       })
       .strict(),
+    liveMatchExecution: LpLiveMatchExecutionSchema.optional(),
   })
   .strict();

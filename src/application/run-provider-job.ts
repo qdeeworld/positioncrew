@@ -1,5 +1,6 @@
-import type { CommerceAdapter, JobRecord } from "../commerce/types.js";
+import type { CommerceAdapter, EvaluationReceipt, JobRecord } from "../commerce/types.js";
 import {
+  PositionCrewDeliverableSchema,
   PositionCrewRequestSchema,
   type PositionCrewDeliverable,
   type PositionCrewRequest,
@@ -22,16 +23,33 @@ export interface ProviderJobResult {
   evaluation: ReturnType<typeof evaluateProviderConformance>;
 }
 
+export type ProviderJobEvaluator = (
+  request: PositionCrewRequest,
+  deliverable: PositionCrewDeliverable,
+  evaluatorId: string,
+  now: Date,
+  requestHashOverride?: string,
+) => EvaluationReceipt;
+
+export interface RunProviderJobOptions {
+  persistExpiredRefusal?: boolean;
+  requestHash?: string;
+  providerId?: string;
+  evaluatorId?: string;
+  deliverable?: PositionCrewDeliverable;
+  evaluate?: ProviderJobEvaluator;
+}
+
 export async function runProviderJob(
   adapter: CommerceAdapter,
   requestInput: PositionCrewRequest,
   now: Date,
-  options: { persistExpiredRefusal?: boolean; requestHash?: string } = {},
+  options: RunProviderJobOptions = {},
 ): Promise<ProviderJobResult> {
   const request = PositionCrewRequestSchema.parse(requestInput);
   const requestHash = options.requestHash ?? canonicalHash(request);
-  const providerId = PROVIDER_IDS[request.service];
-  const evaluatorId = `positioncrew:evaluator:${request.service.toLowerCase()}:v1`;
+  const providerId = options.providerId ?? PROVIDER_IDS[request.service];
+  const evaluatorId = options.evaluatorId ?? `positioncrew:evaluator:${request.service.toLowerCase()}:v1`;
   const persistExpiredRefusal =
     options.persistExpiredRefusal === true && now.getTime() >= Date.parse(request.deadline);
   const commerceDeadline = persistExpiredRefusal
@@ -60,7 +78,9 @@ export async function runProviderJob(
   job = await adapter.assignProvider(job.jobId, providerId);
   job = await adapter.assignEvaluator(job.jobId, evaluatorId);
 
-  const deliverable = executeProvider(request, now);
+  const deliverable = PositionCrewDeliverableSchema.parse(
+    options.deliverable ?? executeProvider(request, now),
+  );
   if (persistExpiredRefusal && deliverable.status !== "REFUSED_EXPIRED") {
     throw new Error("An expired request may persist only an explicit expired refusal");
   }
@@ -73,7 +93,7 @@ export async function runProviderJob(
     uri: jsonDataUri(deliverable),
     createdAt: now.toISOString(),
   });
-  const evaluation = evaluateProviderConformance(
+  const evaluation = (options.evaluate ?? evaluateProviderConformance)(
     request,
     deliverable,
     evaluatorId,

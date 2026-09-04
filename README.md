@@ -35,7 +35,7 @@ Three separate historical tasks remain immutable: `lending-rescue`, `lp-rebalanc
 The persisted lifecycle uses these routes:
 
 - `POST /api/benchmark-hires` creates the hire and its `CREATED` job before provider computation;
-- `POST /api/benchmark-hires/{hireId}/jobs` claims and starts that persisted job;
+- `POST /api/benchmark-hires/{hireId}/jobs` claims and starts that persisted job; new current LP jobs require the explicit provider selection below;
 - `GET /api/benchmark-hires/{hireId}` polls the persisted hire, job, and optional receipt chain;
 - `GET /api/benchmark-receipts/{receiptId}` reloads the completed receipt and its exact response commitments.
 
@@ -197,3 +197,21 @@ Offline role-specific handoff tools reduce procedural errors without weakening t
 The optional Venus native-supply receipt proves one bounded `0.0001 tBNB` action by the disclosed operator on BSC Testnet. Its preflight observed zero native BNB balance and pending nonce on BSC mainnet at one timestamp but did not inventory tokens or NFTs. It proves no external buyer, revenue, autonomous custody, strategy return, repeated track record, marketplace demand, or financial performance, and it is not a performance claim.
 
 The four-category current public-hire outer lifecycle persists the request, provider and block-evidence commitments, job state, result, evaluation, and receipt in D1. The provider computation within that lifecycle remains an in-memory conformance rail and does not submit a buyer's wallet transaction. Its no-wallet provider trial collects no token; the displayed `5 TEST_USDC` is a listed testnet price, not trial revenue. The durable hire path likewise costs `$0.00`, requires no wallet, creates no payment or settlement, signs nothing, and broadcasts no protocol transaction. A separate optional Altana sandbox uses founder funds to supply exactly `0.0001 tBNB` on Venus BSC testnet under a short-lived key restricted to `mint()` and a `0.0002 tBNB` per-minute native-spend ceiling. Its receipt proves the scoped authority and positive vToken balance change; it does not execute the preceding Lending result, rescue a mainnet position, use customer funds, or prove revenue or investment performance. The Venus and PancakeSwap builders read block-pinned public state, but their embedded requests and provider outputs remain unsigned and must be revalidated before execution. Venus APYs are variable base rates derived from per-block rates and measured block time; they exclude incentives and do not remove stablecoin depeg risk. Pancake active liquidity is a current virtual-liquidity estimate from `slot0` and the pool's active `liquidity`, not a fill guarantee across future ticks; the grid's cycle count is an explicit assumption. LP collectible fees come from a read-only `collect` simulation, and the displayed 24-hour volume and fee values are extrapolated run rates from an exact recent swap window rather than guaranteed future activity. Other interactive jobs validate caller-supplied scenario observations against the current request clock. Locked jobs reproduce the three immutable historical fixtures and public receipts but are not presented as current instructions; yield optimisation has no historical task. Separately, the public ERC-8183 ledger proves seven operator-controlled BSC Testnet lifecycles, including six funded completions; it does not prove external demand or revenue. The scheduled operating record measures production verification, not demand, financial performance, mainnet execution, or Agent Advantage. The production AACP endpoint verifies current protocol deployment and PositionCrew onboarding state; it does not prove a minted production Agent NFT, published listing, paid order, settlement, revenue, reputation, or external demand. No provisional ABI, undocumented write route, external-provider track record, or incomplete blind benchmark is represented as production evidence.
+
+### Choosing the provider for a current LP assessment
+
+Current LP hiring pauses after comparing PositionCrew and HeyAnon against the saved request. The buyer chooses an eligible provider in the public workspace. The selected provider runs afresh; a changed or incompatible external response, outage, or expiry produces a persisted refusal without selecting another provider. Compatibility is specific to the request and does not imply superior performance.
+
+Send the following body to `POST /api/benchmark-hires/{hireId}/jobs` for a new current LP hire:
+
+```json
+{
+  "schemaVersion": "positioncrew.lp-live-match-selection-request.v1",
+  "selectedProvider": "HEYANON",
+  "auditionHash": "<hire.evidenceHash from the create response>"
+}
+```
+
+`POSITIONCREW` is the other supported choice. Only candidates marked `COMPATIBLE` and `selectable: true` in `hire.evidence.lpLiveMatchAudition` can be chosen. Repeating the same choice resumes the existing job; changing an accepted choice returns HTTP 409. The job preserves `providerSelection` and its commitment, and the completed response includes `liveMatchExecution` with invocation and result provenance. Existing historical LP jobs and other categories retain their prior run contract.
+
+These are free assessments with no wallet, payment, settlement, or liquidity transaction. Apply migration `0006_lp_live_match_selection.sql` (or the equivalent managed Sites migration `0005_lp_live_match_selection.sql`) before activating this release. Compatible external delivery in tests is not a claim that every live position admits HeyAnon.

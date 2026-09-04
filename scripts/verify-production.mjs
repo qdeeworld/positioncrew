@@ -896,7 +896,9 @@ async function verifyCurrentPersistedHire(definition, probe) {
   await postCurrentHireJson(
     `${definition.service}:current-hire-run`,
     `/api/benchmark-hires/${created.hire.hireId}/jobs`,
-    {},
+    created.hire.evidence?.lpLiveMatchAudition
+      ? { schemaVersion: "positioncrew.lp-live-match-selection-request.v1", selectedProvider: "POSITIONCREW", auditionHash: created.hire.evidenceHash }
+      : {},
     [200, 202],
   );
   const completed = await waitForCurrentPersistedHire(definition, created.hire.hireId);

@@ -15,6 +15,7 @@ import {
 } from "../core/fixed.js";
 import { clampNonNegative } from "../providers/provider-utils.js";
 import { createLpRebalanceDeliverable } from "../providers/lp-rebalance.js";
+import { canonicalHash } from "../core/canonical.js";
 import {
   HEYANON_V3_POOLS,
   fetchPinnedPancakeV3Position,
@@ -79,6 +80,14 @@ export interface HeyAnonV3LpJobAssessment {
   attributableResult: true;
   status: "INCOMPATIBLE_CONSTRAINTS" | "ELIGIBLE_WITH_ADAPTER";
   eligibleForLpRebalance: boolean;
+  invocation: {
+    endpoint: typeof HEYANON_V3_POOLS.endpoint;
+    startedAt: string;
+    completedAt: string;
+    latencyMilliseconds: number;
+    rawResponseHash: string;
+    normalizedResponseHash: string;
+  };
   claimBoundary: string[];
 }
 
@@ -288,6 +297,8 @@ export async function auditionHeyAnonV3LpJob(
   positionId: string,
   options: { fetchImpl?: typeof fetch; now?: Date; rpcUrl?: string } = {},
 ): Promise<HeyAnonV3LpJobAssessment> {
+  const invocationStartedAt = new Date().toISOString();
+  const invocationStartedPerformance = performance.now();
   const request = LpRebalanceRequestSchema.parse(input);
   const fetchImpl = options.fetchImpl ?? fetch;
   if (!new RegExp(`^pancake-position-${positionId}-`).test(request.requestId)) {
@@ -423,6 +434,7 @@ export async function auditionHeyAnonV3LpJob(
       : `The normalized deliverable refused the request with ${normalizedDeliverable.status}.`,
   });
   const eligible = evidenceAccepted && checks.every((check) => check.status === "PASS");
+  const invocationCompletedAt = new Date().toISOString();
   return {
     schemaVersion: "positioncrew.external-lp-job-assessment.v1",
     adapterId: "positioncrew:mcp:heyanon-v3pools:lp-job:v1",
@@ -445,6 +457,18 @@ export async function auditionHeyAnonV3LpJob(
     attributableResult: true,
     status: eligible ? "ELIGIBLE_WITH_ADAPTER" : "INCOMPATIBLE_CONSTRAINTS",
     eligibleForLpRebalance: eligible,
+    invocation: {
+      endpoint: HEYANON_V3_POOLS.endpoint,
+      startedAt: invocationStartedAt,
+      completedAt: invocationCompletedAt,
+      latencyMilliseconds: Math.max(1, Math.round(performance.now() - invocationStartedPerformance)),
+      rawResponseHash: canonicalHash({
+        provider: HEYANON_V3_POOLS,
+        price: priceEnvelope,
+        range: rangeEnvelope,
+      }),
+      normalizedResponseHash: canonicalHash(normalizedDeliverable),
+    },
     claimBoundary: [
       "The external agent produced the attributable range recommendation; PositionCrew supplied the pinned position and market economics.",
       "The compatibility adapter aligned ticks, evaluated buyer constraints, and normalized the result without changing the external range thesis.",

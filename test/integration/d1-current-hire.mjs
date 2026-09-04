@@ -392,6 +392,15 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
     ? created.body?.hire?.evidence?.externalYieldComparison
     : undefined;
   if (definition.service === "LP_REBALANCE") {
+    const missingChoice = await requestJson(baseUrl, `/api/benchmark-hires/${created.body.hire.hireId}/jobs`, {
+      method: "POST", headers: { Origin: baseUrl, "Content-Type": "application/json" }, body: "{}",
+    });
+    assert.equal(missingChoice.response.status, 422, "LP must not execute before an explicit choice");
+    const wrongCommitment = await requestJson(baseUrl, `/api/benchmark-hires/${created.body.hire.hireId}/jobs`, {
+      method: "POST", headers: { Origin: baseUrl, "Content-Type": "application/json" },
+      body: JSON.stringify({ schemaVersion: "positioncrew.lp-live-match-selection-request.v1", selectedProvider: "POSITIONCREW", auditionHash: `sha256:${"0".repeat(64)}` }),
+    });
+    assert.equal(wrongCommitment.response.status, 409, "LP must reject a choice from another audition");
     assert.equal(
       externalProviderComparison?.schemaVersion,
       "positioncrew.external-lp-comparison-summary.v1",
@@ -428,7 +437,17 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
   const run = await requestJson(
     baseUrl,
     `/api/benchmark-hires/${created.body.hire.hireId}/jobs`,
-    { method: "POST", headers: { Origin: baseUrl } },
+    definition.service === "LP_REBALANCE"
+      ? {
+          method: "POST",
+          headers: { Origin: baseUrl, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schemaVersion: "positioncrew.lp-live-match-selection-request.v1",
+            selectedProvider: "POSITIONCREW",
+            auditionHash: created.body.hire.evidenceHash,
+          }),
+        }
+      : { method: "POST", headers: { Origin: baseUrl } },
   );
   assert.equal(run.response.status, 202, `${definition.service} job was not accepted`);
 
@@ -449,6 +468,29 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
   assert.equal(completed.hire.evidenceHash, created.body.hire.evidenceHash);
   assert.deepEqual(completed.receipt.response.result.request, request);
   assert.equal(completed.receipt.response.result.evaluation.score, 100);
+  if (definition.service === "LP_REBALANCE") {
+    assert.equal(completed.job.providerSelection?.selectedProvider, "POSITIONCREW");
+    assert.equal(completed.job.providerSelection?.auditionHash, completed.hire.evidenceHash);
+    assert.match(completed.job.providerSelectionHash, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(completed.receipt.response.liveMatchExecution?.source?.hireId, completed.hire.hireId);
+    assert.equal(completed.receipt.response.liveMatchExecution?.source?.blockNumber, definition.blockNumber);
+    assert.equal(completed.receipt.response.liveMatchExecution?.selection?.selectedProvider, "POSITIONCREW");
+    assert.match(completed.receipt.response.liveMatchExecution?.invocation?.rawResponseHash, /^sha256:[a-f0-9]{64}$/);
+    assert.match(completed.receipt.response.liveMatchExecution?.invocation?.normalizedResponseHash, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(completed.receipt.response.liveMatchExecution?.commerce?.payment, "NONE");
+    const retry = await requestJson(baseUrl, `/api/benchmark-hires/${completed.hire.hireId}/jobs`, {
+      method: "POST", headers: { Origin: baseUrl, "Content-Type": "application/json" },
+      body: JSON.stringify({ schemaVersion: "positioncrew.lp-live-match-selection-request.v1", selectedProvider: "POSITIONCREW", auditionHash: completed.hire.evidenceHash }),
+    });
+    assert.equal(retry.response.status, 200);
+    assert.equal(retry.body.receipt.receiptId, completed.receipt.receiptId);
+    assert.equal(retry.body.job.providerSelectionHash, completed.job.providerSelectionHash);
+    const switchProvider = await requestJson(baseUrl, `/api/benchmark-hires/${completed.hire.hireId}/jobs`, {
+      method: "POST", headers: { Origin: baseUrl, "Content-Type": "application/json" },
+      body: JSON.stringify({ schemaVersion: "positioncrew.lp-live-match-selection-request.v1", selectedProvider: "HEYANON", auditionHash: completed.hire.evidenceHash }),
+    });
+    assert.equal(switchProvider.response.status, 409, "An accepted provider choice must remain immutable");
+  }
 
   const publicReceipt = await requestJson(baseUrl, completed.receipt.publicUrl);
   assert.equal(publicReceipt.response.status, 200);
@@ -547,6 +589,11 @@ async function main() {
         assert.deepEqual(
           reloadedCategoryHire.body.hire.evidence.externalProviderComparison,
           lifecycleResult.externalProviderComparison,
+        );
+        assert.equal(reloadedCategoryHire.body.job.providerSelection?.selectedProvider, "POSITIONCREW");
+        assert.equal(
+          reloadedCategoryHire.body.receipt.response.liveMatchExecution?.source?.hireId,
+          lifecycleResult.hireId,
         );
       }
       if (lifecycleResult.service === "BOUNDED_GRID") {

@@ -1,3 +1,5 @@
+import type { LpLiveMatchAudition, LpLiveMatchExecution, LpLiveMatchProviderSelection } from "../../src/marketplace/lp-live-match-schema.js";
+
 export type ServiceId =
   | "LENDING_RESCUE"
   | "LP_REBALANCE"
@@ -84,6 +86,7 @@ export interface CurrentMarketplaceObservation {
 export type CurrentLendingObservation = CurrentMarketplaceObservation;
 
 export interface FixtureJobResponse {
+  liveMatchExecution?: LpLiveMatchExecution;
   schemaVersion: "positioncrew.fixture-job-response.v1";
   evidenceMode: "FROZEN_BSC_TEST_FIXTURE" | "CALLER_SUPPLIED_OBSERVATIONS" | "CURRENT_BLOCK_PINNED";
   commerceMode: "IN_MEMORY_CONFORMANCE";
@@ -599,6 +602,7 @@ export interface LendingProviderAudition {
 }
 
 export interface CurrentBlockPinnedMarketplaceEvidence {
+  lpLiveMatchAudition?: LpLiveMatchAudition;
   schemaVersion: "positioncrew.current-block-pinned-evidence.v1";
   evidenceClass: "CURRENT_BLOCK_PINNED";
   chainId: 56;
@@ -761,6 +765,8 @@ export interface FreshMarketplaceChain {
   job: {
     jobId: string;
     state: "CREATED" | "RUNNING" | "COMPLETED" | "FAILED";
+    providerSelection?: LpLiveMatchProviderSelection | null;
+    providerSelectionHash?: string | null;
     status: FreshMarketplaceStatus;
     createdAt: string;
     startedAt: string | null;

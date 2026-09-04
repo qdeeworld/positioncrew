@@ -6,6 +6,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { PROVIDER_CATALOG } from "../../src/marketplace/catalog.js";
+import type { LpLiveMatchRunRequest } from "../../src/marketplace/lp-live-match-schema.js";
 import { EvidenceView } from "./components/EvidenceView";
 import { JobWorkspace } from "./components/JobWorkspace";
 import { MarketplaceView } from "./components/MarketplaceView";
@@ -444,6 +445,7 @@ export default function App() {
     request: Record<string, unknown>,
     mode: JobRequestMode,
     observation?: CurrentMarketplaceObservation,
+    lpSelection?: LpLiveMatchRunRequest,
   ) {
     if (receiptIdFromHash()) navigate("jobs");
     jobRunController.current?.abort();
@@ -499,6 +501,13 @@ export default function App() {
         };
         unresolvedFreshHire.current = logicalHire;
         let trace = logicalHire.chain;
+        if (lpSelection && !trace) {
+          if (!marketplaceTrace || marketplaceTrace.hire.evidenceHash !== lpSelection.auditionHash ||
+            JSON.stringify(marketplaceTrace.hire.request) !== JSON.stringify(request)) {
+            throw new Error("This provider choice no longer matches the displayed job. Compare the current request again.");
+          }
+          trace = marketplaceTrace;
+        }
         if (!trace) {
           const createResponse = await fetchWithTimeout(
             serverOwnedLendingAudition
@@ -556,9 +565,16 @@ export default function App() {
           rememberedAt: activeTrace.hire.createdAt,
         });
         if (activeTrace.job.state === "CREATED") {
+          const requiresLpChoice = activeTrace.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" &&
+            Boolean(activeTrace.hire.evidence.lpLiveMatchAudition);
+          if (requiresLpChoice && !lpSelection) {
+            setActiveJob(null);
+            return;
+          }
           const runResponse = await fetchWithTimeout("/api/benchmark-hires/" + encodeURIComponent(activeTrace.hire.hireId) + "/jobs", {
             method: "POST",
-            headers: { Accept: "application/json" },
+            headers: { Accept: "application/json", ...(lpSelection ? { "Content-Type": "application/json" } : {}) },
+            ...(lpSelection ? { body: JSON.stringify(lpSelection) } : {}),
             signal: controller.signal,
           }, JOB_REQUEST_TIMEOUT_MS);
           activeTrace = await jsonResponse<FreshMarketplaceChain>(runResponse);

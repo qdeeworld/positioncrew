@@ -57,6 +57,8 @@ interface JoinedRow extends Record<string, unknown> {
   api_duration_milliseconds: number | null;
   error_code: string | null;
   error_message: string | null;
+  provider_selection_json: string | null;
+  provider_selection_hash: string | null;
   receipt_id: string | null;
   response_json: string | null;
   response_hash: string | null;
@@ -282,6 +284,12 @@ async function verifyPersistedCommitments(chain: FreshMarketplaceChain): Promise
       throw new Error("Persisted marketplace evaluation commitment mismatch");
     }
   }
+  if (
+    chain.job.providerSelection !== null &&
+    await sha256Commitment(chain.job.providerSelection) !== chain.job.providerSelectionHash
+  ) {
+    throw new Error("Persisted provider selection commitment is invalid");
+  }
 }
 
 async function rowToChain(row: JoinedRow): Promise<FreshMarketplaceChain> {
@@ -331,6 +339,10 @@ async function rowToChain(row: JoinedRow): Promise<FreshMarketplaceChain> {
       error: row.error_code === null || row.error_message === null
         ? null
         : { code: row.error_code, message: row.error_message },
+      providerSelection: row.provider_selection_json === null
+        ? null
+        : JSON.parse(row.provider_selection_json) as unknown,
+      providerSelectionHash: row.provider_selection_hash,
     },
     receipt,
   });
@@ -346,6 +358,7 @@ const JOINED_SELECT = [
   "j.job_id, j.state AS job_state, j.created_at AS job_created_at,",
   "j.started_at AS job_started_at, j.completed_at AS job_completed_at,",
   "j.api_duration_milliseconds, j.error_code, j.error_message,",
+  "j.provider_selection_json, j.provider_selection_hash,",
   "r.receipt_id, r.response_json, r.response_hash, r.deliverable_hash,",
   "r.evaluation_hash, r.created_at AS receipt_created_at",
   "FROM fresh_marketplace_hires h",
@@ -555,7 +568,11 @@ export class FreshMarketplaceStore {
     return row ? await rowToChain(row) : null;
   }
 
-  async claimJob(hireId: string, startedAt: string): Promise<{
+  async claimJob(
+    hireId: string,
+    startedAt: string,
+    selection?: { json: string; hash: string },
+  ): Promise<{
     chain: FreshMarketplaceChain | null;
     claimed: boolean;
     claimToken: string | null;
@@ -567,14 +584,30 @@ export class FreshMarketplaceStore {
     const staleBefore = new Date(
       startedAtMilliseconds - FRESH_MARKETPLACE_JOB_LEASE_MILLISECONDS,
     ).toISOString();
-    const result = await this.db.prepare(
-      [
-        "UPDATE fresh_marketplace_jobs SET state = 'RUNNING', started_at = ?,",
-        "completed_at = NULL, api_duration_milliseconds = NULL, error_code = NULL, error_message = NULL",
-        "WHERE hire_id = ? AND (state = 'CREATED' OR",
-        "(state = 'RUNNING' AND started_at IS NOT NULL AND started_at <= ?))",
-      ].join(" "),
-    ).bind(startedAt, hireId, staleBefore).run();
+    const statement = selection
+      ? this.db.prepare([
+          "UPDATE fresh_marketplace_jobs SET state = 'RUNNING', started_at = ?,",
+          "completed_at = NULL, api_duration_milliseconds = NULL, error_code = NULL, error_message = NULL,",
+          "provider_selection_json = COALESCE(provider_selection_json, ?),",
+          "provider_selection_hash = COALESCE(provider_selection_hash, ?)",
+          "WHERE hire_id = ? AND (provider_selection_hash IS NULL OR provider_selection_hash = ?)",
+          "AND (state = 'CREATED' OR",
+          "(state = 'RUNNING' AND started_at IS NOT NULL AND started_at <= ?))",
+        ].join(" ")).bind(
+          startedAt,
+          selection.json,
+          selection.hash,
+          hireId,
+          selection.hash,
+          staleBefore,
+        )
+      : this.db.prepare([
+          "UPDATE fresh_marketplace_jobs SET state = 'RUNNING', started_at = ?,",
+          "completed_at = NULL, api_duration_milliseconds = NULL, error_code = NULL, error_message = NULL",
+          "WHERE hire_id = ? AND (state = 'CREATED' OR",
+          "(state = 'RUNNING' AND started_at IS NOT NULL AND started_at <= ?))",
+        ].join(" ")).bind(startedAt, hireId, staleBefore);
+    const result = await statement.run();
     if (!result.success) throw new Error(result.error ?? "D1 job claim failed");
     const claimed = result.meta.changes === 1;
     return {
