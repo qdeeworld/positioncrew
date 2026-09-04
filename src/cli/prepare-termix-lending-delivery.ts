@@ -33,7 +33,7 @@ const UploadGrantSchema = z.object({
 
 const RemoteArtifactSchema = z.object({
   id: z.string().min(1),
-  sha256: z.string().regex(/^(?:sha256:)?[a-fA-F0-9]{64}$/),
+  sha256: z.string().regex(/^(?:(?:sha256:)|(?:0x))?[a-fA-F0-9]{64}$/),
   url: z.string().url().optional(),
   publicUrl: z.string().url().optional(),
 }).passthrough();
@@ -236,7 +236,7 @@ function print(value: unknown): void {
 }
 
 function normalizeSha256(value: string): string {
-  return value.replace(/^sha256:/i, "").toLowerCase();
+  return value.replace(/^(?:sha256:|0x)/i, "").toLowerCase();
 }
 
 function remoteArtifacts(input: unknown): z.infer<typeof RemoteArtifactSchema>[] {
@@ -433,7 +433,7 @@ async function run(): Promise<void> {
     registered = registeredArtifact(await apiJson(baseUrl, token, "POST", artifactPathname, {
       s3Key: grant.s3Key,
       url: grant.publicUrl,
-      sha256: descriptor.sha256,
+      sha256: `0x${descriptor.sha256}`,
       contentType: descriptor.contentType,
       sizeBytes: descriptor.sizeBytes,
     }));
