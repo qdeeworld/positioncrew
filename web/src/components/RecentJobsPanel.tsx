@@ -14,6 +14,7 @@ import {
 } from "../job-history";
 import { resultHeadline, resultMeaning } from "../presentation";
 import type { FreshMarketplaceChain, ServiceId, SessionJob } from "../types";
+import type { LpLiveMatchRunRequest } from "../../../src/marketplace/lp-live-match-schema.js";
 
 const SERVICE_NAMES: Record<ServiceId, string> = {
   LENDING_RESCUE: "Lending Rescue",
@@ -86,6 +87,9 @@ function stateCopy(item: RecentJobItem): { label: string; detail: string } {
 
   switch (item.chain?.job.state) {
     case "CREATED":
+      if (item.chain.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" && item.chain.hire.evidence.lpLiveMatchAudition) {
+        return { label: "Choose provider", detail: `Saved LP assessment. Maximum action $${String(item.chain.hire.request.maxActionUsd)}, maximum gas $${String(item.chain.hire.request.maxGasUsd)}. Choose an eligible provider to run these saved limits.` };
+      }
       return { label: "Recorded", detail: "Recorded, not started." };
     case "RUNNING":
       return { label: "Running", detail: "Provider is evaluating." };
@@ -237,17 +241,23 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
     };
   }, [hydrate, refresh, updateItem]);
 
-  const resume = async (item: RecentJobItem) => {
+  const resume = async (item: RecentJobItem, selectedProvider?: LpLiveMatchRunRequest["selectedProvider"]) => {
     updateItem(item.reference, { busy: true, error: null });
     try {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), RECOVERY_REQUEST_TIMEOUT_MS);
       let response: Response;
       try {
+        const selected = item.chain?.job.providerSelection;
+        const evidence = item.chain?.hire.evidence;
+        const lpRequest = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" && evidence.lpLiveMatchAudition
+          ? { schemaVersion: "positioncrew.lp-live-match-selection-request.v1", selectedProvider: selected?.selectedProvider ?? selectedProvider, auditionHash: item.chain?.hire.evidenceHash }
+          : undefined;
+        if (lpRequest && !lpRequest.selectedProvider) throw new Error("Choose an eligible LP provider before running this saved job.");
         response = await fetch(`/api/benchmark-hires/${encodeURIComponent(item.reference.hireId)}/jobs`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: "{}",
+          body: JSON.stringify(lpRequest ?? {}),
           signal: controller.signal,
         });
       } finally {
@@ -351,6 +361,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
               const chain = item.chain;
               const receipt = item.phase === "READY" && chain?.job.state === "COMPLETED" ? chain.receipt : null;
               const deliverable = receipt?.response.result.deliverable ?? null;
+              const lpAudition = chain?.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" ? chain.hire.evidence.lpLiveMatchAudition : undefined;
               return (
                 <tr key={item.reference.hireId}>
                   <td data-label="Saved">{formatTime(chain?.hire.createdAt ?? item.reference.rememberedAt)}</td>
@@ -376,7 +387,12 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
                           </a>
                         </>
                       )}
-                      {item.phase === "READY" && (chain?.job.state === "CREATED" || chain?.job.state === "RUNNING") && (
+                      {item.phase === "READY" && chain?.job.state === "CREATED" && lpAudition && lpAudition.candidates.map((candidate) => (
+                        <button key={candidate.providerKey} type="button" onClick={() => void resume(item, candidate.providerKey)} disabled={item.busy || !candidate.selectable}>
+                          Run with {candidate.providerKey === "HEYANON" ? "HeyAnon" : "PositionCrew"}
+                        </button>
+                      ))}
+                      {item.phase === "READY" && ((chain?.job.state === "CREATED" && !lpAudition) || chain?.job.state === "RUNNING") && (
                         <button type="button" onClick={() => void resume(item)} disabled={item.busy}>
                           <Play size={16} aria-hidden="true" /> {chain.job.state === "RUNNING" ? "Recover run" : "Resume run"}
                         </button>

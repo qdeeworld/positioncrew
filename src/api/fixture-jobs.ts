@@ -8,7 +8,11 @@ import lpBenchmarkProtocol from "../../benchmarks/lp-rebalance/protocol.v2.json"
 import lpBenchmarkRubric from "../../benchmarks/lp-rebalance/rubric.v1.json" with { type: "json" };
 import gridBenchmarkProtocol from "../../benchmarks/bounded-grid/protocol.v2.json" with { type: "json" };
 import gridBenchmarkRubric from "../../benchmarks/bounded-grid/rubric.v1.json" with { type: "json" };
-import { runProviderJob, type ProviderJobResult } from "../application/run-provider-job.js";
+import {
+  runProviderJob,
+  type ProviderJobResult,
+  type RunProviderJobOptions,
+} from "../application/run-provider-job.js";
 import type {
   BenchmarkLock,
   TermixBenchmarkService,
@@ -18,10 +22,12 @@ import { MemoryCommerceAdapter } from "../commerce/memory-adapter.js";
 import {
   LendingRescueRequestSchema,
   PositionCrewRequestSchema,
+  type PositionCrewDeliverable,
   type PositionCrewRequest,
 } from "../contracts/index.js";
 import { canonicalHash } from "../core/canonical.js";
 import { sha256Commitment } from "../commerce/fresh-hire-schema.js";
+import type { LpLiveMatchExecution } from "../marketplace/lp-live-match-schema.js";
 
 const FIXTURE_NOW = new Date("2026-08-12T16:00:30.000Z");
 const FIXTURES = [lendingFixture, lpFixture, yieldFixture, gridFixture] as const;
@@ -81,6 +87,7 @@ export interface FixtureJobResponse {
     evaluationHash: string;
   };
   result: ProviderJobResult;
+  liveMatchExecution?: LpLiveMatchExecution;
 }
 
 export interface BenchmarkRepeatabilityResponse {
@@ -247,6 +254,39 @@ export async function runCurrentBlockPinnedProviderRequest(
     claimBoundary: [
       "The exact block-referenced BSC request was persisted before this provider run and is committed by the durable hire receipt.",
       "The provider evaluates the persisted caller-supplied observation without independently re-fetching BSC state and does not sign or broadcast a transaction.",
+      "The run costs $0.00, requires no wallet, creates no payment or settlement, and must be revalidated before any financial action.",
+    ],
+    benchmarkLock: null,
+    receipt: {
+      mode: "SESSION_EMBEDDED",
+      path: null,
+      evaluationHash: result.evaluation.evaluationHash,
+    },
+    result,
+  };
+}
+
+export async function runCurrentBlockPinnedProviderDeliverable(
+  input: unknown,
+  deliverable: PositionCrewDeliverable,
+  now: Date,
+  options: RunProviderJobOptions,
+): Promise<FixtureJobResponse> {
+  const request = PositionCrewRequestSchema.parse(input);
+  const result = await runProviderJob(new MemoryCommerceAdapter(), request, now, {
+    ...options,
+    deliverable,
+    requestHash: await sha256Commitment(request),
+  });
+  return {
+    schemaVersion: "positioncrew.fixture-job-response.v1",
+    evidenceMode: "CURRENT_BLOCK_PINNED",
+    commerceMode: "IN_MEMORY_CONFORMANCE",
+    advantageStatus: "PENDING_INDEPENDENT_BLIND_EVALUATION",
+    generatedAt: now.toISOString(),
+    claimBoundary: [
+      "The exact block-referenced BSC request was persisted before this selected-provider run and is committed by the durable hire receipt.",
+      "PositionCrew validates the selected provider's normalized result without signing or broadcasting a transaction.",
       "The run costs $0.00, requires no wallet, creates no payment or settlement, and must be revalidated before any financial action.",
     ],
     benchmarkLock: null,

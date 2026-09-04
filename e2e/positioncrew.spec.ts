@@ -2,6 +2,9 @@ import { runCurrentBlockPinnedProviderRequest } from "../src/api/fixture-jobs.js
 import { sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { createLpLiveMatchAudition, executeLpLiveMatchProvider, selectLpLiveMatchProvider } from "../src/marketplace/lp-live-match.js";
+import type { LpLiveMatchAudition, LpLiveMatchProviderSelection } from "../src/marketplace/lp-live-match-schema.js";
+import { LpRebalanceRequestSchema } from "../src/contracts/lp-rebalance.js";
 
 const TRANSIENT_REQUEST_ERROR = /socket hang up|ECONNRESET|ECONNREFUSED|fetch failed/i;
 
@@ -336,7 +339,7 @@ function liveLpRequest(now: Date, tokenId: string, blockNumber: string) {
     }));
   };
   const request = rebase(structuredClone(lpFixture)) as Record<string, unknown>;
-  request.requestId = `pancake-position-live-e2e-${now.getTime()}`;
+  request.requestId = `pancake-position-${tokenId}-e2e-${now.getTime()}`;
   request.protocol = "PancakeSwap V3 position analysis";
   request.requestedAt = now.toISOString();
   request.deadline = new Date(now.getTime() + 5 * 60_000).toISOString();
@@ -1022,7 +1025,7 @@ test("capital check turns current positions into truthful provider routes", asyn
   await lpRoute.getByRole("button", { name: "Compare providers for this job" }).click();
   await expect(page.getByLabel("PancakeSwap position NFT ID")).toHaveValue(live.lpTokenId);
   await expect(page.getByText(`Block-pinned PancakeSwap position from BSC block ${live.blockNumber}`, { exact: false })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Hire and run current request" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /Hire and run current request|Compare live providers/ })).toBeEnabled();
 });
 
 test("capital check does not claim jobs were found when every current read fails", async ({ page }) => {
@@ -1079,7 +1082,7 @@ test("a block-pinned Pancake market can become a bounded grid request", async ({
   await expect(page.getByText("READY", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("PancakeSwap market probe", { exact: true })).toBeVisible();
   await expect(page.getByText(/Block-pinned PancakeSwap market from BSC block/)).toBeVisible();
-  await page.getByRole("button", { name: "Hire and run current request" }).click();
+  await page.getByRole("button", { name: /Hire and run current request|Compare live providers/ }).click();
   await expect(page.getByRole("heading", { name: /Build [45] bounded orders/ })).toBeVisible();
   await expect(page.getByText(/Block-pinned PancakeSwap input/)).toBeVisible();
   expect(mockedHire.createBodies).toHaveLength(1);
@@ -1103,6 +1106,36 @@ test("a block-pinned Pancake market can become a bounded grid request", async ({
   expect(mockedHire.receiptLoadCount).toBe(2);
 });
 
+test("LP waits for a buyer choice and restores the selected provider from its receipt", async ({ page }) => {
+  await installDeterministicLiveProbeRoutes(page);
+  const hire = await installCurrentCategoryHireRoutes(page, {
+    service: "LP_REBALANCE", benchmarkSlug: "lp-rebalance", providerSlug: "lp-rebalance", idDigit: "7", liveMatch: true,
+  });
+  await page.goto("/#jobs");
+  await page.getByRole("combobox", { name: "Job" }).selectOption("LP_REBALANCE");
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
+  await page.getByRole("button", { name: "Use live position" }).click();
+  await page.getByRole("button", { name: "Compare live providers", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Choose who runs this LP check" })).toBeVisible();
+  expect(hire.runBodies).toHaveLength(0);
+  await expect(page.getByRole("button", { name: "Choose HeyAnon", exact: true })).toBeDisabled();
+  const choose = page.getByRole("button", { name: "Choose PositionCrew", exact: true });
+  await choose.focus();
+  await expect(choose).toBeFocused();
+  const box = await choose.boundingBox();
+  expect(box?.height).toBeGreaterThanOrEqual(44);
+  await choose.press("Enter");
+  await expect(page.getByRole("heading", { name: "SHIFT range to 0...240" })).toBeVisible();
+  expect(hire.runBodies).toHaveLength(1);
+  expect(hire.runBodies[0]).toMatchObject({ selectedProvider: "POSITIONCREW" });
+  await page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Readable receipt" }).click();
+  await page.reload();
+  await expect(page.getByTestId("lp-live-match-choice")).toContainText("LP Range Operator v1 selected");
+  await expect(page.getByRole("heading", { name: "SHIFT range to 0...240" })).toBeVisible();
+  expect(hire.createBodies).toHaveLength(1);
+  expect(hire.runBodies).toHaveLength(1);
+});
+
 test("a block-pinned Pancake position can become an LP rebalance request", async ({ page }) => {
   const live = await installDeterministicLiveProbeRoutes(page);
   const mockedHire = await installCurrentCategoryHireRoutes(page, {
@@ -1121,7 +1154,7 @@ test("a block-pinned Pancake position can become an LP rebalance request", async
   await page.getByRole("button", { name: "Use live position" }).click();
   await expect(page.getByText(`Block-pinned PancakeSwap position from BSC block ${live.blockNumber}`, { exact: false })).toBeVisible();
   await expect(page.getByLabel("Current tick")).toBeDisabled();
-  await page.getByRole("button", { name: "Hire and run current request" }).click();
+  await page.getByRole("button", { name: /Hire and run current request|Compare live providers/ }).click();
   await expect(page.getByRole("heading", { name: "SHIFT range to 0...240" })).toBeVisible();
   await expect(page.locator(".result-boundary")).toContainText("Block-pinned PancakeSwap position");
   expect(mockedHire.createBodies).toHaveLength(1);
@@ -1155,7 +1188,7 @@ test("block-pinned Venus stablecoin rates can become a yield request", async ({ 
   await expect(page.getByText("Venus stablecoin probe", { exact: true })).toBeVisible();
   await expect(page.getByText(/Block-pinned Venus yield market from BSC block/)).toBeVisible();
   await expect(page.getByLabel("Leading base APY (bps)")).toBeDisabled();
-  await page.getByRole("button", { name: "Hire and run current request" }).click();
+  await page.getByRole("button", { name: /Hire and run current request|Compare live providers/ }).click();
   await expect(page.getByRole("heading", { name: /to beefy-usdt-vault/ })).toBeVisible();
   await expect(page.getByText(/Block-pinned Venus yield input/)).toBeVisible();
   expect(mockedHire.createBodies).toHaveLength(1);
@@ -1199,7 +1232,7 @@ test("all three non-lending current hires return category-specific durable resul
     } else {
       await expect(page.getByText("READY", { exact: true })).toBeVisible({ timeout: 20_000 });
     }
-    await page.getByRole("button", { name: "Hire and run current request" }).click();
+    await page.getByRole("button", { name: /Hire and run current request|Compare live providers/ }).click();
     await expect(page.getByRole("heading", { name: candidate.output })).toBeVisible();
     await expect(page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" })).toBeVisible();
     if (candidate.value === "LP_REBALANCE") {
@@ -1287,7 +1320,7 @@ test("every non-lending provider accepts custom bounds and fails closed", async 
     await expect(page.getByText(
       /The exact submitted request and pinned observation are persisted/,
     )).toBeVisible();
-    await page.getByRole("button", { name: "Hire and run current request" }).click();
+    await page.getByRole("button", { name: /Hire and run current request|Compare live providers/ }).click();
     await expect(page.getByRole("heading", { name: candidate.decision })).toBeVisible();
     await expect(page.locator('.request-boundary[role="status"]').getByRole("link", { name: "Public receipt" })).toBeVisible();
     await page.getByTitle("Reset interactive bounds").click();
@@ -1687,6 +1720,7 @@ async function installCurrentCategoryHireRoutes(
     benchmarkSlug: "bounded-grid" | "lp-rebalance" | "yield-optimization";
     providerSlug: "bounded-grid" | "lp-rebalance" | "yield-optimization";
     idDigit: "6" | "7" | "8";
+    liveMatch?: boolean;
   },
 ) {
   const now = new Date();
@@ -1694,6 +1728,11 @@ async function installCurrentCategoryHireRoutes(
   const jobId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-9${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
   const receiptId = `${definition.idDigit.repeat(8)}-${definition.idDigit.repeat(4)}-4${definition.idDigit.repeat(3)}-a${definition.idDigit.repeat(3)}-${definition.idDigit.repeat(12)}`;
   const createBodies: Array<Record<string, unknown>> = [];
+  const runBodies: Array<Record<string, unknown>> = [];
+  let lpAudition: LpLiveMatchAudition | undefined;
+  let lpSelection: LpLiveMatchProviderSelection | null = null;
+  let lpSelectionHash: string | null = null;
+  let evidenceHash = `sha256:${"d".repeat(64)}`;
   let providerResponse: Awaited<ReturnType<typeof runCurrentBlockPinnedProviderRequest>> | null = null;
   let providerResponseHash: string | null = null;
   let receiptLoadCount = 0;
@@ -1729,6 +1768,7 @@ async function installCurrentCategoryHireRoutes(
           freshnessAtCreation: "FRESH",
           evaluatedAt: now.toISOString(),
           maxDataAgeSeconds: request.maxDataAgeSeconds,
+          ...(lpAudition ? { lpLiveMatchAudition: lpAudition } : {}),
           ...(definition.service === "LP_REBALANCE" ? {
             externalProviderComparison: {
               schemaVersion: "positioncrew.external-lp-comparison-summary.v1",
@@ -1824,7 +1864,7 @@ async function installCurrentCategoryHireRoutes(
             },
           } : {}),
         },
-        evidenceHash: `sha256:${"d".repeat(64)}`,
+        evidenceHash,
         providerHash: `sha256:${"f".repeat(64)}`,
         createdAt: now.toISOString(),
       },
@@ -1837,6 +1877,8 @@ async function installCurrentCategoryHireRoutes(
         completedAt: state === "COMPLETED" ? now.toISOString() : null,
         apiDurationMilliseconds: state === "COMPLETED" ? 43 : null,
         error: null,
+        providerSelection: lpSelection,
+        providerSelectionHash: lpSelectionHash,
       },
       receipt: state === "COMPLETED" ? {
         receiptId,
@@ -1859,6 +1901,14 @@ async function installCurrentCategoryHireRoutes(
     createBodies.push(body);
     providerResponse = await runCurrentBlockPinnedProviderRequest(body.request, now);
     providerResponseHash = await sha256Commitment(providerResponse);
+    if (definition.liveMatch) {
+      const request = LpRebalanceRequestSchema.parse(body.request);
+      const source = body.observation as { blockNumber: string; observedAt: string; explorerUrl: string };
+      lpAudition = (await createLpLiveMatchAudition(request, source, await sha256Commitment(request), now, {
+        fetchImpl: async () => { throw new Error("External provider unavailable in this browser scenario"); },
+      })).audition;
+      evidenceHash = await sha256Commitment(chain("CREATED").hire.evidence);
+    }
     await route.fulfill({
       status: 201,
       contentType: "application/json",
@@ -1866,6 +1916,18 @@ async function installCurrentCategoryHireRoutes(
     });
   });
   await page.route(new RegExp(`/api/benchmark-hires/${hireId}/jobs$`), async (route) => {
+    if (definition.liveMatch && lpAudition) {
+      const selectionRequest = route.request().postDataJSON();
+      runBodies.push(selectionRequest);
+      lpSelection = selectLpLiveMatchProvider(lpAudition, selectionRequest, evidenceHash, new Date());
+      lpSelectionHash = await sha256Commitment(lpSelection);
+      providerResponse = await executeLpLiveMatchProvider({
+        hireId, jobId, requestHash: lpAudition.requestHash, evidenceHash, source: lpAudition.source,
+        request: LpRebalanceRequestSchema.parse(createBodies.at(-1)!.request),
+        audition: lpAudition, selection: lpSelection, now: new Date(),
+      });
+      providerResponseHash = await sha256Commitment(providerResponse);
+    }
     await route.fulfill({
       status: 202,
       contentType: "application/json",
@@ -1876,7 +1938,7 @@ async function installCurrentCategoryHireRoutes(
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(chain("COMPLETED")),
+      body: JSON.stringify(chain(definition.liveMatch && !lpSelection ? "CREATED" : "COMPLETED")),
     });
   });
   await page.context().route(`**/api/benchmark-receipts/${receiptId}`, async (route) => {
@@ -1892,6 +1954,7 @@ async function installCurrentCategoryHireRoutes(
     hireId,
     receiptId,
     createBodies,
+    runBodies,
     get receiptLoadCount() { return receiptLoadCount; },
   };
 }

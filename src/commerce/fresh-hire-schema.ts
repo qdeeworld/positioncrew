@@ -4,6 +4,13 @@ import { LendingRescueRequestSchema } from "../contracts/lending-rescue.js";
 import { LpRebalanceDeliverableSchema, LpRebalanceRequestSchema } from "../contracts/lp-rebalance.js";
 import { YieldOptimizationDeliverableSchema, YieldOptimizationRequestSchema } from "../contracts/yield-optimization.js";
 import { LendingProviderAuditionSchema } from "../marketplace/lending-provider-audition.js";
+import {
+  LpLiveMatchAuditionSchema,
+  LpLiveMatchProviderSelectionSchema,
+  LpLiveMatchRunRequestSchema,
+} from "../marketplace/lp-live-match-schema.js";
+
+export { LpLiveMatchRunRequestSchema };
 
 export const FRESH_MARKETPLACE_HISTORICAL_TASKS = {
   "lending-rescue": {
@@ -191,6 +198,7 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     }).strict()).min(1),
     boundary: z.string().min(1),
   }).strict().optional(),
+  lpLiveMatchAudition: LpLiveMatchAuditionSchema.optional(),
   externalGridComparison: z.object({
     schemaVersion: z.literal("positioncrew.external-grid-comparison-summary.v1"),
     provider: z.object({
@@ -467,6 +475,8 @@ export const FreshMarketplaceChainSchema = z.object({
     completedAt: IsoTimestampSchema.nullable(),
     apiDurationMilliseconds: z.number().int().positive().nullable(),
     error: z.object({ code: z.string().min(1), message: z.string().min(1) }).strict().nullable(),
+    providerSelection: LpLiveMatchProviderSelectionSchema.nullable().default(null),
+    providerSelectionHash: Sha256Schema.nullable().default(null),
   }).strict(),
   receipt: z.object({
     receiptId: z.string().uuid(),
@@ -507,6 +517,45 @@ export const FreshMarketplaceChainSchema = z.object({
         message: "Provider audition must bind the persisted request, observation, and selected provider",
       });
     }
+    const lpAudition = evidence.lpLiveMatchAudition;
+    if (lpAudition && (
+      value.hire.service !== "LP_REBALANCE" ||
+      lpAudition.requestHash !== value.hire.requestHash ||
+      lpAudition.source.blockNumber !== evidence.source.blockNumber ||
+      lpAudition.source.observedAt !== evidence.source.observedAt ||
+      lpAudition.source.explorerUrl !== evidence.source.explorerUrl
+    )) {
+      context.addIssue({
+        code: "custom",
+        path: ["hire", "evidence", "lpLiveMatchAudition"],
+        message: "LP Live Match audition must bind the persisted request and observation",
+      });
+    }
+    if (lpAudition && value.job.state !== "CREATED" && value.job.providerSelection === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["job", "providerSelection"],
+        message: "A started LP Live Match job requires an immutable provider selection",
+      });
+    }
+  }
+  if ((value.job.providerSelection === null) !== (value.job.providerSelectionHash === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["job", "providerSelectionHash"],
+      message: "Provider selection and its commitment must be present together",
+    });
+  }
+  if (value.job.providerSelection && (
+    value.hire.service !== "LP_REBALANCE" ||
+    value.hire.evidenceMode !== "CURRENT_BLOCK_PINNED" ||
+    value.job.providerSelection.auditionHash !== value.hire.evidenceHash
+  )) {
+    context.addIssue({
+      code: "custom",
+      path: ["job", "providerSelection"],
+      message: "Provider selection must bind a current LP hire and its audition evidence",
+    });
   }
 });
 

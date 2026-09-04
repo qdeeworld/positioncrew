@@ -25,6 +25,7 @@ import {
 import {
   FreshMarketplaceChainSchema,
   FreshMarketplaceHireRequestSchema,
+  LpLiveMatchRunRequestSchema,
 } from "../commerce/fresh-hire-schema.js";
 import {
   VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE,
@@ -212,6 +213,10 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
   );
   schemas.FreshMarketplaceChain = z.toJSONSchema(
     FreshMarketplaceChainSchema,
+    { target: "draft-2020-12" },
+  );
+  schemas.LpLiveMatchRunRequest = z.toJSONSchema(
+    LpLiveMatchRunRequestSchema,
     { target: "draft-2020-12" },
   );
   schemas.ExternalComparisonSnapshot = z.toJSONSchema(
@@ -436,7 +441,7 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
     },
     "/api/benchmark-hires/{hireId}/jobs": {
       post: {
-        summary: "Claim and run the already-persisted provider job",
+        summary: "Select and run a provider for the already-persisted job",
         operationId: "runFreshMarketplaceHire",
         parameters: [{
           name: "hireId",
@@ -444,10 +449,21 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
           required: true,
           schema: { type: "string", format: "uuid" },
         }],
+        requestBody: {
+          required: false,
+          description: "Required for current LP Live Match hires; omitted for legacy and other-category jobs.",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/LpLiveMatchRunRequest" },
+            },
+          },
+        },
         responses: {
           "202": { description: "Persisted job is RUNNING" },
           "200": { description: "Idempotent replay of a terminal job" },
           "404": { description: "Unknown hire" },
+          "409": { description: "Provider is not selectable or conflicts with an existing immutable selection" },
+          "422": { description: "Current LP Live Match selection body is missing or invalid" },
         },
       },
     },

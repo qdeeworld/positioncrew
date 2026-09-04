@@ -185,6 +185,10 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
     expect(result.eligibleForLpRebalance).toBe(true);
     expect(result.normalizedDeliverable.schemaVersion).toBe("positioncrew.lp-rebalance.deliverable.v1");
     expect(result.checks.find((check) => check.code === "EXACT_OUTPUT_CONTRACT")?.status).toBe("PASS");
+    expect(result.invocation.endpoint).toBe("https://erc8004.heyanon.ai/mcp/v3pools");
+    expect(result.invocation.rawResponseHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(result.invocation.normalizedResponseHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(result.invocation.latencyMilliseconds).toBeGreaterThan(0);
   });
 
   it("rejects a caller-supplied position that does not match the position manager", async () => {

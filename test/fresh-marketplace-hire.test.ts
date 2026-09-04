@@ -235,6 +235,8 @@ class FakeD1 implements D1Database {
         api_duration_milliseconds: null,
         error_code: null,
         error_message: null,
+        provider_selection_json: null,
+        provider_selection_hash: null,
       };
     } else if (normalized.startsWith("INSERT INTO fresh_marketplace_receipts")) {
       const canComplete = Boolean(
@@ -289,16 +291,22 @@ class FakeD1 implements D1Database {
         error_message: bindings[3],
       };
     } else if (normalized.startsWith("UPDATE fresh_marketplace_jobs SET state = 'RUNNING'")) {
+      const persistsSelection = normalized.includes("provider_selection_json = COALESCE");
+      const hireBinding = persistsSelection ? bindings[3] : bindings[1];
+      const staleBinding = persistsSelection ? bindings[5] : bindings[2];
+      const selectionHash = persistsSelection ? bindings[2] : null;
       const canClaim = Boolean(
         this.hire &&
         this.job &&
-        this.hire.hire_id === bindings[1] &&
+        this.hire.hire_id === hireBinding &&
+        (!persistsSelection || this.job.provider_selection_hash === null ||
+          this.job.provider_selection_hash === selectionHash) &&
         (this.job.job_state === "CREATED" ||
           (this.job.job_state === "RUNNING" &&
             typeof this.job.job_started_at === "string" &&
-            this.job.job_started_at <= String(bindings[2]))),
+            this.job.job_started_at <= String(staleBinding))),
       );
-      if (!canClaim) return { success: true, meta: { changes: 0 } };
+      if (!canClaim || !this.job) return { success: true, meta: { changes: 0 } };
       this.job = {
         ...this.job,
         job_state: "RUNNING",
@@ -307,6 +315,12 @@ class FakeD1 implements D1Database {
         api_duration_milliseconds: null,
         error_code: null,
         error_message: null,
+        provider_selection_json: persistsSelection
+          ? this.job.provider_selection_json ?? bindings[1]
+          : this.job.provider_selection_json,
+        provider_selection_hash: persistsSelection
+          ? this.job.provider_selection_hash ?? selectionHash
+          : this.job.provider_selection_hash,
       };
     }
     return { success: true, meta: { changes: 1 } };
@@ -518,6 +532,8 @@ class RateLimitD1 implements D1Database {
         api_duration_milliseconds: null,
         error_code: null,
         error_message: null,
+        provider_selection_json: null,
+        provider_selection_hash: null,
       });
       return { success: true, meta: { changes: 1 } };
     }
@@ -1311,12 +1327,14 @@ describe("fresh marketplace hire contract", () => {
     const generatedFourCategoryMigrationName = "0002_four_category_current_hires.sql";
     const generatedShadowGridMigrationName = "0003_shadow_grid_events.sql";
     const generatedAltanaActivationMigrationName = "0004_altana_venus_activations.sql";
+    const generatedLpLiveMatchMigrationName = "0005_lp_live_match_selection.sql";
     expect(readdirSync(drizzleRoot).sort()).toEqual([
       generatedMigrationName,
       generatedCurrentMigrationName,
       generatedFourCategoryMigrationName,
       generatedShadowGridMigrationName,
       generatedAltanaActivationMigrationName,
+      generatedLpLiveMatchMigrationName,
       "meta",
     ]);
     expect(readdirSync(resolve(drizzleRoot, "meta")).sort()).toEqual([
@@ -1349,6 +1367,7 @@ describe("fresh marketplace hire contract", () => {
       { idx: 2, tag: "0002_four_category_current_hires" },
       { idx: 3, tag: "0003_shadow_grid_events" },
       { idx: 4, tag: "0004_altana_venus_activations" },
+      { idx: 5, tag: "0005_lp_live_match_selection" },
     ]);
 
     const altanaActivationMigration = readFileSync(
@@ -1360,6 +1379,15 @@ describe("fresh marketplace hire contract", () => {
       "utf8",
     );
     expect(generatedAltanaActivationMigration).toBe(altanaActivationMigration);
+    const lpLiveMatchMigration = readFileSync(
+      resolve(PROJECT_ROOT, "migrations", "0006_lp_live_match_selection.sql"),
+      "utf8",
+    );
+    const generatedLpLiveMatchMigration = readFileSync(
+      resolve(drizzleRoot, generatedLpLiveMatchMigrationName),
+      "utf8",
+    );
+    expect(generatedLpLiveMatchMigration).toBe(lpLiveMatchMigration);
 
     const currentMigration = readFileSync(
       resolve(PROJECT_ROOT, "migrations", "0002_current_block_pinned_hires.sql"),

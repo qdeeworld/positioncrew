@@ -1,5 +1,7 @@
 import type { FixtureJobResponse, FreshMarketplaceChain, ServiceId, SessionJob } from "./types.js";
 import { FixtureJobResponseSchema } from "../../src/api/fixture-response-schema.js";
+import { canonicalHash } from "../../src/core/canonical.js";
+import { LpLiveMatchAuditionSchema, LpLiveMatchProviderSelectionSchema, LpLiveMatchExecutionSchema } from "../../src/marketplace/lp-live-match-schema.js";
 import {
   canonicalJson,
   freshMarketplaceTaskForService,
@@ -401,6 +403,44 @@ export async function isFreshMarketplaceChainForReference(
     return false;
   }
 
+  let resultProviderId = hire.providerId;
+  const auditionInput = isRecord(hire.evidence) ? hire.evidence.lpLiveMatchAudition : undefined;
+  if (auditionInput !== undefined) {
+    const audition = LpLiveMatchAuditionSchema.safeParse(auditionInput);
+    if (!audition.success || reference.service !== "LP_REBALANCE" || hire.evidenceMode !== "CURRENT_BLOCK_PINNED" ||
+      audition.data.requestHash !== hire.requestHash ||
+      await sha256Commitment(hire.request) !== hire.requestHash ||
+      await sha256Commitment(hire.evidence) !== hire.evidenceHash) return false;
+    if (job.providerSelection != null) {
+      const selection = LpLiveMatchProviderSelectionSchema.safeParse(job.providerSelection);
+      if (!selection.success || selection.data.auditionHash !== hire.evidenceHash ||
+        await sha256Commitment(selection.data) !== job.providerSelectionHash) return false;
+      const candidate = audition.data.candidates.find((entry) => entry.providerKey === selection.data.selectedProvider);
+      if (!candidate?.selectable || candidate.status !== "COMPATIBLE" ||
+        candidate.providerId !== selection.data.providerId || candidate.name !== selection.data.providerName ||
+        candidate.endpoint !== selection.data.endpoint || candidate.adapterId !== selection.data.adapterId ||
+        canonicalJson(candidate.identity) !== canonicalJson(selection.data.identity)) return false;
+      resultProviderId = selection.data.providerId;
+      if (job.state === "COMPLETED") {
+        const response = isRecord(value.receipt) && isRecord(value.receipt.response) ? value.receipt.response : null;
+        const execution = LpLiveMatchExecutionSchema.safeParse(response?.liveMatchExecution);
+        if (!execution.success || canonicalJson(execution.data.selection) !== canonicalJson(selection.data) ||
+          execution.data.source.hireId !== hire.hireId || execution.data.source.jobId !== job.jobId ||
+          execution.data.source.requestHash !== hire.requestHash || execution.data.source.evidenceHash !== hire.evidenceHash ||
+          execution.data.source.blockNumber !== audition.data.source.blockNumber ||
+          execution.data.source.observedAt !== audition.data.source.observedAt ||
+          execution.data.source.explorerUrl !== audition.data.source.explorerUrl ||
+          execution.data.invocation.endpoint !== selection.data.endpoint ||
+          !isRecord(response?.result) || !isRecord(response.result.deliverable) ||
+          execution.data.invocation.normalizedResponseHash !== canonicalHash(response.result.deliverable) ||
+          execution.data.outcome !== (String(response.result.deliverable.status).startsWith("REFUSED_") ? "REFUSED" : "DELIVERED")) return false;
+      }
+    } else if (job.state !== "CREATED" || job.providerSelectionHash != null) return false;
+  } else if (job.providerSelection != null || job.providerSelectionHash != null ||
+    (isRecord(value.receipt) && isRecord(value.receipt.response) && value.receipt.response.liveMatchExecution !== undefined)) {
+    return false;
+  }
+
   if (job.state === "COMPLETED") {
     const receipt = value.receipt;
     if (!isRecord(receipt) ||
@@ -413,7 +453,7 @@ export async function isFreshMarketplaceChainForReference(
       !isFixtureJobResponseForChain(
         receipt.response,
         reference,
-        hire.providerId,
+        resultProviderId,
         hire.request,
         hire.requestHash,
         receipt.deliverableHash,
