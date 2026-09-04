@@ -1120,6 +1120,12 @@ test("LP waits for a buyer choice and restores the selected provider from its re
   expect(hire.runBodies).toHaveLength(0);
   await expect(page.getByRole("button", { name: "Choose HeyAnon", exact: true })).toBeDisabled();
   const choose = page.getByRole("button", { name: "Choose PositionCrew", exact: true });
+  await page.getByLabel("Minimum net benefit (USD)").fill("6");
+  await expect(choose).toBeDisabled();
+  await expect(page.getByText("Your inputs changed. Compare live providers again before choosing.")).toBeVisible();
+  expect(hire.runBodies).toHaveLength(0);
+  await page.getByRole("button", { name: "Compare live providers", exact: true }).click();
+  await expect(choose).toBeEnabled();
   await choose.focus();
   await expect(choose).toBeFocused();
   const box = await choose.boundingBox();
@@ -1132,7 +1138,7 @@ test("LP waits for a buyer choice and restores the selected provider from its re
   await page.reload();
   await expect(page.getByTestId("lp-live-match-choice")).toContainText("LP Range Operator v1 selected");
   await expect(page.getByRole("heading", { name: "SHIFT range to 0...240" })).toBeVisible();
-  expect(hire.createBodies).toHaveLength(1);
+  expect(hire.createBodies).toHaveLength(2);
   expect(hire.runBodies).toHaveLength(1);
 });
 

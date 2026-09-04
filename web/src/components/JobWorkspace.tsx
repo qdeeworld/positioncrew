@@ -62,6 +62,7 @@ import type {
 } from "../types";
 import { isVerifiedFounderAgentAdvantagePublication } from "../types";
 import type { LpLiveMatchRunRequest } from "../../../src/marketplace/lp-live-match-schema.js";
+import { canonicalJson } from "../../../src/commerce/fresh-hire-schema.js";
 
 type ResultView = "summary" | "json" | "receipt";
 type WorkspaceInputMode = "interactive" | "locked";
@@ -690,10 +691,12 @@ function LpExternalProviderComparisonPanel({
   trace,
   loading,
   onChoose,
+  requestMatches,
 }: {
   trace: FreshMarketplaceChain | null;
   loading: boolean;
   onChoose: (provider: LpLiveMatchRunRequest["selectedProvider"]) => void;
+  requestMatches: boolean;
 }) {
   const evidence = trace?.hire.evidence;
   const audition = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" ? evidence.lpLiveMatchAudition : undefined;
@@ -709,6 +712,7 @@ function LpExternalProviderComparisonPanel({
             <p>Each provider was checked against the saved position and limits from block {audition.source.blockNumber}. Choosing an eligible provider starts a fresh assessment of that saved request.</p>
           </div>
         </div>
+        {trace.job.state === "CREATED" && !requestMatches && <p role="status">Your inputs changed. Compare live providers again before choosing.</p>}
         <div className="provider-audition-grid">
           {audition.candidates.map((candidate) => {
             const selected = selection?.selectedProvider === candidate.providerKey;
@@ -729,7 +733,7 @@ function LpExternalProviderComparisonPanel({
                   <p>ERC-8004 #{candidate.identity.agentId} · {candidate.identity.network === "BSC_MAINNET" ? "BSC mainnet identity" : "BSC testnet identity"}</p>
                   <ul className="provider-audition-checks">{candidate.checks.map((check) => <li key={check.code} className={check.status.toLowerCase()}><span>{check.status}</span><p>{check.detail}</p></li>)}</ul>
                 </details>
-                {trace.job.state === "CREATED" && <button className="primary-action lp-provider-choice" type="button" disabled={loading || !eligible} onClick={() => onChoose(candidate.providerKey)}>Choose {candidate.providerKey === "HEYANON" ? "HeyAnon" : "PositionCrew"}</button>}
+                {trace.job.state === "CREATED" && <button className="primary-action lp-provider-choice" type="button" disabled={loading || !eligible || !requestMatches} onClick={() => onChoose(candidate.providerKey)}>Choose {candidate.providerKey === "HEYANON" ? "HeyAnon" : "PositionCrew"}</button>}
               </article>
             );
           })}
@@ -2294,7 +2298,12 @@ export function JobWorkspace({
           )}
           <LendingProviderAuditionPanel trace={marketplaceTrace} />
           <LendingExternalProviderComparisonPanel trace={marketplaceTrace} />
-          <LpExternalProviderComparisonPanel trace={marketplaceTrace} loading={loading} onChoose={(choice) => void chooseLpProvider(choice)} />
+          <LpExternalProviderComparisonPanel trace={marketplaceTrace} loading={loading} onChoose={(choice) => void chooseLpProvider(choice)} requestMatches={Boolean(
+            service === "LP_REBALANCE" && inputMode === "interactive" && draftRequest && marketplaceTrace &&
+            canonicalJson(draftRequest) === canonicalJson(marketplaceTrace.hire.request) &&
+            marketplaceTrace.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" &&
+            canonicalJson(liveObservation) === canonicalJson(marketplaceTrace.hire.evidence.source)
+          )} />
           <GridAndYieldExternalComparisonPanel trace={marketplaceTrace} />
           {marketplaceTrace && (
             <div className="request-boundary" role="status" aria-live="polite">
