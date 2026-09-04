@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly PositionCrew TermiX wallet-session renewal check
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1h
+RandomizedDelaySec=2min
+Persistent=true
+AccuracySec=1min
+Unit=positioncrew-termix-session-renew.service
+
+[Install]
+WantedBy=timers.target
