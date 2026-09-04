@@ -323,7 +323,8 @@ async function rpcRequestOnce(rpcUrl: string, call: RpcCall): Promise<unknown> {
 
 async function rpcRequest(rpcUrl: string, call: RpcCall): Promise<unknown> {
   const failures: string[] = [];
-  const candidates = rpcFallbacks(rpcUrl);
+  // Official BNB dataseeds disable eth_getLogs. They are not log fallbacks.
+  const candidates = call.method === "eth_getLogs" ? [rpcUrl] : rpcFallbacks(rpcUrl);
   for (let attempt = 1; attempt <= RPC_TRANSPORT_ATTEMPTS; attempt += 1) {
     try {
       return await firstSuccessfulRpcTransport(
@@ -338,6 +339,71 @@ async function rpcRequest(rpcUrl: string, call: RpcCall): Promise<unknown> {
     if (attempt < RPC_TRANSPORT_ATTEMPTS) await wait(RPC_RETRY_DELAY_MS);
   }
   throw new RpcTransportError(`BSC RPC providers unavailable (${failures.join("; ")})`);
+}
+
+async function configuredPancakeLogs(
+  endpoint: string,
+  blockNumber: bigint,
+  blockHash: Hex,
+  call: RpcCall,
+): Promise<unknown> {
+  // This value comes only from the Worker secret, never from a buyer request.
+  // Do not include provider errors or URL paths in diagnostics: they can carry keys.
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    throw new Error("BSC log RPC configuration is invalid");
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.hash) {
+    throw new Error("BSC log RPC requires an HTTPS endpoint without userinfo or fragment");
+  }
+  // This integration relies on NodeReal's documented 50,000-record limit.
+  // An arbitrary provider may silently truncate at a smaller limit, so it must
+  // not inherit this completeness check without its own reviewed adapter.
+  if (
+    parsed.hostname !== "bsc-mainnet.nodereal.io" || parsed.port || parsed.search ||
+    !/^\/v1\/[0-9a-f]{32}$/i.test(parsed.pathname)
+  ) {
+    throw new Error("BSC log RPC requires the supported NodeReal BSC endpoint");
+  }
+  let identity: unknown[];
+  try {
+    identity = await rpcBatchOnce(endpoint, [
+      { method: "eth_chainId", params: [] },
+      { method: "eth_getBlockByNumber", params: [toHex(blockNumber), false] },
+    ]);
+  } catch {
+    throw new RpcTransportError("Configured BSC log RPC identity read failed");
+  }
+  const [chainId, blockValue] = identity;
+  const block = rpcBlock(blockValue, "Configured BSC log RPC block");
+  if (
+    typeof chainId !== "string" || !/^0x[0-9a-f]+$/i.test(chainId) ||
+    BigInt(chainId) !== 56n || BigInt(block.number) !== blockNumber ||
+    block.hash.toLowerCase() !== blockHash.toLowerCase()
+  ) {
+    throw new Error("Configured BSC log RPC does not match the pinned BSC block");
+  }
+  let logs: unknown;
+  let terminalBlockValue: unknown;
+  try {
+    logs = await rpcRequest(endpoint, call);
+    terminalBlockValue = await rpcRequest(endpoint, {
+      method: "eth_getBlockByNumber",
+      params: [toHex(blockNumber), false],
+    });
+  } catch {
+    throw new RpcTransportError("Configured BSC log RPC request failed");
+  }
+  const terminalBlock = rpcBlock(terminalBlockValue, "Configured BSC log RPC terminal block");
+  if (
+    BigInt(terminalBlock.number) !== blockNumber ||
+    terminalBlock.hash.toLowerCase() !== blockHash.toLowerCase()
+  ) {
+    throw new Error("Pinned BSC block changed during the configured log read");
+  }
+  return logs;
 }
 
 async function rpcBatchChunked(
@@ -816,6 +882,7 @@ async function readPancakeSwapRunRate(
   token0Decimals: number,
   token0PriceUsd: number,
   feeTier: number,
+  logRpc?: { endpoint: string; blockHash: Hex },
 ): Promise<{
   volumeRunRate24hUsd: number;
   feesRunRate24hUsd: number;
@@ -834,7 +901,7 @@ async function readPancakeSwapRunRate(
     1,
     Number(blockTimestamp - BigInt(startBlock.timestamp)),
   );
-  const logValue = await rpcRequest(LOG_RPC, {
+  const logCall: RpcCall = {
     method: "eth_getLogs",
     params: [{
       address: poolAddress,
@@ -842,8 +909,14 @@ async function readPancakeSwapRunRate(
       toBlock: toHex(blockNumber),
       topics: [PANCAKE_V3_SWAP_TOPIC],
     }],
-  });
+  };
+  const logValue = logRpc
+    ? await configuredPancakeLogs(logRpc.endpoint, blockNumber, logRpc.blockHash, logCall)
+    : await rpcRequest(LOG_RPC, logCall);
   if (!Array.isArray(logValue)) throw new Error("PancakeSwap swap logs are unavailable");
+  if (logValue.length >= 50_000) {
+    throw new Error("PancakeSwap swap logs may have reached the provider response cap");
+  }
   const logs = logValue as RpcLog[];
   let token0VolumeRaw = 0n;
   for (const log of logs) {
@@ -1332,6 +1405,7 @@ export async function verifyPancakeGridPriceSample(sample: PancakeGridPriceSampl
 
 export async function inspectPancakePosition(
   tokenIdInput: string | bigint,
+  options: { logRpcUrl?: string } = {},
 ): Promise<PancakePositionProbe> {
   const tokenIdText = String(tokenIdInput);
   if (!/^\d{1,78}$/.test(tokenIdText)) {
@@ -1571,6 +1645,7 @@ export async function inspectPancakePosition(
       token0Decimals,
       usdtPriceUsd,
       feeTier,
+      options.logRpcUrl ? { endpoint: options.logRpcUrl, blockHash: block.hash } : undefined,
     ),
   ]);
 
