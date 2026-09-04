@@ -10,7 +10,6 @@ import {
   AddressSchema,
   PositiveDecimalSchema,
   TimestampSchema,
-  UnsignedDecimalSchema,
 } from "../contracts/common.js";
 import { canonicalHash } from "../core/canonical.js";
 import { evaluateLendingRescue } from "../evaluators/lending-rescue.js";
@@ -67,7 +66,7 @@ const TermixLendingRequestFields = {
   targetHealthFactor: PositiveDecimalSchema,
   stressPriceDropBps: z.number().int().min(0).max(5_000),
   maxActionUsd: PositiveDecimalSchema,
-  maxGasUsd: UnsignedDecimalSchema,
+  maxGasUsd: PositiveDecimalSchema,
   maxSlippageBps: z.number().int().min(0).max(2_000),
 };
 

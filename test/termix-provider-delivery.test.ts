@@ -5,6 +5,7 @@ import {
   assertTermixProviderOrder,
   createTermixLendingIntakeFromRuntimeMessage,
   sealTermixFulfillmentCheckpoint,
+  TermixLendingBuyerRequestSchema,
   verifyTermixFulfillmentCheckpoint,
 } from "../src/commerce/termix-provider-delivery.js";
 
@@ -141,6 +142,10 @@ describe("TermiX provider delivery guard", () => {
     });
     expect(intake.maxActionUsd).toBe("250");
     expect(intake.buyerEvidence.senderAccountId).toBe("buyer-account-1");
+    expect(TermixLendingBuyerRequestSchema.safeParse({
+      ...buyerRequest,
+      maxGasUsd: "0",
+    }).success).toBe(false);
   });
 
   it("rejects a runtime message not authored by the order client account", () => {

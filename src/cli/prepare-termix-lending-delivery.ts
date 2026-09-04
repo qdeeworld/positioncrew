@@ -273,11 +273,21 @@ function remoteArtifacts(input: unknown): z.infer<typeof RemoteArtifactSchema>[]
   return z.array(RemoteArtifactSchema).parse(items);
 }
 
-function runtimeMessages(input: unknown): z.infer<typeof TermixRuntimeBuyerMessageSchema>[] {
+function runtimeMessage(
+  input: unknown,
+  messageId: string,
+): z.infer<typeof TermixRuntimeBuyerMessageSchema> {
   if (!input || typeof input !== "object" || !("items" in input) || !Array.isArray((input as { items: unknown }).items)) {
     throw new Error("TermiX runtime inbox has an undocumented response shape");
   }
-  return z.array(TermixRuntimeBuyerMessageSchema).parse((input as { items: unknown[] }).items);
+  const selected = (input as { items: unknown[] }).items.find(
+    (item) => item !== null
+      && typeof item === "object"
+      && "messageId" in item
+      && (item as { messageId?: unknown }).messageId === messageId,
+  );
+  if (!selected) throw new Error("TermiX runtime inbox did not return the specified buyer message");
+  return TermixRuntimeBuyerMessageSchema.parse(selected);
 }
 
 function registeredArtifact(input: unknown): z.infer<typeof RemoteArtifactSchema> {
@@ -456,14 +466,12 @@ async function run(): Promise<void> {
     throw new Error("Order delivery deadline has less than 120 seconds remaining");
   }
   const runtimeToken = await readRuntimeToken();
-  const inbox = runtimeMessages(await apiJson(
+  const buyerMessage = runtimeMessage(await apiJson(
     baseUrl,
     runtimeToken,
     "GET",
     `/api/v1/a2a/runtime/inbox?since=${encodeURIComponent(locator.since)}&limit=100`,
-  ));
-  const buyerMessage = inbox.find((message) => message.messageId === locator.messageId);
-  if (!buyerMessage) throw new Error("TermiX runtime inbox did not return the specified buyer message");
+  ), locator.messageId);
   const intake = createTermixLendingIntakeFromRuntimeMessage(order, locator, buyerMessage);
   const intakeHash = canonicalHash(intake);
   const sameRound = previous?.deliveryRound === (order.redoUsed ? 2 : 1);
