@@ -358,6 +358,15 @@ async function configuredPancakeLogs(
   if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.hash) {
     throw new Error("BSC log RPC requires an HTTPS endpoint without userinfo or fragment");
   }
+  // This integration relies on NodeReal's documented 50,000-record limit.
+  // An arbitrary provider may silently truncate at a smaller limit, so it must
+  // not inherit this completeness check without its own reviewed adapter.
+  if (
+    parsed.hostname !== "bsc-mainnet.nodereal.io" || parsed.port || parsed.search ||
+    !/^\/v1\/[0-9a-f]{32}$/i.test(parsed.pathname)
+  ) {
+    throw new Error("BSC log RPC requires the supported NodeReal BSC endpoint");
+  }
   let identity: unknown[];
   try {
     identity = await rpcBatchOnce(endpoint, [
@@ -376,11 +385,25 @@ async function configuredPancakeLogs(
   ) {
     throw new Error("Configured BSC log RPC does not match the pinned BSC block");
   }
+  let logs: unknown;
+  let terminalBlockValue: unknown;
   try {
-    return await rpcRequest(endpoint, call);
+    logs = await rpcRequest(endpoint, call);
+    terminalBlockValue = await rpcRequestOnce(endpoint, {
+      method: "eth_getBlockByNumber",
+      params: [toHex(blockNumber), false],
+    });
   } catch {
     throw new RpcTransportError("Configured BSC log RPC request failed");
   }
+  const terminalBlock = rpcBlock(terminalBlockValue, "Configured BSC log RPC terminal block");
+  if (
+    BigInt(terminalBlock.number) !== blockNumber ||
+    terminalBlock.hash.toLowerCase() !== blockHash.toLowerCase()
+  ) {
+    throw new Error("Pinned BSC block changed during the configured log read");
+  }
+  return logs;
 }
 
 async function rpcBatchChunked(
