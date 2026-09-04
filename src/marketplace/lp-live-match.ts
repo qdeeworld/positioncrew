@@ -71,6 +71,17 @@ function elapsed(startedAt: number): number {
   return Math.max(1, Math.round(performance.now() - startedAt));
 }
 
+function requireFreshCompletion(request: LpRebalanceRequest): void {
+  const completedAt = Date.now();
+  if (completedAt >= Date.parse(request.deadline)) {
+    throw new Error("The selected-provider job expired while waiting for its fresh response");
+  }
+  const evidenceTimes = [request.marketState.observedAt, ...request.sources.map((source) => source.observedAt)];
+  if (evidenceTimes.some((observedAt) => completedAt - Date.parse(observedAt) > request.maxDataAgeSeconds * 1_000)) {
+    throw new Error("The saved LP market evidence became stale while waiting for the selected provider");
+  }
+}
+
 function candidateChecks(
   checks: Array<{ id: string; passed: boolean; evidence: string }>,
 ): Array<{ code: string; status: "PASS" | "FAIL"; detail: string }> {
@@ -409,6 +420,7 @@ export async function executeLpLiveMatchProvider(input: {
         throw new Error("Fresh PositionCrew execution failed its selected-provider conformance checks");
       }
       rawResponseHash = canonicalHash(deliverable);
+      requireFreshCompletion(request);
       checks = [
         { code: "FRESH_SELECTED_PROVIDER_RUN", status: "PASS", detail: "PositionCrew executed the exact persisted request after selection." },
         ...candidateChecks(response.result.evaluation.checks),
@@ -445,14 +457,7 @@ export async function executeLpLiveMatchProvider(input: {
         10_000,
       );
       rawResponseHash = assessment.invocation.rawResponseHash;
-      if (Date.now() >= Date.parse(request.deadline)) {
-        throw new Error("The selected-provider job expired while waiting for its fresh response");
-      }
-      const completedAtMilliseconds = Date.now();
-      const evidenceTimes = [request.marketState.observedAt, ...request.sources.map((source) => source.observedAt)];
-      if (evidenceTimes.some((observedAt) => completedAtMilliseconds - Date.parse(observedAt) > request.maxDataAgeSeconds * 1_000)) {
-        throw new Error("The saved LP market evidence became stale while waiting for the selected provider");
-      }
+      requireFreshCompletion(request);
       const stable = candidate.rawResponseHash === assessment.invocation.rawResponseHash;
       const compatible = assessment.eligibleForLpRebalance &&
         assessment.checks.every((check) => check.status === "PASS");
