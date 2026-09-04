@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open } from "node:fs/promises";
+import { mkdir, open, unlink } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
@@ -189,7 +189,7 @@ function identity(): { providerAgentId: string; listingId: string } {
   return { providerAgentId, listingId };
 }
 
-function statePaths(orderId: string): { root: string; checkpoint: string; artifactRoot: string } {
+function statePaths(orderId: string): { root: string; checkpoint: string; artifactRoot: string; lock: string } {
   const root = resolve(process.env.TERMIX_FULFILLMENT_STATE_DIR?.trim() || "/var/lib/positioncrew-termix-orders/fulfillment");
   if (!isAbsolute(root)) throw new Error("TERMIX_FULFILLMENT_STATE_DIR must be absolute");
   const key = canonicalHash(orderId).slice("sha256:".length);
@@ -197,6 +197,39 @@ function statePaths(orderId: string): { root: string; checkpoint: string; artifa
     root,
     checkpoint: resolve(root, `${key}.json`),
     artifactRoot: resolve(root, "artifacts"),
+    lock: resolve(root, `${key}.lock`),
+  };
+}
+
+async function acquireOrderLock(root: string, path: string): Promise<() => Promise<void>> {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(
+      path,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+      0o600,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(`Another fulfillment command already holds the order lock: ${path}`);
+    }
+    throw error;
+  }
+  try {
+    await handle.writeFile(`${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`);
+    await handle.sync();
+  } catch (error) {
+    await handle.close();
+    await unlink(path).catch(() => undefined);
+    throw error;
+  }
+  await handle.close();
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    await unlink(path);
   };
 }
 
@@ -273,21 +306,57 @@ function remoteArtifacts(input: unknown): z.infer<typeof RemoteArtifactSchema>[]
   return z.array(RemoteArtifactSchema).parse(items);
 }
 
-function runtimeMessage(
-  input: unknown,
-  messageId: string,
-): z.infer<typeof TermixRuntimeBuyerMessageSchema> {
+function runtimeInboxItems(input: unknown): unknown[] {
   if (!input || typeof input !== "object" || !("items" in input) || !Array.isArray((input as { items: unknown }).items)) {
     throw new Error("TermiX runtime inbox has an undocumented response shape");
   }
-  const selected = (input as { items: unknown[] }).items.find(
-    (item) => item !== null
-      && typeof item === "object"
-      && "messageId" in item
-      && (item as { messageId?: unknown }).messageId === messageId,
-  );
-  if (!selected) throw new Error("TermiX runtime inbox did not return the specified buyer message");
-  return TermixRuntimeBuyerMessageSchema.parse(selected);
+  return (input as { items: unknown[] }).items;
+}
+
+async function fetchRuntimeMessage(
+  baseUrl: string,
+  runtimeToken: string,
+  locator: z.infer<typeof TermixBuyerMessageLocatorSchema>,
+): Promise<z.infer<typeof TermixRuntimeBuyerMessageSchema>> {
+  const pageLimit = 100;
+  const maxPages = 20;
+  let since = locator.since;
+  for (let page = 0; page < maxPages; page += 1) {
+    const items = runtimeInboxItems(await apiJson(
+      baseUrl,
+      runtimeToken,
+      "GET",
+      `/api/v1/a2a/runtime/inbox?since=${encodeURIComponent(since)}&limit=${pageLimit}`,
+    ));
+    const matches = items.filter(
+      (item) => item !== null
+        && typeof item === "object"
+        && "messageId" in item
+        && (item as { messageId?: unknown }).messageId === locator.messageId,
+    );
+    if (matches.length > 1) throw new Error("TermiX runtime inbox returned a duplicate buyer message ID");
+    if (matches.length === 1) return TermixRuntimeBuyerMessageSchema.parse(matches[0]);
+    if (items.length === 0) break;
+
+    const sinceTime = Date.parse(since);
+    let nextTime = sinceTime;
+    let nextSince: string | null = null;
+    for (const item of items) {
+      if (item === null || typeof item !== "object" || !("createdAt" in item)) continue;
+      const createdAt = (item as { createdAt?: unknown }).createdAt;
+      if (typeof createdAt !== "string") continue;
+      const createdAtTime = Date.parse(createdAt);
+      if (Number.isFinite(createdAtTime) && createdAtTime > nextTime) {
+        nextTime = createdAtTime;
+        nextSince = createdAt;
+      }
+    }
+    if (!nextSince) {
+      throw new Error("TermiX runtime inbox pagination made no forward progress");
+    }
+    since = nextSince;
+  }
+  throw new Error(`TermiX runtime inbox did not return buyer message ${locator.messageId} within ${maxPages} pages`);
 }
 
 function registeredArtifact(input: unknown): z.infer<typeof RemoteArtifactSchema> {
@@ -394,15 +463,17 @@ async function run(): Promise<void> {
     return;
   }
 
-  const baseUrl = checkedBaseUrl();
-  const token = await readSessionToken();
-  const order = await fetchOrder(baseUrl, token, args.orderId);
-  const previous = await loadCheckpoint(paths.checkpoint);
-  if (previous && (
-    previous.baseUrl !== baseUrl ||
-    previous.providerAgentId !== order.providerAgentId ||
-    previous.listingId !== order.listingId
-  )) throw new Error("Existing fulfillment checkpoint has a different immutable identity");
+  const releaseLock = await acquireOrderLock(paths.root, paths.lock);
+  try {
+    const baseUrl = checkedBaseUrl();
+    const token = await readSessionToken();
+    const order = await fetchOrder(baseUrl, token, args.orderId);
+    const previous = await loadCheckpoint(paths.checkpoint);
+    if (previous && (
+      previous.baseUrl !== baseUrl ||
+      previous.providerAgentId !== order.providerAgentId ||
+      previous.listingId !== order.listingId
+    )) throw new Error("Existing fulfillment checkpoint has a different immutable identity");
 
   if (args.command === "observe") {
     const checkpoint = await saveCheckpoint(
@@ -466,12 +537,7 @@ async function run(): Promise<void> {
     throw new Error("Order delivery deadline has less than 120 seconds remaining");
   }
   const runtimeToken = await readRuntimeToken();
-  const buyerMessage = runtimeMessage(await apiJson(
-    baseUrl,
-    runtimeToken,
-    "GET",
-    `/api/v1/a2a/runtime/inbox?since=${encodeURIComponent(locator.since)}&limit=100`,
-  ), locator.messageId);
+  const buyerMessage = await fetchRuntimeMessage(baseUrl, runtimeToken, locator);
   const intake = createTermixLendingIntakeFromRuntimeMessage(order, locator, buyerMessage);
   const intakeHash = canonicalHash(intake);
   const sameRound = previous?.deliveryRound === (order.redoUsed ? 2 : 1);
@@ -639,6 +705,9 @@ async function run(): Promise<void> {
     ...checkpoint,
     nextAction: "Explicit operator confirmation is required before broadcasting submitDelivery.",
   });
+  } finally {
+    await releaseLock();
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
