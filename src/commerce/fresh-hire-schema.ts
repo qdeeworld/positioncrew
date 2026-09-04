@@ -218,7 +218,9 @@ export const CurrentBlockPinnedEvidenceSchema = z.object({
     attributable: z.boolean(),
     persisted: z.boolean().optional(),
     exactRequestAccepted: z.literal(false),
-    eligibleForRangeAssessmentActivation: z.boolean(),
+    // Earlier persisted v1 Grid comparisons predate this scoped eligibility
+    // field. Preserve its absence (and receipt hashes), never default to true.
+    eligibleForRangeAssessmentActivation: z.boolean().optional(),
     eligibleForGridSelection: z.boolean(),
     eligibleForLiveMatch: z.boolean(),
     adapterNormalized: z.boolean().optional(),
