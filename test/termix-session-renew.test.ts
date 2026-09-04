@@ -69,7 +69,7 @@ describe("TermiX wallet-session renewal", () => {
     const { directory, tokenPath, config } = fixture();
     const token = jwt(new Date(NOW.getTime() + 7 * 60 * 60 * 1_000));
     writeFileSync(tokenPath, token, { mode: 0o600 });
-    const fetchMock = vi.fn(async () => Response.json({
+    const fetchMock = vi.fn(async (_input: unknown) => Response.json({
       items: [{ id: TERMIX_SESSION_REQUIRED_AGENT_ID }],
     }));
     const readOwnerKey = vi.fn(async () => TEST_KEY);
