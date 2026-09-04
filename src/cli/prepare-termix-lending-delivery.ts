@@ -8,14 +8,17 @@ import { canonicalHash } from "../core/canonical.js";
 import {
   assertTermixProviderIntent,
   assertTermixProviderOrder,
+  assertTermixLendingArtifactOrder,
+  createTermixLendingIntakeFromRuntimeMessage,
   createTermixLendingDeliveryArtifact,
   sealTermixFulfillmentCheckpoint,
   termixDeliveryArtifactDescriptor,
   TermixContractsConfigSchema,
+  TermixBuyerMessageLocatorSchema,
   TermixFulfillmentCheckpointSchema,
   TermixLendingDeliveryArtifactSchema,
-  TermixLendingIntakeSchema,
   TermixProviderOrderSchema,
+  TermixRuntimeBuyerMessageSchema,
   verifyTermixFulfillmentCheckpoint,
   type TermixFulfillmentCheckpoint,
   type TermixProviderOrder,
@@ -112,6 +115,14 @@ async function readSessionToken(): Promise<string> {
   if (!path || !isAbsolute(path)) throw new Error("TERMIX_SESSION_TOKEN_FILE must be absolute");
   const token = (await readBoundedFile(path, true)).trim();
   if (!token || /\s/.test(token)) throw new Error("TermiX session token is malformed");
+  return token;
+}
+
+async function readRuntimeToken(): Promise<string> {
+  const path = process.env.TERMIX_RUNTIME_TOKEN_FILE?.trim();
+  if (!path || !isAbsolute(path)) throw new Error("TERMIX_RUNTIME_TOKEN_FILE must be absolute");
+  const token = (await readBoundedFile(path, true)).trim();
+  if (!token || /\s/.test(token)) throw new Error("TermiX runtime token is malformed");
   return token;
 }
 
@@ -262,6 +273,13 @@ function remoteArtifacts(input: unknown): z.infer<typeof RemoteArtifactSchema>[]
   return z.array(RemoteArtifactSchema).parse(items);
 }
 
+function runtimeMessages(input: unknown): z.infer<typeof TermixRuntimeBuyerMessageSchema>[] {
+  if (!input || typeof input !== "object" || !("items" in input) || !Array.isArray((input as { items: unknown }).items)) {
+    throw new Error("TermiX runtime inbox has an undocumented response shape");
+  }
+  return z.array(TermixRuntimeBuyerMessageSchema).parse((input as { items: unknown[] }).items);
+}
+
 function registeredArtifact(input: unknown): z.infer<typeof RemoteArtifactSchema> {
   const candidates = [
     input,
@@ -340,27 +358,22 @@ async function run(): Promise<void> {
   if (args.command === "intake-template") {
     const capturedAt = new Date().toISOString();
     print({
-      schemaVersion: "positioncrew.termix-lending-intake.v1",
-      orderId: args.orderId,
-      account: "0x0000000000000000000000000000000000000000",
-      targetHealthFactor: "1.25",
-      stressPriceDropBps: 1000,
-      maxActionUsd: "250",
-      maxGasUsd: "0.10",
-      maxSlippageBps: 30,
-      buyerEvidence: {
-        kind: "TERMIX_BUYER_MESSAGE",
-        reference: "replace-with-conversation-or-attachment-id",
-        exactInstruction: "Replace this text with the buyer's exact instruction containing 0x0000000000000000000000000000000000000000.",
-        capturedAt,
-        declaredConstraints: {
-          account: "0x0000000000000000000000000000000000000000",
-          targetHealthFactor: "1.25",
-          stressPriceDropBps: 1000,
-          maxActionUsd: "250",
-          maxGasUsd: "0.10",
-          maxSlippageBps: 30,
-        },
+      buyerMessage: {
+        schemaVersion: "positioncrew.termix-lending-buyer-request.v1",
+        orderId: args.orderId,
+        account: "0x0000000000000000000000000000000000000000",
+        targetHealthFactor: "1.25",
+        stressPriceDropBps: 1000,
+        maxActionUsd: "250",
+        maxGasUsd: "0.10",
+        maxSlippageBps: 30,
+      },
+      operatorLocator: {
+        schemaVersion: "positioncrew.termix-buyer-message-locator.v1",
+        orderId: args.orderId,
+        conversationId: "replace-with-termix-conversation-id",
+        messageId: "replace-with-termix-message-id",
+        since: capturedAt,
       },
     });
     return;
@@ -432,16 +445,26 @@ async function run(): Promise<void> {
     return;
   }
 
-  const intake = TermixLendingIntakeSchema.parse(
+  const locator = TermixBuyerMessageLocatorSchema.parse(
     JSON.parse(await readBoundedFile(args.intakePath!, false)),
   );
-  if (intake.orderId !== order.id) throw new Error("Intake orderId does not match --order");
+  if (locator.orderId !== order.id) throw new Error("Buyer message locator does not match --order");
   if (!["FUNDED", "IN_PROGRESS"].includes(order.status) || order.availableActions.canSubmitDelivery !== true) {
     throw new Error("Order is not indexed as ready for delivery");
   }
   if (!order.deliveryDueAt || Date.parse(order.deliveryDueAt) - Date.now() < 120_000) {
     throw new Error("Order delivery deadline has less than 120 seconds remaining");
   }
+  const runtimeToken = await readRuntimeToken();
+  const inbox = runtimeMessages(await apiJson(
+    baseUrl,
+    runtimeToken,
+    "GET",
+    `/api/v1/a2a/runtime/inbox?since=${encodeURIComponent(locator.since)}&limit=100`,
+  ));
+  const buyerMessage = inbox.find((message) => message.messageId === locator.messageId);
+  if (!buyerMessage) throw new Error("TermiX runtime inbox did not return the specified buyer message");
+  const intake = createTermixLendingIntakeFromRuntimeMessage(order, locator, buyerMessage);
   const intakeHash = canonicalHash(intake);
   const sameRound = previous?.deliveryRound === (order.redoUsed ? 2 : 1);
   if (sameRound && previous.intakeHash && previous.intakeHash !== intakeHash) {
@@ -467,6 +490,7 @@ async function run(): Promise<void> {
     }
     const storedContent = await readBoundedFile(artifactPath, true);
     artifact = TermixLendingDeliveryArtifactSchema.parse(JSON.parse(storedContent));
+    assertTermixLendingArtifactOrder(artifact, order);
     descriptor = termixDeliveryArtifactDescriptor(artifact);
     if (
       storedContent !== descriptor.content ||

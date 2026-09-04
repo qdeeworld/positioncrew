@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   assertTermixProviderIntent,
   assertTermixProviderOrder,
+  createTermixLendingIntakeFromRuntimeMessage,
   sealTermixFulfillmentCheckpoint,
-  TermixLendingIntakeSchema,
   verifyTermixFulfillmentCheckpoint,
 } from "../src/commerce/termix-provider-delivery.js";
 
@@ -35,6 +35,7 @@ function order(status: "PENDING_ACCEPT" | "IN_PROGRESS" = "PENDING_ACCEPT") {
     amount: "5",
     currency: "USDC",
     clientAgentId: "client-1",
+    clientAccountId: "buyer-account-1",
     providerAgentId: "provider-1",
     listingId: "listing-1",
     acceptDeadline: "2026-09-04T13:00:00.000Z",
@@ -112,9 +113,9 @@ describe("TermiX provider delivery guard", () => {
     })).toThrow("reviewed artifact hash");
   });
 
-  it("requires buyer evidence to name the evaluated account", () => {
-    expect(() => TermixLendingIntakeSchema.parse({
-      schemaVersion: "positioncrew.termix-lending-intake.v1",
+  it("constructs intake only from an order-bound TermiX buyer message", () => {
+    const buyerRequest = {
+      schemaVersion: "positioncrew.termix-lending-buyer-request.v1",
       orderId: "order-1",
       account: "0x0000000000000000000000000000000000000001",
       targetHealthFactor: "1.25",
@@ -122,48 +123,42 @@ describe("TermiX provider delivery guard", () => {
       maxActionUsd: "250",
       maxGasUsd: "0.10",
       maxSlippageBps: 30,
-      buyerEvidence: {
-        kind: "TERMIX_BUYER_MESSAGE",
-        reference: "conversation-1",
-        exactInstruction: "Please check my lending account.",
-        capturedAt: NOW.toISOString(),
-        declaredConstraints: {
-          account: "0x0000000000000000000000000000000000000001",
-          targetHealthFactor: "1.25",
-          stressPriceDropBps: 1000,
-          maxActionUsd: "250",
-          maxGasUsd: "0.10",
-          maxSlippageBps: 30,
-        },
-      },
-    })).toThrow("exact account");
+    };
+    const intake = createTermixLendingIntakeFromRuntimeMessage(order("IN_PROGRESS"), {
+      schemaVersion: "positioncrew.termix-buyer-message-locator.v1",
+      orderId: "order-1",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      since: "2026-09-04T11:59:00.000Z",
+    }, {
+      messageId: "message-1",
+      conversationId: "conversation-1",
+      orderId: "order-1",
+      kind: "TEXT",
+      text: JSON.stringify(buyerRequest),
+      from: { accountId: "buyer-account-1" },
+      createdAt: NOW.toISOString(),
+    });
+    expect(intake.maxActionUsd).toBe("250");
+    expect(intake.buyerEvidence.senderAccountId).toBe("buyer-account-1");
   });
 
-  it("rejects buyer evidence that changes a consequential rescue limit", () => {
-    expect(() => TermixLendingIntakeSchema.parse({
-      schemaVersion: "positioncrew.termix-lending-intake.v1",
+  it("rejects a runtime message not authored by the order client account", () => {
+    expect(() => createTermixLendingIntakeFromRuntimeMessage(order("IN_PROGRESS"), {
+      schemaVersion: "positioncrew.termix-buyer-message-locator.v1",
       orderId: "order-1",
-      account: "0x0000000000000000000000000000000000000001",
-      targetHealthFactor: "1.25",
-      stressPriceDropBps: 1000,
-      maxActionUsd: "250",
-      maxGasUsd: "0.10",
-      maxSlippageBps: 30,
-      buyerEvidence: {
-        kind: "TERMIX_BUYER_ATTACHMENT",
-        reference: "artifact-1",
-        exactInstruction: "Evaluate 0x0000000000000000000000000000000000000001 using the attached constraints.",
-        capturedAt: NOW.toISOString(),
-        declaredConstraints: {
-          account: "0x0000000000000000000000000000000000000001",
-          targetHealthFactor: "1.50",
-          stressPriceDropBps: 1000,
-          maxActionUsd: "250",
-          maxGasUsd: "0.10",
-          maxSlippageBps: 30,
-        },
-      },
-    })).toThrow("every exact rescue constraint");
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      since: "2026-09-04T11:59:00.000Z",
+    }, {
+      messageId: "message-1",
+      conversationId: "conversation-1",
+      orderId: "order-1",
+      kind: "TEXT",
+      text: "{}",
+      from: { accountId: "attacker-account" },
+      createdAt: NOW.toISOString(),
+    })).toThrow("order client account");
   });
 
   it("detects checkpoint mutation", () => {

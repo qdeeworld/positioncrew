@@ -38,6 +38,7 @@ export const TermixProviderOrderSchema = z.object({
   amount: PositiveDecimalSchema,
   currency: z.enum(["USDC", "USDT"]),
   clientAgentId: z.string().min(1),
+  clientAccountId: z.string().min(1),
   providerAgentId: z.string().min(1),
   listingId: z.string().min(1),
   acceptDeadline: TimestampSchema.nullable().optional(),
@@ -60,8 +61,7 @@ export const TermixContractsConfigSchema = z.object({
   }).passthrough()).min(1),
 }).passthrough();
 
-export const TermixLendingIntakeSchema = z.object({
-  schemaVersion: z.literal("positioncrew.termix-lending-intake.v1"),
+const TermixLendingRequestFields = {
   orderId: z.string().min(1).max(200),
   account: AddressSchema,
   targetHealthFactor: PositiveDecimalSchema,
@@ -69,23 +69,57 @@ export const TermixLendingIntakeSchema = z.object({
   maxActionUsd: PositiveDecimalSchema,
   maxGasUsd: UnsignedDecimalSchema,
   maxSlippageBps: z.number().int().min(0).max(2_000),
+};
+
+export const TermixLendingBuyerRequestSchema = z.object({
+  schemaVersion: z.literal("positioncrew.termix-lending-buyer-request.v1"),
+  ...TermixLendingRequestFields,
+}).strict().superRefine((value, context) => {
+  if (Number(value.targetHealthFactor) <= 1) {
+    context.addIssue({
+      code: "custom",
+      path: ["targetHealthFactor"],
+      message: "targetHealthFactor must be greater than 1",
+    });
+  }
+});
+
+export const TermixBuyerMessageLocatorSchema = z.object({
+  schemaVersion: z.literal("positioncrew.termix-buyer-message-locator.v1"),
+  orderId: z.string().min(1).max(200),
+  conversationId: z.string().min(1).max(200),
+  messageId: z.string().min(1).max(200),
+  since: TimestampSchema,
+}).strict();
+
+export const TermixRuntimeBuyerMessageSchema = z.object({
+  messageId: z.string().min(1).max(200),
+  conversationId: z.string().min(1).max(200),
+  conversationKind: z.string().min(1).optional(),
+  orderId: z.string().min(1).max(200),
+  kind: z.literal("TEXT"),
+  text: z.string().min(1).max(16_000),
+  from: z.object({
+    accountId: z.string().min(1),
+    walletAddress: AddressSchema.optional(),
+    displayName: z.string().nullish(),
+    handle: z.string().nullish(),
+  }).passthrough(),
+  createdAt: TimestampSchema,
+}).passthrough();
+
+export const TermixLendingIntakeSchema = z.object({
+  schemaVersion: z.literal("positioncrew.termix-lending-intake.v1"),
+  ...TermixLendingRequestFields,
   buyerEvidence: z.object({
-    kind: z.enum([
-      "TERMIX_ORDER_SCOPE",
-      "TERMIX_BUYER_MESSAGE",
-      "TERMIX_BUYER_ATTACHMENT",
-    ]),
-    reference: z.string().min(1).max(500),
-    exactInstruction: z.string().min(1).max(4_000),
-    capturedAt: TimestampSchema,
-    declaredConstraints: z.object({
-      account: AddressSchema,
-      targetHealthFactor: PositiveDecimalSchema,
-      stressPriceDropBps: z.number().int().min(0).max(5_000),
-      maxActionUsd: PositiveDecimalSchema,
-      maxGasUsd: UnsignedDecimalSchema,
-      maxSlippageBps: z.number().int().min(0).max(2_000),
-    }).strict(),
+    source: z.literal("TERMIX_RUNTIME_INBOX"),
+    conversationId: z.string().min(1).max(200),
+    messageId: z.string().min(1).max(200),
+    senderAccountId: z.string().min(1),
+    senderWalletAddress: AddressSchema.nullable(),
+    messageCreatedAt: TimestampSchema,
+    rawMessageHash: Sha256Schema,
+    parsedRequestHash: Sha256Schema,
   }).strict(),
 }).strict().superRefine((value, context) => {
   if (Number(value.targetHealthFactor) <= 1) {
@@ -95,36 +129,6 @@ export const TermixLendingIntakeSchema = z.object({
       message: "targetHealthFactor must be greater than 1",
     });
   }
-  if (!value.buyerEvidence.exactInstruction.toLowerCase().includes(value.account.toLowerCase())) {
-    context.addIssue({
-      code: "custom",
-      path: ["buyerEvidence", "exactInstruction"],
-      message: "buyer evidence must contain the exact account being evaluated",
-    });
-  }
-  const declared = value.buyerEvidence.declaredConstraints;
-  const expected = {
-    account: value.account,
-    targetHealthFactor: value.targetHealthFactor,
-    stressPriceDropBps: value.stressPriceDropBps,
-    maxActionUsd: value.maxActionUsd,
-    maxGasUsd: value.maxGasUsd,
-    maxSlippageBps: value.maxSlippageBps,
-  };
-  if (
-    declared.account.toLowerCase() !== expected.account.toLowerCase() ||
-    declared.targetHealthFactor !== expected.targetHealthFactor ||
-    declared.stressPriceDropBps !== expected.stressPriceDropBps ||
-    declared.maxActionUsd !== expected.maxActionUsd ||
-    declared.maxGasUsd !== expected.maxGasUsd ||
-    declared.maxSlippageBps !== expected.maxSlippageBps
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["buyerEvidence", "declaredConstraints"],
-      message: "buyer evidence must bind every exact rescue constraint",
-    });
-  }
 });
 
 const TermixArtifactOrderSchema = z.object({
@@ -132,10 +136,13 @@ const TermixArtifactOrderSchema = z.object({
   onChainOrderId: Bytes32Schema,
   listingId: z.string().min(1),
   clientAgentId: z.string().min(1),
+  clientAccountId: z.string().min(1),
   providerAgentId: z.string().min(1),
   amount: PositiveDecimalSchema,
   currency: z.enum(["USDC", "USDT"]),
   deliveryRound: z.number().int().min(1).max(2),
+  deliveryDueAt: TimestampSchema,
+  challengeWindowEndsAt: TimestampSchema.nullable(),
 }).strict();
 
 export const TermixLendingDeliveryArtifactSchema = z.object({
@@ -219,6 +226,8 @@ export const TermixFulfillmentCheckpointSchema = z.object({
 
 export type TermixProviderOrder = z.infer<typeof TermixProviderOrderSchema>;
 export type TermixContractsConfig = z.infer<typeof TermixContractsConfigSchema>;
+export type TermixLendingBuyerRequest = z.infer<typeof TermixLendingBuyerRequestSchema>;
+export type TermixBuyerMessageLocator = z.infer<typeof TermixBuyerMessageLocatorSchema>;
 export type TermixLendingIntake = z.infer<typeof TermixLendingIntakeSchema>;
 export type TermixLendingDeliveryArtifact = z.infer<typeof TermixLendingDeliveryArtifactSchema>;
 export type TermixFulfillmentCheckpoint = z.infer<typeof TermixFulfillmentCheckpointSchema>;
@@ -236,6 +245,79 @@ export function assertTermixProviderOrder(
     throw new Error("TermiX order belongs to a different service listing");
   }
   return order;
+}
+
+export function createTermixLendingIntakeFromRuntimeMessage(
+  orderInput: unknown,
+  locatorInput: unknown,
+  messageInput: unknown,
+): TermixLendingIntake {
+  const order = TermixProviderOrderSchema.parse(orderInput);
+  const locator = TermixBuyerMessageLocatorSchema.parse(locatorInput);
+  const message = TermixRuntimeBuyerMessageSchema.parse(messageInput);
+  if (locator.orderId !== order.id || message.orderId !== order.id) {
+    throw new Error("TermiX buyer message is not bound to the exact order");
+  }
+  if (message.conversationId !== locator.conversationId || message.messageId !== locator.messageId) {
+    throw new Error("TermiX buyer message does not match the requested platform locator");
+  }
+  if (message.from.accountId !== order.clientAccountId) {
+    throw new Error("TermiX buyer message sender is not the order client account");
+  }
+  let rawRequest: unknown;
+  try {
+    rawRequest = JSON.parse(message.text);
+  } catch {
+    throw new Error("TermiX buyer message must contain only the structured Lending request JSON");
+  }
+  const buyerRequest = TermixLendingBuyerRequestSchema.parse(rawRequest);
+  if (buyerRequest.orderId !== order.id) {
+    throw new Error("Structured Lending request belongs to a different TermiX order");
+  }
+  return TermixLendingIntakeSchema.parse({
+    ...buyerRequest,
+    schemaVersion: "positioncrew.termix-lending-intake.v1",
+    buyerEvidence: {
+      source: "TERMIX_RUNTIME_INBOX",
+      conversationId: message.conversationId,
+      messageId: message.messageId,
+      senderAccountId: message.from.accountId,
+      senderWalletAddress: message.from.walletAddress ?? null,
+      messageCreatedAt: message.createdAt,
+      rawMessageHash: canonicalHash(message.text),
+      parsedRequestHash: canonicalHash(buyerRequest),
+    },
+  });
+}
+
+function artifactOrderIdentity(orderInput: unknown) {
+  const order = TermixProviderOrderSchema.parse(orderInput);
+  if (!order.deliveryDueAt) throw new Error("Deliverable TermiX order is missing deliveryDueAt");
+  return TermixArtifactOrderSchema.parse({
+    id: order.id,
+    onChainOrderId: order.onChainOrderId,
+    listingId: order.listingId,
+    clientAgentId: order.clientAgentId,
+    clientAccountId: order.clientAccountId,
+    providerAgentId: order.providerAgentId,
+    amount: order.amount,
+    currency: order.currency,
+    deliveryRound: order.redoUsed ? 2 : 1,
+    deliveryDueAt: order.deliveryDueAt,
+    challengeWindowEndsAt: order.challengeWindowEndsAt ?? null,
+  });
+}
+
+export function assertTermixLendingArtifactOrder(
+  artifactInput: unknown,
+  orderInput: unknown,
+): TermixLendingDeliveryArtifact {
+  const artifact = TermixLendingDeliveryArtifactSchema.parse(artifactInput);
+  const currentIdentity = artifactOrderIdentity(orderInput);
+  if (canonicalHash(artifact.order) !== canonicalHash(currentIdentity)) {
+    throw new Error("Prepared artifact does not match the refreshed immutable order identity");
+  }
+  return artifact;
 }
 
 function intentTarget(intent: z.infer<typeof AacpOrderTxIntentSchema>): string {
@@ -357,16 +439,7 @@ export function createTermixLendingDeliveryArtifact(
   return TermixLendingDeliveryArtifactSchema.parse({
     schemaVersion: "positioncrew.termix-lending-delivery.v1",
     generatedAt: now.toISOString(),
-    order: {
-      id: order.id,
-      onChainOrderId: order.onChainOrderId,
-      listingId: order.listingId,
-      clientAgentId: order.clientAgentId,
-      providerAgentId: order.providerAgentId,
-      amount: order.amount,
-      currency: order.currency,
-      deliveryRound: order.redoUsed ? 2 : 1,
-    },
+    order: artifactOrderIdentity(order),
     intake,
     request,
     result,
