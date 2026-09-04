@@ -5,6 +5,7 @@ import { mkdir, open } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { atomicJson } from "../core/atomic-json.js";
 import { canonicalHash } from "../core/canonical.js";
 import {
   assertTermixProviderIntent,
@@ -25,7 +26,6 @@ import {
   type TermixProviderOrder,
 } from "../commerce/termix-provider-delivery.js";
 import { inspectVenusAccount } from "../telemetry/bsc.js";
-import { atomicJson } from "./watch-termix-orders.js";
 
 const BASE_URL = "https://platform-backend.prod.termix.live";
 const MAX_JSON_BYTES = 1_048_576;
@@ -220,6 +220,7 @@ async function rerunUnderOrderLock(root: string, path: string): Promise<boolean>
       "75",
       path,
       process.execPath,
+      ...process.execArgv,
       scriptPath,
       ...process.argv.slice(2),
     ], {
