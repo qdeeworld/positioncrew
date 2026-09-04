@@ -28,6 +28,9 @@ do
 done
 
 /usr/bin/install -d -o root -g root -m 0755 "${artifact_root}"
+/usr/bin/install -d -o root -g root -m 0755 /etc/sysusers.d
+/usr/bin/install -d -o root -g root -m 0755 /etc/tmpfiles.d
+/usr/bin/install -d -o root -g root -m 0755 /etc/systemd/system
 /usr/bin/install -T -o root -g root -m 0555 "${observer_source}" "${artifact_root}/watch-termix-orders.mjs"
 /usr/bin/install -T -o root -g root -m 0555 "${notifier_source}" "${artifact_root}/notify-termix-orders.mjs"
 
