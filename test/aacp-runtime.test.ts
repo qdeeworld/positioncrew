@@ -162,6 +162,13 @@ describe("PositionCrew TermiX A2A runtime", () => {
       new URL("../deploy/systemd/positioncrew-termix-orders.timer", import.meta.url),
       "utf8",
     );
+    const credentialOverride = readFileSync(
+      new URL(
+        "../deploy/systemd/positioncrew-termix-orders.service.d/zzzz-load-credential.conf",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     expect(service).toContain("TimeoutStartSec=5h");
     expect(service).toContain("WorkingDirectory=/opt/positioncrew-termix-orders");
@@ -171,8 +178,17 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(service).toContain(
       "ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/watch-termix-orders.mjs",
     );
+    expect(service).toContain(
+      "Environment=TERMIX_SESSION_TOKEN_FILE=%d/session-token",
+    );
+    expect(service).not.toContain("LoadCredential=");
+    expect(credentialOverride).toContain(
+      "LoadCredential=session-token:/var/lib/positioncrew-termix-session-renew/termix-session.token",
+    );
+    expect(credentialOverride).toContain("NoNewPrivileges=true");
     expect(service).toContain("ProtectHome=yes");
     expect(service).not.toContain("/home/crosswind");
+    expect(timer).toContain("OnBootSec=7min");
     expect(timer).toContain("OnUnitInactiveSec=1min");
     expect(timer).not.toContain("OnUnitActiveSec=");
   });
@@ -190,16 +206,34 @@ describe("PositionCrew TermiX A2A runtime", () => {
       new URL("../deploy/install-positioncrew-termix-orders.sh", import.meta.url),
       "utf8",
     );
+    const sysusers = readFileSync(
+      new URL("../deploy/sysusers.d/positioncrew-termix-orders.conf", import.meta.url),
+      "utf8",
+    );
+    const renewalSysusers = readFileSync(
+      new URL("../deploy/sysusers.d/positioncrew-termix-session-renew.conf", import.meta.url),
+      "utf8",
+    );
+    const renewalService = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-session-renew.service", import.meta.url),
+      "utf8",
+    );
 
     expect(packageJson.scripts.build).toContain("npm run build:termix-orders");
     expect(packageJson.scripts["build:termix-orders"]).toContain("--bundle");
     expect(packageJson.scripts["build:termix-orders"]).toContain("src/cli/watch-termix-orders.ts");
     expect(packageJson.scripts["build:termix-orders"]).toContain("src/cli/notify-termix-orders.ts");
+    expect(packageJson.scripts["build:termix-session-renewer"]).toContain(
+      "--outfile=dist/termix-session-renew/renew-termix-session-token.mjs",
+    );
     expect(alertService).toContain(
       "ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/notify-termix-orders.mjs",
     );
     expect(installer).toContain(
       "/usr/bin/install -d -o root -g root -m 0755 \"${artifact_root}\"",
+    );
+    expect(installer).toContain(
+      "/usr/bin/install -d -o root -g root -m 0755 \"${session_renewer_artifact_root}\"",
     );
     expect(installer).toContain(
       "/usr/bin/install -d -o root -g root -m 0755 /etc/sysusers.d",
@@ -211,11 +245,30 @@ describe("PositionCrew TermiX A2A runtime", () => {
       "/usr/bin/install -d -o root -g root -m 0755 /etc/systemd/system",
     );
     expect(installer).toContain("/usr/bin/install -T -o root -g root -m 0555");
+    expect(installer).toContain("preflight_renewed_session_token");
     expect(installer).toContain("/usr/bin/systemctl daemon-reload");
-    expect(installer).toContain(
-      "/usr/bin/systemctl enable --now positioncrew-termix-orders.timer positioncrew-termix-order-alert.path",
-    );
+    expect(installer).toContain("/usr/bin/systemctl enable --now");
+    expect(installer).toContain("positioncrew-termix-orders.timer");
+    expect(installer).toContain("positioncrew-termix-order-alert.path");
+    expect(installer).toContain("positioncrew-termix-session-renew.timer");
     expect(installer).not.toContain("try-restart");
+    expect(sysusers.trim()).toBe(
+      'u positioncrew-orders - "PositionCrew TermiX order observer" /nonexistent',
+    );
+    expect(renewalSysusers.trim()).toBe(
+      'u positioncrew-session-renew - "PositionCrew TermiX session renewer" /nonexistent',
+    );
+    expect(renewalService).toContain("User=positioncrew-session-renew");
+    expect(renewalService).toContain("Group=positioncrew-session-renew");
+    expect(renewalService).toContain(
+      "ExecStart=/usr/bin/node /opt/positioncrew-termix-session-renew/renew-termix-session-token.mjs",
+    );
+    expect(installer.indexOf("systemctl start positioncrew-termix-session-renew.service")).toBeLessThan(
+      installer.indexOf("\"${observer_source}\" \\\n  \"${artifact_root}/watch-termix-orders.mjs\""),
+    );
+    expect(installer.indexOf("preflight_renewed_session_token")).toBeLessThan(
+      installer.indexOf("\"${observer_source}\" \\\n  \"${artifact_root}/watch-termix-orders.mjs\""),
+    );
   });
 
   it.each([
@@ -494,8 +547,23 @@ describe("PositionCrew TermiX A2A runtime", () => {
       new URL("../deploy/systemd/positioncrew-termix-order-alert.service", import.meta.url),
       "utf8",
     );
+    const observerCredentialOverride = readFileSync(
+      new URL(
+        "../deploy/systemd/positioncrew-termix-orders.service.d/zzzz-load-credential.conf",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
-    expect(observer).toContain("LoadCredential=session-token:");
+    expect(observer).not.toContain("LoadCredential=");
+    expect(observer).toContain(
+      "TERMIX_SESSION_TOKEN_FILE=%d/session-token",
+    );
+    expect(observerCredentialOverride).toContain("LoadCredential=\n");
+    expect(observerCredentialOverride).toContain(
+      "LoadCredential=session-token:/var/lib/positioncrew-termix-session-renew/termix-session.token",
+    );
+    expect(observerCredentialOverride).toContain("NoNewPrivileges=true");
     expect(observer).toContain("User=positioncrew-orders");
     expect(observer).toContain("StateDirectoryMode=0700");
     expect(observer).toContain("ReadWritePaths=/var/spool/positioncrew-termix-order-outbox");
@@ -510,6 +578,7 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(alert).toContain("StartLimitIntervalSec=0");
     expect(alert).toContain("notify-termix-orders.mjs");
     expect(alert).not.toContain("termix-session.token");
+    expect(alert).not.toContain("LoadCredential=");
   });
 
   it("uses only a bearer runtime token for inbox, signal, and reply calls", async () => {

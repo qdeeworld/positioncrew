@@ -2,7 +2,7 @@
 Description=Poll TermiX for PositionCrew provider orders
 
 [Timer]
-OnBootSec=30s
+OnBootSec=7min
 OnUnitInactiveSec=1min
 AccuracySec=5s
 Persistent=true
