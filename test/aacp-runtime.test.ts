@@ -34,6 +34,11 @@ import {
   runtimeExitCode,
   validateProtectedRuntimeTokenFile,
 } from "../src/cli/run-termix-runtime.js";
+import {
+  actionableOrders,
+  atomicJson,
+  unseenOrderTransitions,
+} from "../src/cli/watch-termix-orders.js";
 
 const NOW = new Date("2026-08-13T12:00:00.000Z");
 
@@ -66,6 +71,142 @@ function jwt(exp: number): string {
 }
 
 describe("PositionCrew TermiX A2A runtime", () => {
+  it("alerts once per actionable TermiX order transition for the exact provider", () => {
+    const initial = {
+      schemaVersion: "positioncrew.termix-order-watch.v1" as const,
+      agentId: "agent-1",
+      observations: {},
+      lastPollAt: null,
+    };
+    const orders = actionableOrders([
+      { id: "order-1", status: "PENDING_ACCEPT", providerAgentId: "agent-1", deliveryDueAt: null },
+      { id: "order-2", status: "SETTLED", providerAgentId: "agent-1", deliveryDueAt: null },
+      { id: "order-3", status: "FUNDED", providerAgentId: "agent-2", deliveryDueAt: null },
+    ], "agent-1");
+    expect(orders.map((order) => order.id)).toEqual(["order-1"]);
+
+    const first = unseenOrderTransitions(initial, orders);
+    expect(first.changed.map((order) => order.id)).toEqual(["order-1"]);
+    expect(unseenOrderTransitions(first.state, orders).changed).toEqual([]);
+
+    const advanced = unseenOrderTransitions(first.state, [{
+      ...orders[0]!,
+      status: "IN_PROGRESS",
+      availableActions: { canSubmitDelivery: true },
+    }]);
+    expect(advanced.changed.map((order) => order.id)).toEqual(["order-1"]);
+  });
+
+  it("publishes an alert durably before the watcher may advance its cursor", async () => {
+    const operations: string[] = [];
+    let openCount = 0;
+    await atomicJson("/var/spool/positioncrew-termix-order-outbox/alert.json", { orderId: "order-1" }, 0o640, {
+      mkdir: async () => {
+        operations.push("mkdir");
+      },
+      open: async () => {
+        openCount += 1;
+        if (openCount === 1) {
+          operations.push("open-temporary");
+          return {
+            writeFile: async () => {
+              operations.push("write-temporary");
+            },
+            sync: async () => {
+              operations.push("fsync-temporary");
+            },
+            close: async () => {
+              operations.push("close-temporary");
+            },
+          };
+        }
+        operations.push("open-directory");
+        return {
+          sync: async () => {
+            operations.push("fsync-directory");
+          },
+          close: async () => {
+            operations.push("close-directory");
+          },
+        };
+      },
+      rename: async () => {
+        operations.push("rename");
+      },
+      unlink: async () => {
+        operations.push("unlink");
+      },
+    });
+    operations.push("persist-cursor");
+
+    expect(operations).toEqual([
+      "mkdir",
+      "open-temporary",
+      "write-temporary",
+      "fsync-temporary",
+      "close-temporary",
+      "rename",
+      "open-directory",
+      "fsync-directory",
+      "close-directory",
+      "persist-cursor",
+    ]);
+  });
+
+  it("bounds a full paginated poll and schedules the next run after completion", () => {
+    const service = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-orders.service", import.meta.url),
+      "utf8",
+    );
+    const timer = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-orders.timer", import.meta.url),
+      "utf8",
+    );
+
+    expect(service).toContain("TimeoutStartSec=5h");
+    expect(service).toContain("WorkingDirectory=/opt/positioncrew-termix-orders");
+    expect(service).toContain(
+      "ConditionFileNotEmpty=/opt/positioncrew-termix-orders/watch-termix-orders.mjs",
+    );
+    expect(service).toContain(
+      "ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/watch-termix-orders.mjs",
+    );
+    expect(service).toContain("ProtectHome=yes");
+    expect(service).not.toContain("/home/crosswind");
+    expect(timer).toContain("OnUnitInactiveSec=1min");
+    expect(timer).not.toContain("OnUnitActiveSec=");
+  });
+
+  it("installs bundled TermiX order services into an accessible root-owned runtime", () => {
+    const packageJson = JSON.parse(readFileSync(
+      new URL("../package.json", import.meta.url),
+      "utf8",
+    )) as { scripts: Record<string, string> };
+    const alertService = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-order-alert.service", import.meta.url),
+      "utf8",
+    );
+    const installer = readFileSync(
+      new URL("../deploy/install-positioncrew-termix-orders.sh", import.meta.url),
+      "utf8",
+    );
+
+    expect(packageJson.scripts.build).toContain("npm run build:termix-orders");
+    expect(packageJson.scripts["build:termix-orders"]).toContain("--bundle");
+    expect(packageJson.scripts["build:termix-orders"]).toContain("src/cli/watch-termix-orders.ts");
+    expect(packageJson.scripts["build:termix-orders"]).toContain("src/cli/notify-termix-orders.ts");
+    expect(alertService).toContain(
+      "ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/notify-termix-orders.mjs",
+    );
+    expect(installer).toContain("/usr/bin/install -d -o root -g root -m 0755");
+    expect(installer).toContain("/usr/bin/install -T -o root -g root -m 0555");
+    expect(installer).toContain("/usr/bin/systemctl daemon-reload");
+    expect(installer).toContain(
+      "/usr/bin/systemctl enable --now positioncrew-termix-orders.timer positioncrew-termix-order-alert.path",
+    );
+    expect(installer).not.toContain("try-restart");
+  });
+
   it.each([
     ["LENDING_RESCUE", "target health factor", "smallest bounded repay", "lending-rescue"],
     ["LP_REBALANCE", "PancakeSwap V3 position", "range shift or HOLD", "lp-rebalance"],
@@ -327,6 +468,37 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(unit).toContain("CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE");
     expect(unit).toContain("AmbientCapabilities=\n");
     expect(unit).toContain("BindReadOnlyPaths=-/home/crosswind/.local/state/positioncrew");
+  });
+
+  it("keeps TermiX order observation separate from Telegram credentials", () => {
+    const observer = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-orders.service", import.meta.url),
+      "utf8",
+    );
+    const alertPath = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-order-alert.path", import.meta.url),
+      "utf8",
+    );
+    const alert = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-order-alert.service", import.meta.url),
+      "utf8",
+    );
+
+    expect(observer).toContain("LoadCredential=session-token:");
+    expect(observer).toContain("User=positioncrew-orders");
+    expect(observer).toContain("StateDirectoryMode=0700");
+    expect(observer).toContain("ReadWritePaths=/var/spool/positioncrew-termix-order-outbox");
+    expect(observer).not.toContain("CacheDirectory");
+    expect(observer).toContain("UMask=0007");
+    expect(observer).not.toContain("crosswind.env");
+    expect(observer).not.toMatch(/TELEGRAM|WALLET_KEY|PRIVATE_KEY/);
+    expect(alertPath).toContain("PathExistsGlob=/var/spool/positioncrew-termix-order-outbox/*.json");
+    expect(alert).toContain("EnvironmentFile=/etc/crosswind/crosswind.env");
+    expect(alert).toContain("SupplementaryGroups=positioncrew-orders");
+    expect(alert).toContain("Restart=on-failure");
+    expect(alert).toContain("StartLimitIntervalSec=0");
+    expect(alert).toContain("notify-termix-orders.mjs");
+    expect(alert).not.toContain("termix-session.token");
   });
 
   it("uses only a bearer runtime token for inbox, signal, and reply calls", async () => {

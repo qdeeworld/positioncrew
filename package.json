@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Job-first BSC capital operations with reproducible agent advantage evidence",
   "scripts": {
-    "build": "npm run build:core && npm run build:web && npm run build:sites && npm run build:termix-renewer",
+    "build": "npm run build:core && npm run build:web && npm run build:sites && npm run build:termix-renewer && npm run build:termix-orders",
     "build:core": "tsc -p tsconfig.build.json",
     "build:web": "vite build",
     "build:sites": "node scripts/build-sites.mjs",
@@ -33,6 +33,8 @@
     "benchmark:session": "tsx src/cli/benchmark-session.ts",
     "capture:listing-media": "node scripts/capture-listing-media.mjs",
     "runtime:termix": "tsx src/cli/run-termix-runtime.ts",
+    "watch:termix-orders": "tsx src/cli/watch-termix-orders.ts",
+    "notify:termix-orders": "tsx src/cli/notify-termix-orders.ts",
     "preflight:termix": "tsx src/cli/termix-onboarding-preflight.ts",
     "evidence:venus-testnet-supply": "tsx src/cli/venus-testnet-native-supply.ts",
     "activate:grant-altana-venus-session": "tsx src/cli/grant-altana-venus-session.ts",
@@ -53,7 +55,8 @@
     "provider:check": "tsx src/cli/provider-conformance.ts check",
     "provider:verify-result": "tsx src/cli/provider-conformance.ts verify-result",
     "provider:verify-bundle": "tsx src/cli/provider-conformance.ts verify-bundle",
-    "build:termix-renewer": "esbuild src/cli/renew-termix-runtime-token.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/runtime/renew-termix-runtime-token.mjs"
+    "build:termix-renewer": "esbuild src/cli/renew-termix-runtime-token.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/runtime/renew-termix-runtime-token.mjs",
+    "build:termix-orders": "esbuild src/cli/watch-termix-orders.ts src/cli/notify-termix-orders.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist/runtime --out-extension:.js=.mjs"
   },
   "engines": {
     "node": "22.x"
