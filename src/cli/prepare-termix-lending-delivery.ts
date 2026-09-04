@@ -508,9 +508,23 @@ async function run(): Promise<void> {
     publicUrl: priorArtifact && !args.refreshExpired ? priorArtifact.publicUrl : null,
     resultExpiresAt: artifact.result.expiresAt,
   };
+  if (args.refreshExpired) {
+    draft.submitIntent = null;
+    draft.submitIntentHash = null;
+  }
   await saveCheckpoint(paths.checkpoint, draft);
 
   if (previous?.submitIntent && previous.submitIntentHash && priorArtifact && !args.refreshExpired) {
+    if (Date.parse(priorArtifact.resultExpiresAt) - Date.now() < 120_000) {
+      throw new Error("Cached delivery artifact has less than 120 seconds remaining");
+    }
+    if (!priorArtifact.publicUrl) {
+      throw new Error("Cached delivery artifact has no public verification URL");
+    }
+    await verifyPublishedArtifact(priorArtifact.publicUrl, descriptor);
+    if (Date.parse(priorArtifact.resultExpiresAt) - Date.now() < 120_000) {
+      throw new Error("Cached delivery artifact became unsafe during remote verification");
+    }
     const guarded = assertTermixProviderIntent(order, config, previous.submitIntent, "submitDelivery", {
       expectedDeliveryHash: descriptor.deliveryHash,
       now: new Date(),
@@ -565,6 +579,9 @@ async function run(): Promise<void> {
   draft.artifact.publicUrl = publicUrl;
   await saveCheckpoint(paths.checkpoint, draft);
 
+  if (Date.parse(artifact.result.expiresAt) - Date.now() < 120_000) {
+    throw new Error("Delivery artifact has less than 120 seconds remaining before submit preparation");
+  }
   const submitRaw = await apiJson(
     baseUrl,
     token,
@@ -575,6 +592,9 @@ async function run(): Promise<void> {
       note: "PositionCrew bounded Lending Rescue analysis and conformance receipt.",
     },
   );
+  if (Date.parse(artifact.result.expiresAt) - Date.now() < 120_000) {
+    throw new Error("Delivery artifact became unsafe while preparing the submit intent");
+  }
   const guarded = assertTermixProviderIntent(order, config, submitRaw, "submitDelivery", {
     expectedDeliveryHash: descriptor.deliveryHash,
     now: new Date(),
