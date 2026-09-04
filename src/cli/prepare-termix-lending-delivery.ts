@@ -129,10 +129,38 @@ async function readRuntimeToken(): Promise<string> {
 }
 
 async function decodeJson(response: Response): Promise<unknown> {
-  const declared = Number(response.headers.get("content-length") || "0");
-  if (declared > MAX_JSON_BYTES) throw new Error("TermiX response exceeds the 1 MiB limit");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > MAX_JSON_BYTES) throw new Error("TermiX response exceeds the 1 MiB limit");
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null) {
+    const declared = Number(contentLength);
+    if (!Number.isSafeInteger(declared) || declared < 0 || declared > MAX_JSON_BYTES) {
+      throw new Error("TermiX response has an invalid or excessive Content-Length");
+    }
+  }
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  if (response.body) {
+    const reader = response.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        receivedBytes += value.byteLength;
+        if (receivedBytes > MAX_JSON_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          throw new Error("TermiX response exceeds the 1 MiB limit");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  const bytes = new Uint8Array(receivedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   const text = new TextDecoder().decode(bytes);
   let body: unknown;
   try {
@@ -192,8 +220,10 @@ function identity(): { providerAgentId: string; listingId: string } {
 }
 
 function statePaths(orderId: string): { root: string; checkpoint: string; artifactRoot: string; lock: string } {
-  const root = resolve(process.env.TERMIX_FULFILLMENT_STATE_DIR?.trim() || "/var/lib/positioncrew-termix-orders/fulfillment");
-  if (!isAbsolute(root)) throw new Error("TERMIX_FULFILLMENT_STATE_DIR must be absolute");
+  const configuredRoot = process.env.TERMIX_FULFILLMENT_STATE_DIR?.trim()
+    || "/var/lib/positioncrew-termix-orders/fulfillment";
+  if (!isAbsolute(configuredRoot)) throw new Error("TERMIX_FULFILLMENT_STATE_DIR must be absolute");
+  const root = resolve(configuredRoot);
   const key = canonicalHash(orderId).slice("sha256:".length);
   return {
     root,
