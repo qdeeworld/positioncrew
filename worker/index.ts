@@ -2423,7 +2423,7 @@ async function api(
       /^\/api\/benchmark-hires\/([0-9a-f-]{36})\/jobs$/,
     );
     if (freshHireJobRoute) {
-      return runFreshMarketplaceHire(request, env, context, freshHireJobRoute[1]!);
+      return await runFreshMarketplaceHire(request, env, context, freshHireJobRoute[1]!);
     }
 
     const freshHireRoute = url.pathname.match(/^\/api\/benchmark-hires\/([0-9a-f-]{36})$/);

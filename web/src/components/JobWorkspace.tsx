@@ -725,7 +725,7 @@ function LpExternalProviderComparisonPanel({
                   <div><span>Comparison response time</span><b>{candidate.latencyMilliseconds} ms</b><small>A single observation, not a speed guarantee.</small></div>
                 </div>
                 {!eligible && <p role="note">{candidate.checks.find((check) => check.status === "FAIL")?.detail ?? "This provider cannot complete the saved request."}</p>}
-                <details><summary>Why this provider qualifies</summary>
+                <details><summary>Compatibility details</summary>
                   <p>ERC-8004 #{candidate.identity.agentId} · {candidate.identity.network === "BSC_MAINNET" ? "BSC mainnet identity" : "BSC testnet identity"}</p>
                   <ul className="provider-audition-checks">{candidate.checks.map((check) => <li key={check.code} className={check.status.toLowerCase()}><span>{check.status}</span><p>{check.detail}</p></li>)}</ul>
                 </details>
@@ -734,7 +734,7 @@ function LpExternalProviderComparisonPanel({
             );
           })}
         </div>
-        {execution && <p role="status">{execution.outcome === "DELIVERED" ? "Assessment delivered" : "Assessment refused"} by the selected provider in {execution.invocation.latencyMilliseconds} ms. Your choice and the result are saved on the receipt.</p>}
+        {execution && <p role="status">{execution.outcome === "DELIVERED" ? "The selected provider delivered an assessment." : "The selected run was refused. See the result for the reason."} The attempt took {execution.invocation.latencyMilliseconds} ms. Your choice and the result are saved on the receipt.</p>}
         <footer className="provider-audition-boundary">This is a free assessment. It does not move liquidity or require a wallet. If the selected provider fails, the receipt records the failure without switching providers.</footer>
       </section>
     );

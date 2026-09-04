@@ -45,6 +45,43 @@ async function prepared() {
 beforeEach(() => mockAudition.mockReset());
 
 describe("selected external LP execution", () => {
+  it("refuses evidence that becomes stale during the external call even before the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      input.request.maxDataAgeSeconds = 30;
+      input.requestHash = await sha256Commitment(input.request);
+      input.audition.requestHash = input.requestHash;
+      input.evidenceHash = await sha256Commitment(input.evidence);
+      input.selection.auditionHash = input.evidenceHash;
+      mockAudition.mockImplementationOnce(async () => {
+        vi.setSystemTime(input.now.getTime() + 31000);
+        return input.assessment;
+      });
+      const response = await executeLpLiveMatchProvider(input);
+      expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+      expect(response.result.deliverable.decision).toBe("NONE");
+      expect(response.liveMatchExecution?.invocation.checks[0]?.detail).toContain("became stale");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("persists an expired refusal when the request expires during the external call", async () => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      mockAudition.mockImplementationOnce(async () => {
+        vi.setSystemTime(Date.parse(input.request.deadline) + 1);
+        return input.assessment;
+      });
+      const response = await executeLpLiveMatchProvider(input);
+      expect(response.result.deliverable.status).toBe("REFUSED_EXPIRED");
+      expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+      expect(response.result.job.providerId).toBe("erc8004:56:45650");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("invokes HeyAnon again and reloads its attributed result while rejecting a changed selection", async () => {
     const input = await prepared();
     const response = await executeLpLiveMatchProvider(input);

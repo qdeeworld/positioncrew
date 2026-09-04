@@ -58,7 +58,7 @@ const HEYANON_LP = {
 };
 
 const EXECUTION_BOUNDARY = [
-  "The selected provider was invoked afresh for the exact persisted LP request; an earlier audition result was not relabelled as delivery.",
+  "The selected provider is invoked afresh for a valid persisted LP request; expired requests are refused before an external call and audition output is never relabelled as delivery.",
   "A changed, unavailable, timed-out, or incompatible selected provider produces an explicit refusal and never falls back to another provider.",
   "This $0 run requires no wallet, creates no payment or settlement, and does not sign, broadcast, or move liquidity.",
 ] as const;
@@ -445,6 +445,14 @@ export async function executeLpLiveMatchProvider(input: {
         10_000,
       );
       rawResponseHash = assessment.invocation.rawResponseHash;
+      if (Date.now() >= Date.parse(request.deadline)) {
+        throw new Error("The selected-provider job expired while waiting for its fresh response");
+      }
+      const completedAtMilliseconds = Date.now();
+      const evidenceTimes = [request.marketState.observedAt, ...request.sources.map((source) => source.observedAt)];
+      if (evidenceTimes.some((observedAt) => completedAtMilliseconds - Date.parse(observedAt) > request.maxDataAgeSeconds * 1_000)) {
+        throw new Error("The saved LP market evidence became stale while waiting for the selected provider");
+      }
       const stable = candidate.rawResponseHash === assessment.invocation.rawResponseHash;
       const compatible = assessment.eligibleForLpRebalance &&
         assessment.checks.every((check) => check.status === "PASS");
