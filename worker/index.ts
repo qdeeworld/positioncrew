@@ -158,6 +158,7 @@ interface Env {
   SHADOW_GRID_TEST_NOW?: string;
   SHADOW_GRID_TEST_CHECKPOINT_NOW?: string;
   ALTANA_VENUS_SESSION?: string;
+  BSC_LOG_RPC_URL?: string;
 }
 
 interface WorkerExecutionContext {
@@ -2602,7 +2603,10 @@ async function api(
     if (pancakePositionRoute) {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
       return json(
-        await inspectPancakePosition(pancakePositionRoute[1]!),
+        await inspectPancakePosition(
+          pancakePositionRoute[1]!,
+          env.BSC_LOG_RPC_URL ? { logRpcUrl: env.BSC_LOG_RPC_URL } : {},
+        ),
         200,
         "public, max-age=0, s-maxage=10, stale-while-revalidate=20",
       );
