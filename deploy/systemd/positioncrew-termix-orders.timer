@@ -3,11 +3,10 @@ Description=Poll TermiX for PositionCrew provider orders
 
 [Timer]
 OnBootSec=30s
-OnUnitActiveSec=1min
+OnUnitInactiveSec=1min
 AccuracySec=5s
 Persistent=true
 Unit=positioncrew-termix-orders.service
 
 [Install]
 WantedBy=timers.target
-

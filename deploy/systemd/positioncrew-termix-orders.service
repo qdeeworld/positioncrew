@@ -17,7 +17,7 @@ Environment=TERMIX_ORDER_STATE_PATH=/var/lib/positioncrew-termix-orders/state.js
 Environment=TERMIX_ORDER_OUTBOX_PATH=/var/spool/positioncrew-termix-order-outbox
 LoadCredential=session-token:/etc/positioncrew-runtime/credentials/termix-session.token
 ExecStart=/usr/bin/node /home/crosswind/apps/positioncrew/dist/cli/watch-termix-orders.js
-TimeoutStartSec=30s
+TimeoutStartSec=5h
 UMask=0007
 NoNewPrivileges=true
 PrivateTmp=true

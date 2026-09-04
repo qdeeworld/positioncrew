@@ -106,18 +106,27 @@ describe("PositionCrew TermiX A2A runtime", () => {
       },
       open: async () => {
         openCount += 1;
-        operations.push(openCount === 1 ? "open-temporary" : "open-directory");
-        return {
-          writeFile: openCount === 1
-            ? async () => {
+        if (openCount === 1) {
+          operations.push("open-temporary");
+          return {
+            writeFile: async () => {
               operations.push("write-temporary");
-            }
-            : undefined,
+            },
+            sync: async () => {
+              operations.push("fsync-temporary");
+            },
+            close: async () => {
+              operations.push("close-temporary");
+            },
+          };
+        }
+        operations.push("open-directory");
+        return {
           sync: async () => {
-            operations.push(openCount === 1 ? "fsync-temporary" : "fsync-directory");
+            operations.push("fsync-directory");
           },
           close: async () => {
-            operations.push(openCount === 1 ? "close-temporary" : "close-directory");
+            operations.push("close-directory");
           },
         };
       },
@@ -142,6 +151,21 @@ describe("PositionCrew TermiX A2A runtime", () => {
       "close-directory",
       "persist-cursor",
     ]);
+  });
+
+  it("bounds a full paginated poll and schedules the next run after completion", () => {
+    const service = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-orders.service", import.meta.url),
+      "utf8",
+    );
+    const timer = readFileSync(
+      new URL("../deploy/systemd/positioncrew-termix-orders.timer", import.meta.url),
+      "utf8",
+    );
+
+    expect(service).toContain("TimeoutStartSec=5h");
+    expect(timer).toContain("OnUnitInactiveSec=1min");
+    expect(timer).not.toContain("OnUnitActiveSec=");
   });
 
   it.each([
