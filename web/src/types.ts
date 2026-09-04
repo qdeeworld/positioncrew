@@ -680,7 +680,7 @@ export interface CurrentBlockPinnedMarketplaceEvidence {
     attributable: boolean;
     persisted?: boolean;
     exactRequestAccepted: false;
-    eligibleForRangeAssessmentActivation: boolean;
+    eligibleForRangeAssessmentActivation?: boolean;
     eligibleForGridSelection: boolean;
     eligibleForLiveMatch: boolean;
     adapterNormalized?: boolean;
