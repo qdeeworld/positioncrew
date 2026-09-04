@@ -201,6 +201,10 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(installer).toContain("/usr/bin/install -d -o root -g root -m 0755");
     expect(installer).toContain("/usr/bin/install -T -o root -g root -m 0555");
     expect(installer).toContain("/usr/bin/systemctl daemon-reload");
+    expect(installer).toContain(
+      "/usr/bin/systemctl enable --now positioncrew-termix-orders.timer positioncrew-termix-order-alert.path",
+    );
+    expect(installer).not.toContain("try-restart");
   });
 
   it.each([
@@ -493,7 +497,7 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(alert).toContain("SupplementaryGroups=positioncrew-orders");
     expect(alert).toContain("Restart=on-failure");
     expect(alert).toContain("StartLimitIntervalSec=0");
-    expect(alert).toContain("notify-termix-orders.js");
+    expect(alert).toContain("notify-termix-orders.mjs");
     expect(alert).not.toContain("termix-session.token");
   });
 

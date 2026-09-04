@@ -53,4 +53,4 @@ do
 done
 
 /usr/bin/systemctl daemon-reload
-/usr/bin/systemctl try-restart positioncrew-termix-orders.timer positioncrew-termix-order-alert.path
+/usr/bin/systemctl enable --now positioncrew-termix-orders.timer positioncrew-termix-order-alert.path
