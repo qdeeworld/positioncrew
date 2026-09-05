@@ -1,8 +1,5 @@
-import { runFrozenFixture } from "../api/fixture-jobs.js";
+import archive from "../../evidence/historical-provider-receipts.2026-09-05.json" with { type: "json" };
 import type { PositionCrewRequest } from "../contracts/index.js";
-import { canonicalJson } from "../core/canonical.js";
-
-const BASE_URL = "https://positioncrew.dolepee.com";
 
 export const ERC8183_TESTNET_CONTRACTS = {
   commerce: "0xa206c0517B6371C6638CD9e4a42Cc9f02A33B0DE",
@@ -27,55 +24,8 @@ export const ERC8183_TESTNET_JOBS = [
 export async function buildErc8183TestnetDeliverable(jobId: number) {
   const job = ERC8183_TESTNET_JOBS.find((candidate) => candidate.jobId === jobId);
   if (!job) return null;
-
-  const fixture = await runFrozenFixture(job.service);
-  const receiptUrl = `${BASE_URL}${fixture.receipt.path}`;
-  const delivery = {
-    schemaVersion: "positioncrew.erc8183-delivery.v1",
-    service: job.service,
-    sourceMode: fixture.evidenceMode,
-    advantageStatus: fixture.advantageStatus,
-    request: fixture.result.request,
-    deliverable: fixture.result.deliverable,
-    evaluation: fixture.result.evaluation,
-    commerceProof: {
-      chainId: 97,
-      jobId,
-      paymentMode: "OPERATOR_CONTROLLED_TESTNET_ESCROW",
-      paymentToken: "0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565",
-      amountBaseUnits: "100000000000000000",
-      providerAgentId: job.agentId,
-    },
-    claimBoundary: [
-      ...fixture.claimBoundary,
-      "This ERC-8183 job is operator-controlled BSC testnet evidence, not external demand, paid revenue, or Agent Advantage.",
-    ],
-    receiptUrl,
-  };
-
-  return {
-    version: 1,
-    job_id: jobId,
-    chain_id: 97,
-    contracts: ERC8183_TESTNET_CONTRACTS,
-    response: {
-      content: canonicalJson(delivery),
-      content_type: "application/json",
-    },
-    metadata: {
-      schemaVersion: "positioncrew.erc8183-deliverable-metadata.v1",
-      service: job.service,
-      providerAgentId: job.agentId,
-      providerRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
-      providerWallet: "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
-      clientWallet: "0x939F689A1Aeef6FB2eEFe9Ba7386B6653bcbc6b3",
-      operatorControlled: true,
-      sourceMode: fixture.evidenceMode,
-      sourceEndpoint: `${BASE_URL}/api/providers/${job.slug}/jobs`,
-      receiptUrl,
-      requestHash: fixture.result.evaluation.requestHash,
-      deliverableHash: fixture.result.evaluation.deliverableHash,
-      evaluationHash: fixture.result.evaluation.evaluationHash,
-    },
-  };
+  // Onchain commitments bind the original v1 bytes, not a replay using today's generator or rubric.
+  const entry = archive.manifests.find((candidate) => candidate.jobId === jobId);
+  if (!entry) throw new Error(`Missing immutable ERC-8183 manifest archive for job ${jobId}`);
+  return structuredClone(entry.manifest);
 }

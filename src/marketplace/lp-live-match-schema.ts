@@ -28,6 +28,8 @@ export const LpLiveMatchCandidateSchema = z.object({
   selectable: z.boolean(),
   rawResponseHash: HashSchema.nullable(),
   normalizedResponseHash: HashSchema.nullable(),
+  // Optional for immutable pre-upgrade auditions; never default or rewrite them.
+  materialTermsHash: HashSchema.optional(),
   latencyMilliseconds: z.number().int().positive(),
   checks: z.array(LpLiveMatchCheckSchema).min(1),
 }).strict().superRefine((value, context) => {

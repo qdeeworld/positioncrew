@@ -10,7 +10,7 @@ import {
   type EvaluationCheck,
   type EvaluationReceipt,
 } from "../commerce/types.js";
-import { executeProvider } from "../providers/index.js";
+import { evaluateFinancialInvariants, yieldPortfolioInputConsistent } from "./financial-invariants.js";
 
 function check(
   id: string,
@@ -31,7 +31,7 @@ function usefulPayload(deliverable: PositionCrewDeliverable): boolean {
     case "LENDING_RESCUE":
       return deliverable.recommendation !== null;
     case "LP_REBALANCE":
-      return deliverable.proposedRange !== null && deliverable.actionSteps.length >= 3;
+      return (deliverable.decision === "EXIT" || deliverable.proposedRange !== null) && deliverable.actionSteps.length >= 3;
     case "YIELD_OPTIMIZATION":
       return deliverable.selectedOpportunityId !== null && deliverable.actionSteps.length >= 2;
     case "BOUNDED_GRID":
@@ -51,7 +51,46 @@ export function evaluateProviderConformance(
 ): EvaluationReceipt {
   const request = PositionCrewRequestSchema.parse(requestInput);
   const deliverable = PositionCrewDeliverableSchema.parse(deliverableInput);
-  const expected = executeProvider(request, now);
+  const financialChecks = evaluateFinancialInvariants(request, deliverable);
+  if (deliverable.service === "LENDING_RESCUE" && deliverable.status === "ACTIONABLE") {
+    // Structural invariants bind deadlines to generation and receipt expiry;
+    // admission additionally checks the evaluator's clock, not a claimed timestamp.
+    financialChecks.push({
+      id: "lending-action-window",
+      passed: deliverable.recommendation !== null
+        && [deliverable.recommendation, ...deliverable.alternatives]
+          .every((action) => Date.parse(action.executeBefore) > now.getTime()),
+      detail: "Every Lending recommendation and alternative must remain executable strictly after evaluation time; an unexpired receipt cannot extend an action deadline.",
+    });
+  }
+  const sourceExpiry = Math.min(Date.parse(request.deadline), ...request.sources.map((source) => Date.parse(source.observedAt) + request.maxDataAgeSeconds * 1_000));
+  const observations = request.service === "LENDING_RESCUE" ? [...request.position.collateral, ...request.position.debt]
+    : request.service === "YIELD_OPTIMIZATION" ? [...request.currentPositions, ...request.opportunities] : [request.marketState];
+  const sourcesById = new Map(request.sources.map((source) => [source.sourceId, source]));
+  const evidenceConsistent = request.sources.every((source) => Date.parse(source.observedAt) <= now.getTime())
+    && observations.every((observation) => sourcesById.get(observation.sourceId)?.observedAt === observation.observedAt
+      && Date.parse(observation.observedAt) <= now.getTime());
+  const evidenceFresh = request.sources.every((source) => Date.parse(source.observedAt) <= now.getTime()
+    && now.getTime() - Date.parse(source.observedAt) <= request.maxDataAgeSeconds * 1_000);
+  const requiredEvidenceRefusal = now.getTime() >= Date.parse(request.deadline) ? "REFUSED_EXPIRED"
+    : !evidenceConsistent ? "REFUSED_INCONSISTENT_DATA" : !evidenceFresh ? "REFUSED_STALE_DATA"
+      : request.service === "YIELD_OPTIMIZATION" && !yieldPortfolioInputConsistent(request) ? "REFUSED_INCONSISTENT_DATA" : null;
+  const evidenceRefusals = ["REFUSED_EXPIRED", "REFUSED_INCONSISTENT_DATA", "REFUSED_STALE_DATA"];
+  const usableExpiry = requiredEvidenceRefusal !== null || Date.parse(deliverable.expiresAt) > now.getTime();
+  // All supplied non-future timestamps constrain chronology, including mismatched
+  // references. An invalid binding must not conceal a later observation time.
+  // Future input can be rejected now, but cannot support a financial decision.
+  let evidenceGenerationFloor = Date.parse(request.requestedAt);
+  let hasFutureEvidence = false;
+  for (const reference of [...request.sources, ...observations]) {
+    const observedAt = Date.parse(reference.observedAt);
+    if (observedAt > now.getTime()) hasFutureEvidence = true;
+    else evidenceGenerationFloor = Math.max(evidenceGenerationFloor, observedAt);
+  }
+  const generatedAt = Date.parse(deliverable.generatedAt);
+  const rejectsRequiredEvidence = requiredEvidenceRefusal !== null && deliverable.status === requiredEvidenceRefusal;
+  const sourcesBound = request.service !== "LENDING_RESCUE" ||
+    (deliverable.service === "LENDING_RESCUE" && canonicalHash(deliverable.sources) === canonicalHash(request.sources));
   const requestHash = requestHashOverride ?? canonicalHash(request);
   const deliverableHash = canonicalHash(deliverable);
   const checks: EvaluationCheck[] = [
@@ -68,39 +107,57 @@ export function evaluateProviderConformance(
       "Result is bound to the requested service and request ID",
       10,
       true,
-      deliverable.service === request.service && deliverable.requestId === request.requestId,
+      deliverable.service === request.service && deliverable.requestId === request.requestId && sourcesBound,
       `${deliverable.service}:${deliverable.requestId}`,
     ),
     check(
-      "deterministic-output",
-      "Output reproduces from the frozen request and provider version",
+      "financial-invariants",
+      "Submitted output satisfies independent financial constraints",
       60,
       true,
-      canonicalHash(deliverable) === canonicalHash(expected),
-      `expected=${canonicalHash(expected)}`,
+      financialChecks.every((item) => item.passed),
+      "Final-output constraints are independent of native reproduction; future execution and performance are not proven.",
     ),
     check(
       "useful-payload",
       "Actionable results contain the category-specific machine payload",
-      15,
+      10,
       true,
       usefulPayload(deliverable),
       `status=${deliverable.status}`,
     ),
     check(
       "bounded-expiry",
-      "Result never outlives the buyer request",
+      "Result remains within the request and is usable when its evidence is current",
       5,
-      false,
-      Date.parse(deliverable.expiresAt) <= Date.parse(request.deadline),
+      true,
+      Date.parse(deliverable.expiresAt) <= Date.parse(request.deadline) && usableExpiry,
       `expiresAt=${deliverable.expiresAt}`,
     ),
+    check("evidence-decision", "Refusals match deadline, observation validity, freshness, and portfolio consistency", 5, true,
+      requiredEvidenceRefusal === null ? !evidenceRefusals.includes(deliverable.status) : deliverable.status === requiredEvidenceRefusal,
+      `required=${requiredEvidenceRefusal ?? "NO_EVIDENCE_REFUSAL"}; reported=${deliverable.status}; precedence=expired,observation-inconsistent,stale,portfolio-inconsistent`),
+    check("evidence-generation-chronology", "Result generation follows the request and available evidence", 0, true,
+      generatedAt >= evidenceGenerationFloor && generatedAt <= now.getTime()
+        && (!hasFutureEvidence || rejectsRequiredEvidence),
+      `generationFloor=${new Date(evidenceGenerationFloor).toISOString()}; generatedAt=${deliverable.generatedAt}; futureEvidence=${hasFutureEvidence}; requiredEvidenceRefusal=${requiredEvidenceRefusal ?? "NONE"}. Future input may be rejected, never treated as observed decision evidence.`),
+    check("evidence-window", "Actionable output uses current evidence and bounded generation/expiry times", 0, true,
+      deliverable.status === "ACTIONABLE"
+        ? evidenceConsistent && evidenceFresh && Date.parse(deliverable.generatedAt) >= Date.parse(request.requestedAt)
+          && Date.parse(deliverable.generatedAt) <= now.getTime() && Date.parse(deliverable.expiresAt) > now.getTime()
+          && Date.parse(deliverable.expiresAt) <= sourceExpiry
+        : Date.parse(deliverable.generatedAt) >= Date.parse(request.requestedAt)
+          && Date.parse(deliverable.generatedAt) <= now.getTime() && Date.parse(deliverable.expiresAt) <= sourceExpiry && usableExpiry,
+      `sourceExpiry=${new Date(sourceExpiry).toISOString()}; status=${deliverable.status}`),
+    check("lending-source-binding", "Lending source references preserve the frozen request attribution", 0, true,
+      sourcesBound, "Lending deliverable sources must canonically match the complete request source array."),
+    ...financialChecks.map((item) => check(item.id, "Independent submitted-output invariant", 0, true, item.passed, item.detail)),
   ];
   const score = checks.reduce((total, item) => total + (item.passed ? item.weight : 0), 0);
   const passed = score >= 90 && !checks.some((item) => item.critical && !item.passed);
   const body = {
     schemaVersion: "positioncrew.evaluation.v1" as const,
-    rubricVersion: `positioncrew.${request.service.toLowerCase()}.conformance.v1`,
+    rubricVersion: `positioncrew.${request.service.toLowerCase()}.conformance.v2`,
     requestHash,
     deliverableHash,
     evaluatorId,

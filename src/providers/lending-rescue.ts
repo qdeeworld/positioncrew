@@ -194,7 +194,9 @@ export function createLendingRescueDeliverable(
     ...common,
     status: "ACTIONABLE",
     decision: recommendation.kind,
-    summary: `${recommendation.kind === "REPAY_DEBT" ? "Repay" : "Add"} ${recommendation.amount} ${recommendation.asset.symbol} to raise health factor from ${position.currentHealthFactor} to ${recommendation.projectedHealthFactor}.`,
+    summary: recommendation.kind === "REPAY_DEBT" && recommendation.projectedHealthFactor === null
+      ? `Repay ${recommendation.amount} ${recommendation.asset.symbol} to clear all observed debt. Projected health: no debt.`
+      : `${recommendation.kind === "REPAY_DEBT" ? "Repay" : "Add"} ${recommendation.amount} ${recommendation.asset.symbol} to raise health factor from ${position.currentHealthFactor} to ${recommendation.projectedHealthFactor}.`,
     recommendation,
     alternatives: candidates.slice(1).map((candidate) => candidate.plan),
     refusalReasons: [],

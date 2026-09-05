@@ -1,0 +1,1527 @@
+{
+  "schemaVersion": "positioncrew.historical-provider-receipts.v1",
+  "capturedAt": "2026-09-05T06:11:47.855Z",
+  "claimBoundary": [
+    "Immutable archival capture of previously published frozen-fixture provider responses and BSC testnet ERC-8183 manifests, checked against committed hashes before storage.",
+    "Historical conformance v1 scores primarily establish deterministic output parity. They are preserved as history and do not establish correctness under the independent financial invariants introduced on 2026-09-05.",
+    "This archive is not a new hire, current recommendation, live execution, human comparison, paid demand, or Agent Advantage result."
+  ],
+  "manifests": [
+    {
+      "jobId": 490,
+      "manifestHash": "0x70332b09542edb6e7dc142fda2dc23d143343522a083cf6ef1ee0073a1dbba00",
+      "manifest": {
+        "version": 1,
+        "job_id": 490,
+        "chain_id": 97,
+        "contracts": {
+          "commerce": "0xa206c0517B6371C6638CD9e4a42Cc9f02A33B0DE",
+          "router": "0xD7d36D66d2F1B608A0F943f722D27e3744f66F25",
+          "policy": "0xd6a4217588F6B1F5657a92A3e94E6422aD771cEA"
+        },
+        "response": {
+          "content": "{\"advantageStatus\":\"PENDING_INDEPENDENT_BLIND_EVALUATION\",\"claimBoundary\":[\"Frozen BSC test fixtures are used; no live wallet or protocol state is read.\",\"The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.\",\"A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established.\",\"This ERC-8183 job is operator-controlled BSC testnet evidence, not external demand, paid revenue, or Agent Advantage.\"],\"commerceProof\":{\"amountBaseUnits\":\"100000000000000000\",\"chainId\":97,\"jobId\":490,\"paymentMode\":\"OPERATOR_CONTROLLED_TESTNET_ESCROW\",\"paymentToken\":\"0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565\",\"providerAgentId\":1810},\"deliverable\":{\"alternatives\":[{\"account\":\"0x1111111111111111111111111111111111111111\",\"actionId\":\"action_8a8a88ebc3801171ed9c7fe2\",\"amount\":\"0.395833333333333334\",\"amountBaseUnits\":\"395833333333333334\",\"amountUsd\":\"237.5\",\"asset\":{\"address\":\"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c\",\"decimals\":18,\"symbol\":\"WBNB\"},\"chainId\":56,\"estimatedGasUsd\":\"0.04\",\"executeBefore\":\"2026-08-12T16:04:00.000Z\",\"kind\":\"ADD_COLLATERAL\",\"market\":\"0x2222222222222222222222222222222222222222\",\"maxSlippageBps\":30,\"preconditions\":[\"Position debt and collateral balances still match request venus-stressed-position-20260812-001\",\"Oracle deviation remains within 100 bps\",\"Estimated gas remains at or below 0.10 USD\"],\"projectedHealthFactor\":\"1.25\",\"protocol\":\"Venus\"}],\"decision\":\"REPAY_DEBT\",\"expiresAt\":\"2026-08-12T16:04:00.000Z\",\"generatedAt\":\"2026-08-12T16:00:30.000Z\",\"invalidationConditions\":[\"Any collateral or debt balance changes after 2026-08-12T16:00:00.000Z\",\"Any source price moves more than 100 bps\",\"Current time passes 2026-08-12T16:04:00.000Z\"],\"limitations\":[\"This result is a bounded action plan, not custody or guaranteed execution.\",\"Projected health factor depends on the supplied protocol thresholds and fresh prices.\",\"Version 1 returns one single-asset rescue action; it does not split repayment across assets.\"],\"position\":{\"collateralValueUsd\":\"1200\",\"currentHealthFactor\":\"1.04347826\",\"debtValueUsd\":\"920\",\"liquidationWeightedCollateralUsd\":\"960\",\"stressedHealthFactor\":\"0.93913043\",\"targetHealthFactor\":\"1.25\"},\"recommendation\":{\"account\":\"0x1111111111111111111111111111111111111111\",\"actionId\":\"action_abfd92fd8ee827ae6ec7d298\",\"amount\":\"152\",\"amountBaseUnits\":\"152000000000000000000\",\"amountUsd\":\"152\",\"asset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"chainId\":56,\"estimatedGasUsd\":\"0.04\",\"executeBefore\":\"2026-08-12T16:04:00.000Z\",\"kind\":\"REPAY_DEBT\",\"market\":\"0x2222222222222222222222222222222222222222\",\"maxSlippageBps\":30,\"preconditions\":[\"Position debt and collateral balances still match request venus-stressed-position-20260812-001\",\"Oracle deviation remains within 100 bps\",\"Estimated gas remains at or below 0.10 USD\"],\"projectedHealthFactor\":\"1.25\",\"protocol\":\"Venus\"},\"refusalReasons\":[],\"requestId\":\"venus-stressed-position-20260812-001\",\"schemaVersion\":\"positioncrew.lending-rescue.deliverable.v1\",\"service\":\"LENDING_RESCUE\",\"sources\":[{\"label\":\"Frozen Venus account and oracle snapshot\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"sourceId\":\"venus-position-fixture-001\",\"uri\":\"https://fixtures.positioncrew.invalid/venus-position-001.json\"}],\"status\":\"ACTIONABLE\",\"summary\":\"Repay 152 USDT to raise health factor from 1.04347826 to 1.25.\"},\"evaluation\":{\"checks\":[{\"critical\":true,\"evidence\":\"positioncrew.lending-rescue.request.v1 -> positioncrew.lending-rescue.deliverable.v1\",\"id\":\"schema\",\"label\":\"Strict versioned contracts parse\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"LENDING_RESCUE:venus-stressed-position-20260812-001\",\"id\":\"identity\",\"label\":\"Result is bound to the requested service and request ID\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"expected=sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f\",\"id\":\"deterministic-output\",\"label\":\"Output reproduces from the frozen request and provider version\",\"passed\":true,\"weight\":60},{\"critical\":true,\"evidence\":\"status=ACTIONABLE\",\"id\":\"useful-payload\",\"label\":\"Actionable results contain the category-specific machine payload\",\"passed\":true,\"weight\":15},{\"critical\":false,\"evidence\":\"expiresAt=2026-08-12T16:04:00.000Z\",\"id\":\"bounded-expiry\",\"label\":\"Result never outlives the buyer request\",\"passed\":true,\"weight\":5}],\"deliverableHash\":\"sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f\",\"evaluatedAt\":\"2026-08-12T16:00:30.000Z\",\"evaluationHash\":\"sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870\",\"evaluatorId\":\"positioncrew:evaluator:lending_rescue:v1\",\"passed\":true,\"requestHash\":\"sha256:068d71bfd268e11bae12e1d26fa3ab4c73c845d42c7d7d150bd05aee1eb81e8d\",\"rubricVersion\":\"positioncrew.lending_rescue.conformance.v1\",\"schemaVersion\":\"positioncrew.evaluation.v1\",\"score\":100},\"receiptUrl\":\"https://positioncrew.dolepee.com/api/receipts/sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870\",\"request\":{\"account\":\"0x1111111111111111111111111111111111111111\",\"allowedActions\":[\"REPAY_DEBT\",\"ADD_COLLATERAL\"],\"availableAssets\":[{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"availableAmount\":\"200\",\"decimals\":18,\"symbol\":\"USDT\"},{\"address\":\"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c\",\"availableAmount\":\"0.5\",\"decimals\":18,\"symbol\":\"WBNB\"}],\"chainId\":56,\"deadline\":\"2026-08-12T16:05:00.000Z\",\"estimatedGasUsd\":\"0.04\",\"market\":\"0x2222222222222222222222222222222222222222\",\"maxActionUsd\":\"250\",\"maxDataAgeSeconds\":300,\"maxGasUsd\":\"0.10\",\"maxSlippageBps\":30,\"oracleDeviationToleranceBps\":100,\"position\":{\"collateral\":[{\"address\":\"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c\",\"amount\":\"2\",\"collateralEnabled\":true,\"decimals\":18,\"liquidationThresholdBps\":8000,\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"priceUsd\":\"600\",\"sourceId\":\"venus-position-fixture-001\",\"symbol\":\"WBNB\"}],\"debt\":[{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"amount\":\"920\",\"decimals\":18,\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"priceUsd\":\"1\",\"sourceId\":\"venus-position-fixture-001\",\"symbol\":\"USDT\"}]},\"protocol\":\"Venus\",\"requestedAt\":\"2026-08-12T16:00:00.000Z\",\"requestId\":\"venus-stressed-position-20260812-001\",\"schemaVersion\":\"positioncrew.lending-rescue.request.v1\",\"service\":\"LENDING_RESCUE\",\"sources\":[{\"label\":\"Frozen Venus account and oracle snapshot\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"sourceId\":\"venus-position-fixture-001\",\"uri\":\"https://fixtures.positioncrew.invalid/venus-position-001.json\"}],\"stressPriceDropBps\":1000,\"targetHealthFactor\":\"1.25\"},\"schemaVersion\":\"positioncrew.erc8183-delivery.v1\",\"service\":\"LENDING_RESCUE\",\"sourceMode\":\"FROZEN_BSC_TEST_FIXTURE\"}",
+          "content_type": "application/json"
+        },
+        "metadata": {
+          "schemaVersion": "positioncrew.erc8183-deliverable-metadata.v1",
+          "service": "LENDING_RESCUE",
+          "providerAgentId": 1810,
+          "providerRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+          "providerWallet": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+          "clientWallet": "0x939F689A1Aeef6FB2eEFe9Ba7386B6653bcbc6b3",
+          "operatorControlled": true,
+          "sourceMode": "FROZEN_BSC_TEST_FIXTURE",
+          "sourceEndpoint": "https://positioncrew.dolepee.com/api/providers/lending-rescue/jobs",
+          "receiptUrl": "https://positioncrew.dolepee.com/api/receipts/sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870",
+          "requestHash": "sha256:068d71bfd268e11bae12e1d26fa3ab4c73c845d42c7d7d150bd05aee1eb81e8d",
+          "deliverableHash": "sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f",
+          "evaluationHash": "sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870"
+        }
+      }
+    },
+    {
+      "jobId": 491,
+      "manifestHash": "0xfa273eeb306951556b7d5c1c36d74c2ee41fda7e447e28135bdc8d2f3842f3a4",
+      "manifest": {
+        "version": 1,
+        "job_id": 491,
+        "chain_id": 97,
+        "contracts": {
+          "commerce": "0xa206c0517B6371C6638CD9e4a42Cc9f02A33B0DE",
+          "router": "0xD7d36D66d2F1B608A0F943f722D27e3744f66F25",
+          "policy": "0xd6a4217588F6B1F5657a92A3e94E6422aD771cEA"
+        },
+        "response": {
+          "content": "{\"advantageStatus\":\"PENDING_INDEPENDENT_BLIND_EVALUATION\",\"claimBoundary\":[\"Frozen BSC test fixtures are used; no live wallet or protocol state is read.\",\"The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.\",\"A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established.\",\"This ERC-8183 job is operator-controlled BSC testnet evidence, not external demand, paid revenue, or Agent Advantage.\"],\"commerceProof\":{\"amountBaseUnits\":\"100000000000000000\",\"chainId\":97,\"jobId\":491,\"paymentMode\":\"OPERATOR_CONTROLLED_TESTNET_ESCROW\",\"paymentToken\":\"0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565\",\"providerAgentId\":1811},\"deliverable\":{\"actionSteps\":[\"Collect fees and remove the current liquidity position.\",\"Rebalance inventory within 30 bps slippage.\",\"Mint the replacement position at ticks 0 and 240.\"],\"breakEvenHours\":\"1.2631\",\"decision\":\"SHIFT\",\"estimatedRebalanceCostUsd\":\"1\",\"expectedGrossFeesUsd\":\"19\",\"expectedNetBenefitUsd\":\"18\",\"expiresAt\":\"2026-08-12T16:04:00.000Z\",\"generatedAt\":\"2026-08-12T16:00:30.000Z\",\"invalidationConditions\":[\"Current tick changes materially from 150.\",\"Gas exceeds 0.10 USD or swap cost exceeds 0.95 USD.\",\"Current time passes 2026-08-12T16:04:00.000Z.\"],\"inventoryExposure\":{\"token0Bps\":5000,\"token1Bps\":5000},\"limitations\":[\"Projected fees use current pool fees, pool share, range density, and a disclosed uptime factor.\",\"Exact V3 inventory composition must be recomputed immediately before execution.\"],\"proposedRange\":{\"lowerTick\":0,\"upperTick\":240},\"requestId\":\"v3-out-of-range-20260812-001\",\"schemaVersion\":\"positioncrew.lp-rebalance.deliverable.v1\",\"service\":\"LP_REBALANCE\",\"status\":\"ACTIONABLE\",\"summary\":\"SHIFT the LP range to 0..240; projected net benefit is 18 USD after costs.\"},\"evaluation\":{\"checks\":[{\"critical\":true,\"evidence\":\"positioncrew.lp-rebalance.request.v1 -> positioncrew.lp-rebalance.deliverable.v1\",\"id\":\"schema\",\"label\":\"Strict versioned contracts parse\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"LP_REBALANCE:v3-out-of-range-20260812-001\",\"id\":\"identity\",\"label\":\"Result is bound to the requested service and request ID\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"expected=sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b\",\"id\":\"deterministic-output\",\"label\":\"Output reproduces from the frozen request and provider version\",\"passed\":true,\"weight\":60},{\"critical\":true,\"evidence\":\"status=ACTIONABLE\",\"id\":\"useful-payload\",\"label\":\"Actionable results contain the category-specific machine payload\",\"passed\":true,\"weight\":15},{\"critical\":false,\"evidence\":\"expiresAt=2026-08-12T16:04:00.000Z\",\"id\":\"bounded-expiry\",\"label\":\"Result never outlives the buyer request\",\"passed\":true,\"weight\":5}],\"deliverableHash\":\"sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b\",\"evaluatedAt\":\"2026-08-12T16:00:30.000Z\",\"evaluationHash\":\"sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7\",\"evaluatorId\":\"positioncrew:evaluator:lp_rebalance:v1\",\"passed\":true,\"requestHash\":\"sha256:77c30b4b66f92a3bcff1dbf7752fdc75cbde1365f344120f32f298ef4ec83ac5\",\"rubricVersion\":\"positioncrew.lp_rebalance.conformance.v1\",\"schemaVersion\":\"positioncrew.evaluation.v1\",\"score\":100},\"receiptUrl\":\"https://positioncrew.dolepee.com/api/receipts/sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7\",\"request\":{\"account\":\"0x1111111111111111111111111111111111111111\",\"chainId\":56,\"constraints\":{\"edgeBufferBps\":1000,\"estimatedGasUsd\":\"0.05\",\"estimatedSwapCostUsd\":\"0.95\",\"evaluationHorizonHours\":24,\"highVolatilityBps\":1000,\"maximumToken0ShareBps\":7000,\"maximumToken1ShareBps\":7000,\"maximumWidthTicks\":600,\"minimumNetBenefitUsd\":\"5\",\"minimumWidthTicks\":120,\"tickSpacing\":60},\"deadline\":\"2026-08-12T16:05:00.000Z\",\"marketState\":{\"currentTick\":150,\"fees24hUsd\":\"2000\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"poolLiquidityUsd\":\"1000000\",\"realizedVolatilityBps\":400,\"sourceId\":\"pancake-v3-fixture-001\",\"token0PriceUsd\":\"1\",\"token1PriceUsd\":\"600\",\"volume24hUsd\":\"5000000\"},\"maxActionUsd\":\"250\",\"maxDataAgeSeconds\":300,\"maxGasUsd\":\"0.10\",\"maxSlippageBps\":30,\"pool\":\"0x2222222222222222222222222222222222222222\",\"position\":{\"feesEarnedUsd\":\"42\",\"liquidity\":\"1000000\",\"lowerTick\":-120,\"positionValueUsd\":\"10000\",\"token0ShareBps\":10000,\"token1ShareBps\":0,\"upperTick\":120},\"protocol\":\"PancakeSwap V3\",\"requestedAt\":\"2026-08-12T16:00:00.000Z\",\"requestId\":\"v3-out-of-range-20260812-001\",\"schemaVersion\":\"positioncrew.lp-rebalance.request.v1\",\"service\":\"LP_REBALANCE\",\"sources\":[{\"label\":\"Frozen PancakeSwap V3 pool and position snapshot\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"sourceId\":\"pancake-v3-fixture-001\",\"uri\":\"https://fixtures.positioncrew.invalid/pancake-v3-position-001.json\"}],\"token0\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"token1\":{\"address\":\"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c\",\"decimals\":18,\"symbol\":\"WBNB\"}},\"schemaVersion\":\"positioncrew.erc8183-delivery.v1\",\"service\":\"LP_REBALANCE\",\"sourceMode\":\"FROZEN_BSC_TEST_FIXTURE\"}",
+          "content_type": "application/json"
+        },
+        "metadata": {
+          "schemaVersion": "positioncrew.erc8183-deliverable-metadata.v1",
+          "service": "LP_REBALANCE",
+          "providerAgentId": 1811,
+          "providerRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+          "providerWallet": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+          "clientWallet": "0x939F689A1Aeef6FB2eEFe9Ba7386B6653bcbc6b3",
+          "operatorControlled": true,
+          "sourceMode": "FROZEN_BSC_TEST_FIXTURE",
+          "sourceEndpoint": "https://positioncrew.dolepee.com/api/providers/lp-rebalance/jobs",
+          "receiptUrl": "https://positioncrew.dolepee.com/api/receipts/sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7",
+          "requestHash": "sha256:77c30b4b66f92a3bcff1dbf7752fdc75cbde1365f344120f32f298ef4ec83ac5",
+          "deliverableHash": "sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b",
+          "evaluationHash": "sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7"
+        }
+      }
+    },
+    {
+      "jobId": 492,
+      "manifestHash": "0x06a675418762555db3e6fc52363f050d43dae992677cb87ddafd821d90d62bb9",
+      "manifest": {
+        "version": 1,
+        "job_id": 492,
+        "chain_id": 97,
+        "contracts": {
+          "commerce": "0xa206c0517B6371C6638CD9e4a42Cc9f02A33B0DE",
+          "router": "0xD7d36D66d2F1B608A0F943f722D27e3744f66F25",
+          "policy": "0xd6a4217588F6B1F5657a92A3e94E6422aD771cEA"
+        },
+        "response": {
+          "content": "{\"advantageStatus\":\"PENDING_INDEPENDENT_BLIND_EVALUATION\",\"claimBoundary\":[\"Frozen BSC test fixtures are used; no live wallet or protocol state is read.\",\"The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.\",\"A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established.\",\"This ERC-8183 job is operator-controlled BSC testnet evidence, not external demand, paid revenue, or Agent Advantage.\"],\"commerceProof\":{\"amountBaseUnits\":\"100000000000000000\",\"chainId\":97,\"jobId\":492,\"paymentMode\":\"OPERATOR_CONTROLLED_TESTNET_ESCROW\",\"paymentToken\":\"0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565\",\"providerAgentId\":1812},\"deliverable\":{\"actionSteps\":[\"Withdraw the bounded allocation from current positions.\",\"Supply 1000 USD to 0x4444444444444444444444444444444444444444.\",\"Re-evaluate before 2026-08-12T16:04:00.000Z.\"],\"allocationUsd\":\"1000\",\"annualYieldUpliftUsd\":\"50\",\"breakEvenDays\":\"14.6\",\"currentWeightedApyBps\":400,\"decision\":\"MIGRATE\",\"expiresAt\":\"2026-08-12T16:04:00.000Z\",\"generatedAt\":\"2026-08-12T16:00:30.000Z\",\"grossApyBps\":900,\"invalidationConditions\":[\"APY, liquidity, lockup, protocol allowlist, or route costs change.\",\"Current time passes 2026-08-12T16:04:00.000Z.\"],\"migrationCostUsd\":\"2\",\"netBenefitUsd\":\"10.328767\",\"requestId\":\"yield-migration-20260812-001\",\"risks\":[\"Beefy risk tier is MEDIUM.\",\"Quoted APY is variable and is not a guaranteed return.\",\"Liquidity snapshot is 5000000 USD.\"],\"schemaVersion\":\"positioncrew.yield-optimization.deliverable.v1\",\"selectedOpportunityId\":\"beefy-usdt-vault\",\"service\":\"YIELD_OPTIMIZATION\",\"status\":\"ACTIONABLE\",\"summary\":\"MIGRATE 1000 USD to beefy-usdt-vault; projected 90-day net benefit is 10.32 USD.\"},\"evaluation\":{\"checks\":[{\"critical\":true,\"evidence\":\"positioncrew.yield-optimization.request.v1 -> positioncrew.yield-optimization.deliverable.v1\",\"id\":\"schema\",\"label\":\"Strict versioned contracts parse\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"YIELD_OPTIMIZATION:yield-migration-20260812-001\",\"id\":\"identity\",\"label\":\"Result is bound to the requested service and request ID\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"expected=sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b\",\"id\":\"deterministic-output\",\"label\":\"Output reproduces from the frozen request and provider version\",\"passed\":true,\"weight\":60},{\"critical\":true,\"evidence\":\"status=ACTIONABLE\",\"id\":\"useful-payload\",\"label\":\"Actionable results contain the category-specific machine payload\",\"passed\":true,\"weight\":15},{\"critical\":false,\"evidence\":\"expiresAt=2026-08-12T16:04:00.000Z\",\"id\":\"bounded-expiry\",\"label\":\"Result never outlives the buyer request\",\"passed\":true,\"weight\":5}],\"deliverableHash\":\"sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b\",\"evaluatedAt\":\"2026-08-12T16:00:30.000Z\",\"evaluationHash\":\"sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb\",\"evaluatorId\":\"positioncrew:evaluator:yield_optimization:v1\",\"passed\":true,\"requestHash\":\"sha256:1b82dc92d4c77bee065638439d024fb4ce2397fcb30f2994b01c1c45804599d5\",\"rubricVersion\":\"positioncrew.yield_optimization.conformance.v1\",\"schemaVersion\":\"positioncrew.evaluation.v1\",\"score\":100},\"receiptUrl\":\"https://positioncrew.dolepee.com/api/receipts/sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb\",\"request\":{\"account\":\"0x1111111111111111111111111111111111111111\",\"capitalUsd\":\"1000\",\"chainId\":56,\"constraints\":{\"evaluationHorizonDays\":90,\"maximumLockupSeconds\":0,\"maximumProtocolConcentrationBps\":10000,\"maximumRiskTier\":\"MEDIUM\",\"minimumLiquidityUsd\":\"1000000\",\"minimumNetBenefitUsd\":\"5\",\"protocolAllowlist\":[\"Venus\",\"Beefy\"]},\"currentPositions\":[{\"amountUsd\":\"1000\",\"asset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"estimatedEntryCostUsd\":\"0\",\"estimatedExitCostUsd\":\"1\",\"grossApyBps\":400,\"liquidityUsd\":\"10000000\",\"lockupSeconds\":0,\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"opportunityId\":\"venus-usdt\",\"protocol\":\"Venus\",\"riskTier\":\"LOW\",\"sourceId\":\"yield-fixture-001\",\"vaultOrMarket\":\"0x3333333333333333333333333333333333333333\"}],\"deadline\":\"2026-08-12T16:05:00.000Z\",\"maxActionUsd\":\"20\",\"maxDataAgeSeconds\":300,\"maxGasUsd\":\"5\",\"maxSlippageBps\":30,\"opportunities\":[{\"amountUsd\":\"1000\",\"asset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"estimatedEntryCostUsd\":\"1\",\"estimatedExitCostUsd\":\"1\",\"grossApyBps\":900,\"liquidityUsd\":\"5000000\",\"lockupSeconds\":0,\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"opportunityId\":\"beefy-usdt-vault\",\"protocol\":\"Beefy\",\"riskTier\":\"MEDIUM\",\"sourceId\":\"yield-fixture-001\",\"vaultOrMarket\":\"0x4444444444444444444444444444444444444444\"},{\"amountUsd\":\"1000\",\"asset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"estimatedEntryCostUsd\":\"1\",\"estimatedExitCostUsd\":\"1\",\"grossApyBps\":5000,\"liquidityUsd\":\"10000\",\"lockupSeconds\":604800,\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"opportunityId\":\"high-risk-farm\",\"protocol\":\"Unknown Farm\",\"riskTier\":\"HIGH\",\"sourceId\":\"yield-fixture-001\",\"vaultOrMarket\":\"0x5555555555555555555555555555555555555555\"}],\"protocol\":\"BSC Yield Router\",\"requestedAt\":\"2026-08-12T16:00:00.000Z\",\"requestId\":\"yield-migration-20260812-001\",\"schemaVersion\":\"positioncrew.yield-optimization.request.v1\",\"service\":\"YIELD_OPTIMIZATION\",\"sources\":[{\"label\":\"Frozen Venus and Beefy opportunity snapshot\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"sourceId\":\"yield-fixture-001\",\"uri\":\"https://fixtures.positioncrew.invalid/yield-opportunities-001.json\"}]},\"schemaVersion\":\"positioncrew.erc8183-delivery.v1\",\"service\":\"YIELD_OPTIMIZATION\",\"sourceMode\":\"FROZEN_BSC_TEST_FIXTURE\"}",
+          "content_type": "application/json"
+        },
+        "metadata": {
+          "schemaVersion": "positioncrew.erc8183-deliverable-metadata.v1",
+          "service": "YIELD_OPTIMIZATION",
+          "providerAgentId": 1812,
+          "providerRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+          "providerWallet": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+          "clientWallet": "0x939F689A1Aeef6FB2eEFe9Ba7386B6653bcbc6b3",
+          "operatorControlled": true,
+          "sourceMode": "FROZEN_BSC_TEST_FIXTURE",
+          "sourceEndpoint": "https://positioncrew.dolepee.com/api/providers/yield-optimization/jobs",
+          "receiptUrl": "https://positioncrew.dolepee.com/api/receipts/sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb",
+          "requestHash": "sha256:1b82dc92d4c77bee065638439d024fb4ce2397fcb30f2994b01c1c45804599d5",
+          "deliverableHash": "sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b",
+          "evaluationHash": "sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb"
+        }
+      }
+    },
+    {
+      "jobId": 493,
+      "manifestHash": "0xc53f23852b2c7041dddd436e847edf78460b00b6141ddcd1e1ad0985adb1f3d5",
+      "manifest": {
+        "version": 1,
+        "job_id": 493,
+        "chain_id": 97,
+        "contracts": {
+          "commerce": "0xa206c0517B6371C6638CD9e4a42Cc9f02A33B0DE",
+          "router": "0xD7d36D66d2F1B608A0F943f722D27e3744f66F25",
+          "policy": "0xd6a4217588F6B1F5657a92A3e94E6422aD771cEA"
+        },
+        "response": {
+          "content": "{\"advantageStatus\":\"PENDING_INDEPENDENT_BLIND_EVALUATION\",\"claimBoundary\":[\"Frozen BSC test fixtures are used; no live wallet or protocol state is read.\",\"The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.\",\"A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established.\",\"This ERC-8183 job is operator-controlled BSC testnet evidence, not external demand, paid revenue, or Agent Advantage.\"],\"commerceProof\":{\"amountBaseUnits\":\"100000000000000000\",\"chainId\":97,\"jobId\":493,\"paymentMode\":\"OPERATOR_CONTROLLED_TESTNET_ESCROW\",\"paymentToken\":\"0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565\",\"providerAgentId\":1813},\"deliverable\":{\"cancellationConditions\":[\"Cancel at 2026-08-12T16:04:00.000Z.\",\"Cancel if volatility exceeds 1000 bps.\",\"Cancel if available liquidity falls below 100000 USD.\",\"Cancel if inventory reaches 600 USD.\"],\"decision\":\"BUILD_GRID\",\"estimatedFeesUsd\":\"60\",\"estimatedGasUsd\":\"1\",\"estimatedSlippageUsd\":\"20\",\"expectedNetProfitUsd\":\"169\",\"expiresAt\":\"2026-08-12T16:04:00.000Z\",\"generatedAt\":\"2026-08-12T16:00:30.000Z\",\"grossSpreadCaptureUsd\":\"250\",\"limitations\":[\"The profit model assumes 10 completed cycles; fills are not guaranteed.\",\"No averaging or replacement orders may exceed the frozen capital, loss, or inventory limits.\"],\"maximumInventoryUsd\":\"500\",\"orders\":[{\"baseAmount\":\"27.777777777777\",\"maximumQuoteAmount\":\"250\",\"price\":\"9\",\"side\":\"BUY\"},{\"baseAmount\":\"26.315789473684\",\"maximumQuoteAmount\":\"250\",\"price\":\"9.5\",\"side\":\"BUY\"},{\"baseAmount\":\"23.809523809523\",\"maximumQuoteAmount\":\"250\",\"price\":\"10.5\",\"side\":\"SELL\"},{\"baseAmount\":\"22.727272727272\",\"maximumQuoteAmount\":\"250\",\"price\":\"11\",\"side\":\"SELL\"}],\"requestId\":\"bounded-grid-20260812-001\",\"schemaVersion\":\"positioncrew.bounded-grid.deliverable.v1\",\"service\":\"BOUNDED_GRID\",\"status\":\"ACTIONABLE\",\"summary\":\"Build 4 bounded orders from 9 to 11; projected net profit is 169 USD.\",\"worstCaseLossUsd\":\"131\"},\"evaluation\":{\"checks\":[{\"critical\":true,\"evidence\":\"positioncrew.bounded-grid.request.v1 -> positioncrew.bounded-grid.deliverable.v1\",\"id\":\"schema\",\"label\":\"Strict versioned contracts parse\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"BOUNDED_GRID:bounded-grid-20260812-001\",\"id\":\"identity\",\"label\":\"Result is bound to the requested service and request ID\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"expected=sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce\",\"id\":\"deterministic-output\",\"label\":\"Output reproduces from the frozen request and provider version\",\"passed\":true,\"weight\":60},{\"critical\":true,\"evidence\":\"status=ACTIONABLE\",\"id\":\"useful-payload\",\"label\":\"Actionable results contain the category-specific machine payload\",\"passed\":true,\"weight\":15},{\"critical\":false,\"evidence\":\"expiresAt=2026-08-12T16:04:00.000Z\",\"id\":\"bounded-expiry\",\"label\":\"Result never outlives the buyer request\",\"passed\":true,\"weight\":5}],\"deliverableHash\":\"sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce\",\"evaluatedAt\":\"2026-08-12T16:00:30.000Z\",\"evaluationHash\":\"sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb\",\"evaluatorId\":\"positioncrew:evaluator:bounded_grid:v1\",\"passed\":true,\"requestHash\":\"sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930\",\"rubricVersion\":\"positioncrew.bounded_grid.conformance.v1\",\"schemaVersion\":\"positioncrew.evaluation.v1\",\"score\":100},\"receiptUrl\":\"https://positioncrew.dolepee.com/api/receipts/sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb\",\"request\":{\"account\":\"0x1111111111111111111111111111111111111111\",\"baseAsset\":{\"address\":\"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c\",\"decimals\":18,\"symbol\":\"WBNB\"},\"chainId\":56,\"constraints\":{\"capitalUsd\":\"1000\",\"estimatedGasUsd\":\"1\",\"expectedCompletedCycles\":10,\"levelCount\":5,\"lowerPrice\":\"9\",\"maximumInventoryUsd\":\"600\",\"maximumLossUsd\":\"150\",\"maximumVolatilityBps\":1000,\"minimumExpectedNetProfitUsd\":\"100\",\"minimumLiquidityUsd\":\"100000\",\"orderExpirySeconds\":300,\"upperPrice\":\"11\"},\"deadline\":\"2026-08-12T16:05:00.000Z\",\"marketState\":{\"liquidityUsd\":\"1000000\",\"midPrice\":\"10\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"realizedVolatilityBps\":300,\"sourceId\":\"grid-fixture-001\",\"venueFeeBps\":30},\"maxActionUsd\":\"1000\",\"maxDataAgeSeconds\":300,\"maxGasUsd\":\"2\",\"maxSlippageBps\":10,\"protocol\":\"PancakeSwap Grid Executor\",\"quoteAsset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"requestedAt\":\"2026-08-12T16:00:00.000Z\",\"requestId\":\"bounded-grid-20260812-001\",\"schemaVersion\":\"positioncrew.bounded-grid.request.v1\",\"service\":\"BOUNDED_GRID\",\"sources\":[{\"label\":\"Frozen BNB-USDT market snapshot\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"sourceId\":\"grid-fixture-001\",\"uri\":\"https://fixtures.positioncrew.invalid/bnb-usdt-grid-001.json\"}],\"venue\":\"0x6666666666666666666666666666666666666666\"},\"schemaVersion\":\"positioncrew.erc8183-delivery.v1\",\"service\":\"BOUNDED_GRID\",\"sourceMode\":\"FROZEN_BSC_TEST_FIXTURE\"}",
+          "content_type": "application/json"
+        },
+        "metadata": {
+          "schemaVersion": "positioncrew.erc8183-deliverable-metadata.v1",
+          "service": "BOUNDED_GRID",
+          "providerAgentId": 1813,
+          "providerRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+          "providerWallet": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+          "clientWallet": "0x939F689A1Aeef6FB2eEFe9Ba7386B6653bcbc6b3",
+          "operatorControlled": true,
+          "sourceMode": "FROZEN_BSC_TEST_FIXTURE",
+          "sourceEndpoint": "https://positioncrew.dolepee.com/api/providers/bounded-grid/jobs",
+          "receiptUrl": "https://positioncrew.dolepee.com/api/receipts/sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb",
+          "requestHash": "sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930",
+          "deliverableHash": "sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce",
+          "evaluationHash": "sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb"
+        }
+      }
+    },
+    {
+      "jobId": 494,
+      "manifestHash": "0x192e536e6f8676502cd80aa0a148589ffc895a75fe5fd6e352c1f82ba59859bc",
+      "manifest": {
+        "version": 1,
+        "job_id": 494,
+        "chain_id": 97,
+        "contracts": {
+          "commerce": "0xa206c0517B6371C6638CD9e4a42Cc9f02A33B0DE",
+          "router": "0xD7d36D66d2F1B608A0F943f722D27e3744f66F25",
+          "policy": "0xd6a4217588F6B1F5657a92A3e94E6422aD771cEA"
+        },
+        "response": {
+          "content": "{\"advantageStatus\":\"PENDING_INDEPENDENT_BLIND_EVALUATION\",\"claimBoundary\":[\"Frozen BSC test fixtures are used; no live wallet or protocol state is read.\",\"The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.\",\"A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established.\",\"This ERC-8183 job is operator-controlled BSC testnet evidence, not external demand, paid revenue, or Agent Advantage.\"],\"commerceProof\":{\"amountBaseUnits\":\"100000000000000000\",\"chainId\":97,\"jobId\":494,\"paymentMode\":\"OPERATOR_CONTROLLED_TESTNET_ESCROW\",\"paymentToken\":\"0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565\",\"providerAgentId\":1812},\"deliverable\":{\"actionSteps\":[\"Withdraw the bounded allocation from current positions.\",\"Supply 1000 USD to 0x4444444444444444444444444444444444444444.\",\"Re-evaluate before 2026-08-12T16:04:00.000Z.\"],\"allocationUsd\":\"1000\",\"annualYieldUpliftUsd\":\"50\",\"breakEvenDays\":\"14.6\",\"currentWeightedApyBps\":400,\"decision\":\"MIGRATE\",\"expiresAt\":\"2026-08-12T16:04:00.000Z\",\"generatedAt\":\"2026-08-12T16:00:30.000Z\",\"grossApyBps\":900,\"invalidationConditions\":[\"APY, liquidity, lockup, protocol allowlist, or route costs change.\",\"Current time passes 2026-08-12T16:04:00.000Z.\"],\"migrationCostUsd\":\"2\",\"netBenefitUsd\":\"10.328767\",\"requestId\":\"yield-migration-20260812-001\",\"risks\":[\"Beefy risk tier is MEDIUM.\",\"Quoted APY is variable and is not a guaranteed return.\",\"Liquidity snapshot is 5000000 USD.\"],\"schemaVersion\":\"positioncrew.yield-optimization.deliverable.v1\",\"selectedOpportunityId\":\"beefy-usdt-vault\",\"service\":\"YIELD_OPTIMIZATION\",\"status\":\"ACTIONABLE\",\"summary\":\"MIGRATE 1000 USD to beefy-usdt-vault; projected 90-day net benefit is 10.32 USD.\"},\"evaluation\":{\"checks\":[{\"critical\":true,\"evidence\":\"positioncrew.yield-optimization.request.v1 -> positioncrew.yield-optimization.deliverable.v1\",\"id\":\"schema\",\"label\":\"Strict versioned contracts parse\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"YIELD_OPTIMIZATION:yield-migration-20260812-001\",\"id\":\"identity\",\"label\":\"Result is bound to the requested service and request ID\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"expected=sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b\",\"id\":\"deterministic-output\",\"label\":\"Output reproduces from the frozen request and provider version\",\"passed\":true,\"weight\":60},{\"critical\":true,\"evidence\":\"status=ACTIONABLE\",\"id\":\"useful-payload\",\"label\":\"Actionable results contain the category-specific machine payload\",\"passed\":true,\"weight\":15},{\"critical\":false,\"evidence\":\"expiresAt=2026-08-12T16:04:00.000Z\",\"id\":\"bounded-expiry\",\"label\":\"Result never outlives the buyer request\",\"passed\":true,\"weight\":5}],\"deliverableHash\":\"sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b\",\"evaluatedAt\":\"2026-08-12T16:00:30.000Z\",\"evaluationHash\":\"sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb\",\"evaluatorId\":\"positioncrew:evaluator:yield_optimization:v1\",\"passed\":true,\"requestHash\":\"sha256:1b82dc92d4c77bee065638439d024fb4ce2397fcb30f2994b01c1c45804599d5\",\"rubricVersion\":\"positioncrew.yield_optimization.conformance.v1\",\"schemaVersion\":\"positioncrew.evaluation.v1\",\"score\":100},\"receiptUrl\":\"https://positioncrew.dolepee.com/api/receipts/sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb\",\"request\":{\"account\":\"0x1111111111111111111111111111111111111111\",\"capitalUsd\":\"1000\",\"chainId\":56,\"constraints\":{\"evaluationHorizonDays\":90,\"maximumLockupSeconds\":0,\"maximumProtocolConcentrationBps\":10000,\"maximumRiskTier\":\"MEDIUM\",\"minimumLiquidityUsd\":\"1000000\",\"minimumNetBenefitUsd\":\"5\",\"protocolAllowlist\":[\"Venus\",\"Beefy\"]},\"currentPositions\":[{\"amountUsd\":\"1000\",\"asset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"estimatedEntryCostUsd\":\"0\",\"estimatedExitCostUsd\":\"1\",\"grossApyBps\":400,\"liquidityUsd\":\"10000000\",\"lockupSeconds\":0,\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"opportunityId\":\"venus-usdt\",\"protocol\":\"Venus\",\"riskTier\":\"LOW\",\"sourceId\":\"yield-fixture-001\",\"vaultOrMarket\":\"0x3333333333333333333333333333333333333333\"}],\"deadline\":\"2026-08-12T16:05:00.000Z\",\"maxActionUsd\":\"20\",\"maxDataAgeSeconds\":300,\"maxGasUsd\":\"5\",\"maxSlippageBps\":30,\"opportunities\":[{\"amountUsd\":\"1000\",\"asset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"estimatedEntryCostUsd\":\"1\",\"estimatedExitCostUsd\":\"1\",\"grossApyBps\":900,\"liquidityUsd\":\"5000000\",\"lockupSeconds\":0,\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"opportunityId\":\"beefy-usdt-vault\",\"protocol\":\"Beefy\",\"riskTier\":\"MEDIUM\",\"sourceId\":\"yield-fixture-001\",\"vaultOrMarket\":\"0x4444444444444444444444444444444444444444\"},{\"amountUsd\":\"1000\",\"asset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"estimatedEntryCostUsd\":\"1\",\"estimatedExitCostUsd\":\"1\",\"grossApyBps\":5000,\"liquidityUsd\":\"10000\",\"lockupSeconds\":604800,\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"opportunityId\":\"high-risk-farm\",\"protocol\":\"Unknown Farm\",\"riskTier\":\"HIGH\",\"sourceId\":\"yield-fixture-001\",\"vaultOrMarket\":\"0x5555555555555555555555555555555555555555\"}],\"protocol\":\"BSC Yield Router\",\"requestedAt\":\"2026-08-12T16:00:00.000Z\",\"requestId\":\"yield-migration-20260812-001\",\"schemaVersion\":\"positioncrew.yield-optimization.request.v1\",\"service\":\"YIELD_OPTIMIZATION\",\"sources\":[{\"label\":\"Frozen Venus and Beefy opportunity snapshot\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"sourceId\":\"yield-fixture-001\",\"uri\":\"https://fixtures.positioncrew.invalid/yield-opportunities-001.json\"}]},\"schemaVersion\":\"positioncrew.erc8183-delivery.v1\",\"service\":\"YIELD_OPTIMIZATION\",\"sourceMode\":\"FROZEN_BSC_TEST_FIXTURE\"}",
+          "content_type": "application/json"
+        },
+        "metadata": {
+          "schemaVersion": "positioncrew.erc8183-deliverable-metadata.v1",
+          "service": "YIELD_OPTIMIZATION",
+          "providerAgentId": 1812,
+          "providerRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+          "providerWallet": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+          "clientWallet": "0x939F689A1Aeef6FB2eEFe9Ba7386B6653bcbc6b3",
+          "operatorControlled": true,
+          "sourceMode": "FROZEN_BSC_TEST_FIXTURE",
+          "sourceEndpoint": "https://positioncrew.dolepee.com/api/providers/yield-optimization/jobs",
+          "receiptUrl": "https://positioncrew.dolepee.com/api/receipts/sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb",
+          "requestHash": "sha256:1b82dc92d4c77bee065638439d024fb4ce2397fcb30f2994b01c1c45804599d5",
+          "deliverableHash": "sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b",
+          "evaluationHash": "sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb"
+        }
+      }
+    },
+    {
+      "jobId": 495,
+      "manifestHash": "0x17c5e5f21b3a4460259acc425a72ea10fcf59e91fe54aa57c6e5599d2f275f2d",
+      "manifest": {
+        "version": 1,
+        "job_id": 495,
+        "chain_id": 97,
+        "contracts": {
+          "commerce": "0xa206c0517B6371C6638CD9e4a42Cc9f02A33B0DE",
+          "router": "0xD7d36D66d2F1B608A0F943f722D27e3744f66F25",
+          "policy": "0xd6a4217588F6B1F5657a92A3e94E6422aD771cEA"
+        },
+        "response": {
+          "content": "{\"advantageStatus\":\"PENDING_INDEPENDENT_BLIND_EVALUATION\",\"claimBoundary\":[\"Frozen BSC test fixtures are used; no live wallet or protocol state is read.\",\"The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.\",\"A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established.\",\"This ERC-8183 job is operator-controlled BSC testnet evidence, not external demand, paid revenue, or Agent Advantage.\"],\"commerceProof\":{\"amountBaseUnits\":\"100000000000000000\",\"chainId\":97,\"jobId\":495,\"paymentMode\":\"OPERATOR_CONTROLLED_TESTNET_ESCROW\",\"paymentToken\":\"0xc70B8741B8B07A6d61E54fd4B20f22Fa648E5565\",\"providerAgentId\":1813},\"deliverable\":{\"cancellationConditions\":[\"Cancel at 2026-08-12T16:04:00.000Z.\",\"Cancel if volatility exceeds 1000 bps.\",\"Cancel if available liquidity falls below 100000 USD.\",\"Cancel if inventory reaches 600 USD.\"],\"decision\":\"BUILD_GRID\",\"estimatedFeesUsd\":\"60\",\"estimatedGasUsd\":\"1\",\"estimatedSlippageUsd\":\"20\",\"expectedNetProfitUsd\":\"169\",\"expiresAt\":\"2026-08-12T16:04:00.000Z\",\"generatedAt\":\"2026-08-12T16:00:30.000Z\",\"grossSpreadCaptureUsd\":\"250\",\"limitations\":[\"The profit model assumes 10 completed cycles; fills are not guaranteed.\",\"No averaging or replacement orders may exceed the frozen capital, loss, or inventory limits.\"],\"maximumInventoryUsd\":\"500\",\"orders\":[{\"baseAmount\":\"27.777777777777\",\"maximumQuoteAmount\":\"250\",\"price\":\"9\",\"side\":\"BUY\"},{\"baseAmount\":\"26.315789473684\",\"maximumQuoteAmount\":\"250\",\"price\":\"9.5\",\"side\":\"BUY\"},{\"baseAmount\":\"23.809523809523\",\"maximumQuoteAmount\":\"250\",\"price\":\"10.5\",\"side\":\"SELL\"},{\"baseAmount\":\"22.727272727272\",\"maximumQuoteAmount\":\"250\",\"price\":\"11\",\"side\":\"SELL\"}],\"requestId\":\"bounded-grid-20260812-001\",\"schemaVersion\":\"positioncrew.bounded-grid.deliverable.v1\",\"service\":\"BOUNDED_GRID\",\"status\":\"ACTIONABLE\",\"summary\":\"Build 4 bounded orders from 9 to 11; projected net profit is 169 USD.\",\"worstCaseLossUsd\":\"131\"},\"evaluation\":{\"checks\":[{\"critical\":true,\"evidence\":\"positioncrew.bounded-grid.request.v1 -> positioncrew.bounded-grid.deliverable.v1\",\"id\":\"schema\",\"label\":\"Strict versioned contracts parse\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"BOUNDED_GRID:bounded-grid-20260812-001\",\"id\":\"identity\",\"label\":\"Result is bound to the requested service and request ID\",\"passed\":true,\"weight\":10},{\"critical\":true,\"evidence\":\"expected=sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce\",\"id\":\"deterministic-output\",\"label\":\"Output reproduces from the frozen request and provider version\",\"passed\":true,\"weight\":60},{\"critical\":true,\"evidence\":\"status=ACTIONABLE\",\"id\":\"useful-payload\",\"label\":\"Actionable results contain the category-specific machine payload\",\"passed\":true,\"weight\":15},{\"critical\":false,\"evidence\":\"expiresAt=2026-08-12T16:04:00.000Z\",\"id\":\"bounded-expiry\",\"label\":\"Result never outlives the buyer request\",\"passed\":true,\"weight\":5}],\"deliverableHash\":\"sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce\",\"evaluatedAt\":\"2026-08-12T16:00:30.000Z\",\"evaluationHash\":\"sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb\",\"evaluatorId\":\"positioncrew:evaluator:bounded_grid:v1\",\"passed\":true,\"requestHash\":\"sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930\",\"rubricVersion\":\"positioncrew.bounded_grid.conformance.v1\",\"schemaVersion\":\"positioncrew.evaluation.v1\",\"score\":100},\"receiptUrl\":\"https://positioncrew.dolepee.com/api/receipts/sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb\",\"request\":{\"account\":\"0x1111111111111111111111111111111111111111\",\"baseAsset\":{\"address\":\"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c\",\"decimals\":18,\"symbol\":\"WBNB\"},\"chainId\":56,\"constraints\":{\"capitalUsd\":\"1000\",\"estimatedGasUsd\":\"1\",\"expectedCompletedCycles\":10,\"levelCount\":5,\"lowerPrice\":\"9\",\"maximumInventoryUsd\":\"600\",\"maximumLossUsd\":\"150\",\"maximumVolatilityBps\":1000,\"minimumExpectedNetProfitUsd\":\"100\",\"minimumLiquidityUsd\":\"100000\",\"orderExpirySeconds\":300,\"upperPrice\":\"11\"},\"deadline\":\"2026-08-12T16:05:00.000Z\",\"marketState\":{\"liquidityUsd\":\"1000000\",\"midPrice\":\"10\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"realizedVolatilityBps\":300,\"sourceId\":\"grid-fixture-001\",\"venueFeeBps\":30},\"maxActionUsd\":\"1000\",\"maxDataAgeSeconds\":300,\"maxGasUsd\":\"2\",\"maxSlippageBps\":10,\"protocol\":\"PancakeSwap Grid Executor\",\"quoteAsset\":{\"address\":\"0x55d398326f99059fF775485246999027B3197955\",\"decimals\":18,\"symbol\":\"USDT\"},\"requestedAt\":\"2026-08-12T16:00:00.000Z\",\"requestId\":\"bounded-grid-20260812-001\",\"schemaVersion\":\"positioncrew.bounded-grid.request.v1\",\"service\":\"BOUNDED_GRID\",\"sources\":[{\"label\":\"Frozen BNB-USDT market snapshot\",\"observedAt\":\"2026-08-12T15:59:00.000Z\",\"sourceId\":\"grid-fixture-001\",\"uri\":\"https://fixtures.positioncrew.invalid/bnb-usdt-grid-001.json\"}],\"venue\":\"0x6666666666666666666666666666666666666666\"},\"schemaVersion\":\"positioncrew.erc8183-delivery.v1\",\"service\":\"BOUNDED_GRID\",\"sourceMode\":\"FROZEN_BSC_TEST_FIXTURE\"}",
+          "content_type": "application/json"
+        },
+        "metadata": {
+          "schemaVersion": "positioncrew.erc8183-deliverable-metadata.v1",
+          "service": "BOUNDED_GRID",
+          "providerAgentId": 1813,
+          "providerRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+          "providerWallet": "0x50da554F1bF6A86469DB201C56bfe967d2E7c43d",
+          "clientWallet": "0x939F689A1Aeef6FB2eEFe9Ba7386B6653bcbc6b3",
+          "operatorControlled": true,
+          "sourceMode": "FROZEN_BSC_TEST_FIXTURE",
+          "sourceEndpoint": "https://positioncrew.dolepee.com/api/providers/bounded-grid/jobs",
+          "receiptUrl": "https://positioncrew.dolepee.com/api/receipts/sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb",
+          "requestHash": "sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930",
+          "deliverableHash": "sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce",
+          "evaluationHash": "sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb"
+        }
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "service": "LENDING_RESCUE",
+      "response": {
+        "schemaVersion": "positioncrew.fixture-job-response.v1",
+        "evidenceMode": "FROZEN_BSC_TEST_FIXTURE",
+        "commerceMode": "IN_MEMORY_CONFORMANCE",
+        "advantageStatus": "PENDING_INDEPENDENT_BLIND_EVALUATION",
+        "generatedAt": "2026-08-12T16:00:30.000Z",
+        "claimBoundary": [
+          "Frozen BSC test fixtures are used; no live wallet or protocol state is read.",
+          "The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.",
+          "A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established."
+        ],
+        "benchmarkLock": {
+          "schemaVersion": "positioncrew.benchmark-lock.v1",
+          "taskId": "venus-stressed-position-20260812-001",
+          "fixtureHash": "sha256:068d71bfd268e11bae12e1d26fa3ab4c73c845d42c7d7d150bd05aee1eb81e8d",
+          "rubricHash": "sha256:d13c3608221e0267d1850ffc08ebe01cbc04ed526abe23720ee926f916a71010",
+          "protocolHash": "sha256:43cc33de9a8ae0a5d62a8a47bf10955e8ffeedfe1c51c6d3b4590809f94f7eaa"
+        },
+        "receipt": {
+          "mode": "PUBLIC_REPRODUCIBLE",
+          "path": "/api/receipts/sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870",
+          "evaluationHash": "sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870"
+        },
+        "result": {
+          "job": {
+            "jobId": "job_4a01de301537c75bb6b599da",
+            "envelope": {
+              "schemaVersion": "positioncrew.job-envelope.v1",
+              "idempotencyKey": "lending_rescue:venus-stressed-position-20260812-001",
+              "service": "LENDING_RESCUE",
+              "requestId": "venus-stressed-position-20260812-001",
+              "requestHash": "sha256:068d71bfd268e11bae12e1d26fa3ab4c73c845d42c7d7d150bd05aee1eb81e8d",
+              "budget": {
+                "chainId": 56,
+                "token": {
+                  "symbol": "TEST_USDC",
+                  "address": "0x0000000000000000000000000000000000001001",
+                  "decimals": 6
+                },
+                "amount": "5"
+              },
+              "createdAt": "2026-08-12T16:00:30.000Z",
+              "deadline": "2026-08-12T16:05:00.000Z"
+            },
+            "envelopeHash": "sha256:446a62077e5ac8f3aae40e8fa7bafdfec2481a277560e48e60dc4d53a8b902c8",
+            "state": "COMPLETED",
+            "providerId": "positioncrew:provider:lending-rescue:v1",
+            "evaluatorId": "positioncrew:evaluator:lending_rescue:v1",
+            "funding": {
+              "tokenAddress": "0x0000000000000000000000000000000000001001",
+              "amount": "5",
+              "transactionReference": "memory-funding:job_4a01de301537c75bb6b599da",
+              "fundedAt": "2026-08-12T16:00:30.000Z"
+            },
+            "deliverable": {
+              "schemaVersion": "positioncrew.deliverable-manifest.v1",
+              "requestHash": "sha256:068d71bfd268e11bae12e1d26fa3ab4c73c845d42c7d7d150bd05aee1eb81e8d",
+              "deliverableHash": "sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f",
+              "mediaType": "application/json",
+              "uri": "data:application/json;base64,eyJzY2hlbWFWZXJzaW9uIjoicG9zaXRpb25jcmV3LmxlbmRpbmctcmVzY3VlLmRlbGl2ZXJhYmxlLnYxIiwic2VydmljZSI6IkxFTkRJTkdfUkVTQ1VFIiwicmVxdWVzdElkIjoidmVudXMtc3RyZXNzZWQtcG9zaXRpb24tMjAyNjA4MTItMDAxIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA4LTEyVDE2OjAwOjMwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFoiLCJzdGF0dXMiOiJBQ1RJT05BQkxFIiwiZGVjaXNpb24iOiJSRVBBWV9ERUJUIiwic3VtbWFyeSI6IlJlcGF5IDE1MiBVU0RUIHRvIHJhaXNlIGhlYWx0aCBmYWN0b3IgZnJvbSAxLjA0MzQ3ODI2IHRvIDEuMjUuIiwicG9zaXRpb24iOnsiY29sbGF0ZXJhbFZhbHVlVXNkIjoiMTIwMCIsImxpcXVpZGF0aW9uV2VpZ2h0ZWRDb2xsYXRlcmFsVXNkIjoiOTYwIiwiZGVidFZhbHVlVXNkIjoiOTIwIiwiY3VycmVudEhlYWx0aEZhY3RvciI6IjEuMDQzNDc4MjYiLCJzdHJlc3NlZEhlYWx0aEZhY3RvciI6IjAuOTM5MTMwNDMiLCJ0YXJnZXRIZWFsdGhGYWN0b3IiOiIxLjI1In0sInJlY29tbWVuZGF0aW9uIjp7ImFjdGlvbklkIjoiYWN0aW9uX2FiZmQ5MmZkOGVlODI3YWU2ZWM3ZDI5OCIsImtpbmQiOiJSRVBBWV9ERUJUIiwiY2hhaW5JZCI6NTYsInByb3RvY29sIjoiVmVudXMiLCJtYXJrZXQiOiIweDIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJhY2NvdW50IjoiMHgxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwiYXNzZXQiOnsic3ltYm9sIjoiVVNEVCIsImFkZHJlc3MiOiIweDU1ZDM5ODMyNmY5OTA1OWZGNzc1NDg1MjQ2OTk5MDI3QjMxOTc5NTUiLCJkZWNpbWFscyI6MTh9LCJhbW91bnQiOiIxNTIiLCJhbW91bnRCYXNlVW5pdHMiOiIxNTIwMDAwMDAwMDAwMDAwMDAwMDAiLCJhbW91bnRVc2QiOiIxNTIiLCJlc3RpbWF0ZWRHYXNVc2QiOiIwLjA0IiwicHJvamVjdGVkSGVhbHRoRmFjdG9yIjoiMS4yNSIsImV4ZWN1dGVCZWZvcmUiOiIyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFoiLCJtYXhTbGlwcGFnZUJwcyI6MzAsInByZWNvbmRpdGlvbnMiOlsiUG9zaXRpb24gZGVidCBhbmQgY29sbGF0ZXJhbCBiYWxhbmNlcyBzdGlsbCBtYXRjaCByZXF1ZXN0IHZlbnVzLXN0cmVzc2VkLXBvc2l0aW9uLTIwMjYwODEyLTAwMSIsIk9yYWNsZSBkZXZpYXRpb24gcmVtYWlucyB3aXRoaW4gMTAwIGJwcyIsIkVzdGltYXRlZCBnYXMgcmVtYWlucyBhdCBvciBiZWxvdyAwLjEwIFVTRCJdfSwiYWx0ZXJuYXRpdmVzIjpbeyJhY3Rpb25JZCI6ImFjdGlvbl84YThhODhlYmMzODAxMTcxZWQ5YzdmZTIiLCJraW5kIjoiQUREX0NPTExBVEVSQUwiLCJjaGFpbklkIjo1NiwicHJvdG9jb2wiOiJWZW51cyIsIm1hcmtldCI6IjB4MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMiIsImFjY291bnQiOiIweDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJhc3NldCI6eyJzeW1ib2wiOiJXQk5CIiwiYWRkcmVzcyI6IjB4YmI0Q2RCOUNCZDM2QjAxYkQxY0JhRUJGMkRlMDhkOTE3M2JjMDk1YyIsImRlY2ltYWxzIjoxOH0sImFtb3VudCI6IjAuMzk1ODMzMzMzMzMzMzMzMzM0IiwiYW1vdW50QmFzZVVuaXRzIjoiMzk1ODMzMzMzMzMzMzMzMzM0IiwiYW1vdW50VXNkIjoiMjM3LjUiLCJlc3RpbWF0ZWRHYXNVc2QiOiIwLjA0IiwicHJvamVjdGVkSGVhbHRoRmFjdG9yIjoiMS4yNSIsImV4ZWN1dGVCZWZvcmUiOiIyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFoiLCJtYXhTbGlwcGFnZUJwcyI6MzAsInByZWNvbmRpdGlvbnMiOlsiUG9zaXRpb24gZGVidCBhbmQgY29sbGF0ZXJhbCBiYWxhbmNlcyBzdGlsbCBtYXRjaCByZXF1ZXN0IHZlbnVzLXN0cmVzc2VkLXBvc2l0aW9uLTIwMjYwODEyLTAwMSIsIk9yYWNsZSBkZXZpYXRpb24gcmVtYWlucyB3aXRoaW4gMTAwIGJwcyIsIkVzdGltYXRlZCBnYXMgcmVtYWlucyBhdCBvciBiZWxvdyAwLjEwIFVTRCJdfV0sInJlZnVzYWxSZWFzb25zIjpbXSwiaW52YWxpZGF0aW9uQ29uZGl0aW9ucyI6WyJBbnkgY29sbGF0ZXJhbCBvciBkZWJ0IGJhbGFuY2UgY2hhbmdlcyBhZnRlciAyMDI2LTA4LTEyVDE2OjAwOjAwLjAwMFoiLCJBbnkgc291cmNlIHByaWNlIG1vdmVzIG1vcmUgdGhhbiAxMDAgYnBzIiwiQ3VycmVudCB0aW1lIHBhc3NlcyAyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFoiXSwibGltaXRhdGlvbnMiOlsiVGhpcyByZXN1bHQgaXMgYSBib3VuZGVkIGFjdGlvbiBwbGFuLCBub3QgY3VzdG9keSBvciBndWFyYW50ZWVkIGV4ZWN1dGlvbi4iLCJQcm9qZWN0ZWQgaGVhbHRoIGZhY3RvciBkZXBlbmRzIG9uIHRoZSBzdXBwbGllZCBwcm90b2NvbCB0aHJlc2hvbGRzIGFuZCBmcmVzaCBwcmljZXMuIiwiVmVyc2lvbiAxIHJldHVybnMgb25lIHNpbmdsZS1hc3NldCByZXNjdWUgYWN0aW9uOyBpdCBkb2VzIG5vdCBzcGxpdCByZXBheW1lbnQgYWNyb3NzIGFzc2V0cy4iXSwic291cmNlcyI6W3sic291cmNlSWQiOiJ2ZW51cy1wb3NpdGlvbi1maXh0dXJlLTAwMSIsImxhYmVsIjoiRnJvemVuIFZlbnVzIGFjY291bnQgYW5kIG9yYWNsZSBzbmFwc2hvdCIsInVyaSI6Imh0dHBzOi8vZml4dHVyZXMucG9zaXRpb25jcmV3LmludmFsaWQvdmVudXMtcG9zaXRpb24tMDAxLmpzb24iLCJvYnNlcnZlZEF0IjoiMjAyNi0wOC0xMlQxNTo1OTowMC4wMDBaIn1dfQ==",
+              "createdAt": "2026-08-12T16:00:30.000Z"
+            },
+            "evaluation": {
+              "schemaVersion": "positioncrew.evaluation.v1",
+              "rubricVersion": "positioncrew.lending_rescue.conformance.v1",
+              "requestHash": "sha256:068d71bfd268e11bae12e1d26fa3ab4c73c845d42c7d7d150bd05aee1eb81e8d",
+              "deliverableHash": "sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f",
+              "evaluatorId": "positioncrew:evaluator:lending_rescue:v1",
+              "evaluatedAt": "2026-08-12T16:00:30.000Z",
+              "score": 100,
+              "passed": true,
+              "checks": [
+                {
+                  "id": "schema",
+                  "label": "Strict versioned contracts parse",
+                  "weight": 10,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "positioncrew.lending-rescue.request.v1 -> positioncrew.lending-rescue.deliverable.v1"
+                },
+                {
+                  "id": "identity",
+                  "label": "Result is bound to the requested service and request ID",
+                  "weight": 10,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "LENDING_RESCUE:venus-stressed-position-20260812-001"
+                },
+                {
+                  "id": "deterministic-output",
+                  "label": "Output reproduces from the frozen request and provider version",
+                  "weight": 60,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "expected=sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f"
+                },
+                {
+                  "id": "useful-payload",
+                  "label": "Actionable results contain the category-specific machine payload",
+                  "weight": 15,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "status=ACTIONABLE"
+                },
+                {
+                  "id": "bounded-expiry",
+                  "label": "Result never outlives the buyer request",
+                  "weight": 5,
+                  "critical": false,
+                  "passed": true,
+                  "evidence": "expiresAt=2026-08-12T16:04:00.000Z"
+                }
+              ],
+              "evaluationHash": "sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870"
+            },
+            "history": [
+              {
+                "state": "CREATED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:446a62077e5ac8f3aae40e8fa7bafdfec2481a277560e48e60dc4d53a8b902c8"
+              },
+              {
+                "state": "FUNDED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "memory-funding:job_4a01de301537c75bb6b599da"
+              },
+              {
+                "state": "ASSIGNED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "positioncrew:provider:lending-rescue:v1:positioncrew:evaluator:lending_rescue:v1"
+              },
+              {
+                "state": "SUBMITTED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f"
+              },
+              {
+                "state": "EVALUATED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870"
+              },
+              {
+                "state": "COMPLETED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870"
+              }
+            ]
+          },
+          "request": {
+            "schemaVersion": "positioncrew.lending-rescue.request.v1",
+            "service": "LENDING_RESCUE",
+            "requestId": "venus-stressed-position-20260812-001",
+            "chainId": 56,
+            "account": "0x1111111111111111111111111111111111111111",
+            "protocol": "Venus",
+            "requestedAt": "2026-08-12T16:00:00.000Z",
+            "deadline": "2026-08-12T16:05:00.000Z",
+            "maxDataAgeSeconds": 300,
+            "maxActionUsd": "250",
+            "maxGasUsd": "0.10",
+            "maxSlippageBps": 30,
+            "sources": [
+              {
+                "sourceId": "venus-position-fixture-001",
+                "label": "Frozen Venus account and oracle snapshot",
+                "uri": "https://fixtures.positioncrew.invalid/venus-position-001.json",
+                "observedAt": "2026-08-12T15:59:00.000Z"
+              }
+            ],
+            "market": "0x2222222222222222222222222222222222222222",
+            "position": {
+              "collateral": [
+                {
+                  "symbol": "WBNB",
+                  "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+                  "decimals": 18,
+                  "amount": "2",
+                  "priceUsd": "600",
+                  "sourceId": "venus-position-fixture-001",
+                  "observedAt": "2026-08-12T15:59:00.000Z",
+                  "liquidationThresholdBps": 8000,
+                  "collateralEnabled": true
+                }
+              ],
+              "debt": [
+                {
+                  "symbol": "USDT",
+                  "address": "0x55d398326f99059fF775485246999027B3197955",
+                  "decimals": 18,
+                  "amount": "920",
+                  "priceUsd": "1",
+                  "sourceId": "venus-position-fixture-001",
+                  "observedAt": "2026-08-12T15:59:00.000Z"
+                }
+              ]
+            },
+            "availableAssets": [
+              {
+                "symbol": "USDT",
+                "address": "0x55d398326f99059fF775485246999027B3197955",
+                "decimals": 18,
+                "availableAmount": "200"
+              },
+              {
+                "symbol": "WBNB",
+                "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+                "decimals": 18,
+                "availableAmount": "0.5"
+              }
+            ],
+            "allowedActions": [
+              "REPAY_DEBT",
+              "ADD_COLLATERAL"
+            ],
+            "targetHealthFactor": "1.25",
+            "stressPriceDropBps": 1000,
+            "oracleDeviationToleranceBps": 100,
+            "estimatedGasUsd": "0.04"
+          },
+          "deliverable": {
+            "schemaVersion": "positioncrew.lending-rescue.deliverable.v1",
+            "service": "LENDING_RESCUE",
+            "requestId": "venus-stressed-position-20260812-001",
+            "generatedAt": "2026-08-12T16:00:30.000Z",
+            "expiresAt": "2026-08-12T16:04:00.000Z",
+            "status": "ACTIONABLE",
+            "decision": "REPAY_DEBT",
+            "summary": "Repay 152 USDT to raise health factor from 1.04347826 to 1.25.",
+            "position": {
+              "collateralValueUsd": "1200",
+              "liquidationWeightedCollateralUsd": "960",
+              "debtValueUsd": "920",
+              "currentHealthFactor": "1.04347826",
+              "stressedHealthFactor": "0.93913043",
+              "targetHealthFactor": "1.25"
+            },
+            "recommendation": {
+              "actionId": "action_abfd92fd8ee827ae6ec7d298",
+              "kind": "REPAY_DEBT",
+              "chainId": 56,
+              "protocol": "Venus",
+              "market": "0x2222222222222222222222222222222222222222",
+              "account": "0x1111111111111111111111111111111111111111",
+              "asset": {
+                "symbol": "USDT",
+                "address": "0x55d398326f99059fF775485246999027B3197955",
+                "decimals": 18
+              },
+              "amount": "152",
+              "amountBaseUnits": "152000000000000000000",
+              "amountUsd": "152",
+              "estimatedGasUsd": "0.04",
+              "projectedHealthFactor": "1.25",
+              "executeBefore": "2026-08-12T16:04:00.000Z",
+              "maxSlippageBps": 30,
+              "preconditions": [
+                "Position debt and collateral balances still match request venus-stressed-position-20260812-001",
+                "Oracle deviation remains within 100 bps",
+                "Estimated gas remains at or below 0.10 USD"
+              ]
+            },
+            "alternatives": [
+              {
+                "actionId": "action_8a8a88ebc3801171ed9c7fe2",
+                "kind": "ADD_COLLATERAL",
+                "chainId": 56,
+                "protocol": "Venus",
+                "market": "0x2222222222222222222222222222222222222222",
+                "account": "0x1111111111111111111111111111111111111111",
+                "asset": {
+                  "symbol": "WBNB",
+                  "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+                  "decimals": 18
+                },
+                "amount": "0.395833333333333334",
+                "amountBaseUnits": "395833333333333334",
+                "amountUsd": "237.5",
+                "estimatedGasUsd": "0.04",
+                "projectedHealthFactor": "1.25",
+                "executeBefore": "2026-08-12T16:04:00.000Z",
+                "maxSlippageBps": 30,
+                "preconditions": [
+                  "Position debt and collateral balances still match request venus-stressed-position-20260812-001",
+                  "Oracle deviation remains within 100 bps",
+                  "Estimated gas remains at or below 0.10 USD"
+                ]
+              }
+            ],
+            "refusalReasons": [],
+            "invalidationConditions": [
+              "Any collateral or debt balance changes after 2026-08-12T16:00:00.000Z",
+              "Any source price moves more than 100 bps",
+              "Current time passes 2026-08-12T16:04:00.000Z"
+            ],
+            "limitations": [
+              "This result is a bounded action plan, not custody or guaranteed execution.",
+              "Projected health factor depends on the supplied protocol thresholds and fresh prices.",
+              "Version 1 returns one single-asset rescue action; it does not split repayment across assets."
+            ],
+            "sources": [
+              {
+                "sourceId": "venus-position-fixture-001",
+                "label": "Frozen Venus account and oracle snapshot",
+                "uri": "https://fixtures.positioncrew.invalid/venus-position-001.json",
+                "observedAt": "2026-08-12T15:59:00.000Z"
+              }
+            ]
+          },
+          "evaluation": {
+            "schemaVersion": "positioncrew.evaluation.v1",
+            "rubricVersion": "positioncrew.lending_rescue.conformance.v1",
+            "requestHash": "sha256:068d71bfd268e11bae12e1d26fa3ab4c73c845d42c7d7d150bd05aee1eb81e8d",
+            "deliverableHash": "sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f",
+            "evaluatorId": "positioncrew:evaluator:lending_rescue:v1",
+            "evaluatedAt": "2026-08-12T16:00:30.000Z",
+            "score": 100,
+            "passed": true,
+            "checks": [
+              {
+                "id": "schema",
+                "label": "Strict versioned contracts parse",
+                "weight": 10,
+                "critical": true,
+                "passed": true,
+                "evidence": "positioncrew.lending-rescue.request.v1 -> positioncrew.lending-rescue.deliverable.v1"
+              },
+              {
+                "id": "identity",
+                "label": "Result is bound to the requested service and request ID",
+                "weight": 10,
+                "critical": true,
+                "passed": true,
+                "evidence": "LENDING_RESCUE:venus-stressed-position-20260812-001"
+              },
+              {
+                "id": "deterministic-output",
+                "label": "Output reproduces from the frozen request and provider version",
+                "weight": 60,
+                "critical": true,
+                "passed": true,
+                "evidence": "expected=sha256:5b10d83eb65c55e7a3dc91387d7ea5a9f2a1e492e73e586295a9a919ef123d1f"
+              },
+              {
+                "id": "useful-payload",
+                "label": "Actionable results contain the category-specific machine payload",
+                "weight": 15,
+                "critical": true,
+                "passed": true,
+                "evidence": "status=ACTIONABLE"
+              },
+              {
+                "id": "bounded-expiry",
+                "label": "Result never outlives the buyer request",
+                "weight": 5,
+                "critical": false,
+                "passed": true,
+                "evidence": "expiresAt=2026-08-12T16:04:00.000Z"
+              }
+            ],
+            "evaluationHash": "sha256:33f9d88a98c1df54d73de1759471902e18872b40cd1d0e3071c84183312d6870"
+          }
+        }
+      }
+    },
+    {
+      "service": "LP_REBALANCE",
+      "response": {
+        "schemaVersion": "positioncrew.fixture-job-response.v1",
+        "evidenceMode": "FROZEN_BSC_TEST_FIXTURE",
+        "commerceMode": "IN_MEMORY_CONFORMANCE",
+        "advantageStatus": "PENDING_INDEPENDENT_BLIND_EVALUATION",
+        "generatedAt": "2026-08-12T16:00:30.000Z",
+        "claimBoundary": [
+          "Frozen BSC test fixtures are used; no live wallet or protocol state is read.",
+          "The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.",
+          "A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established."
+        ],
+        "benchmarkLock": {
+          "schemaVersion": "positioncrew.benchmark-lock.v1",
+          "taskId": "v3-out-of-range-20260812-001",
+          "fixtureHash": "sha256:77c30b4b66f92a3bcff1dbf7752fdc75cbde1365f344120f32f298ef4ec83ac5",
+          "rubricHash": "sha256:f79fa49dca56009cc43932751b9d4e6bcc7d346bb977e7f68f047a07a24b0ef6",
+          "protocolHash": "sha256:7c35e4169854d687333eaf35bbf9556864b4d88792dcc648fde5c476793daa4b"
+        },
+        "receipt": {
+          "mode": "PUBLIC_REPRODUCIBLE",
+          "path": "/api/receipts/sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7",
+          "evaluationHash": "sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7"
+        },
+        "result": {
+          "job": {
+            "jobId": "job_a3a74cad54b6bee459b9c36d",
+            "envelope": {
+              "schemaVersion": "positioncrew.job-envelope.v1",
+              "idempotencyKey": "lp_rebalance:v3-out-of-range-20260812-001",
+              "service": "LP_REBALANCE",
+              "requestId": "v3-out-of-range-20260812-001",
+              "requestHash": "sha256:77c30b4b66f92a3bcff1dbf7752fdc75cbde1365f344120f32f298ef4ec83ac5",
+              "budget": {
+                "chainId": 56,
+                "token": {
+                  "symbol": "TEST_USDC",
+                  "address": "0x0000000000000000000000000000000000001001",
+                  "decimals": 6
+                },
+                "amount": "5"
+              },
+              "createdAt": "2026-08-12T16:00:30.000Z",
+              "deadline": "2026-08-12T16:05:00.000Z"
+            },
+            "envelopeHash": "sha256:08bb812f47fd9f214fe52691e01f8a911396d526b8b2d6b5427dd3d8285a819d",
+            "state": "COMPLETED",
+            "providerId": "positioncrew:provider:lp-rebalance:v1",
+            "evaluatorId": "positioncrew:evaluator:lp_rebalance:v1",
+            "funding": {
+              "tokenAddress": "0x0000000000000000000000000000000000001001",
+              "amount": "5",
+              "transactionReference": "memory-funding:job_a3a74cad54b6bee459b9c36d",
+              "fundedAt": "2026-08-12T16:00:30.000Z"
+            },
+            "deliverable": {
+              "schemaVersion": "positioncrew.deliverable-manifest.v1",
+              "requestHash": "sha256:77c30b4b66f92a3bcff1dbf7752fdc75cbde1365f344120f32f298ef4ec83ac5",
+              "deliverableHash": "sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b",
+              "mediaType": "application/json",
+              "uri": "data:application/json;base64,eyJzY2hlbWFWZXJzaW9uIjoicG9zaXRpb25jcmV3LmxwLXJlYmFsYW5jZS5kZWxpdmVyYWJsZS52MSIsInNlcnZpY2UiOiJMUF9SRUJBTEFOQ0UiLCJyZXF1ZXN0SWQiOiJ2My1vdXQtb2YtcmFuZ2UtMjAyNjA4MTItMDAxIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA4LTEyVDE2OjAwOjMwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFoiLCJzdGF0dXMiOiJBQ1RJT05BQkxFIiwiZGVjaXNpb24iOiJTSElGVCIsInByb3Bvc2VkUmFuZ2UiOnsibG93ZXJUaWNrIjowLCJ1cHBlclRpY2siOjI0MH0sImVzdGltYXRlZFJlYmFsYW5jZUNvc3RVc2QiOiIxIiwiZXhwZWN0ZWRHcm9zc0ZlZXNVc2QiOiIxOSIsImV4cGVjdGVkTmV0QmVuZWZpdFVzZCI6IjE4IiwiYnJlYWtFdmVuSG91cnMiOiIxLjI2MzEiLCJpbnZlbnRvcnlFeHBvc3VyZSI6eyJ0b2tlbjBCcHMiOjUwMDAsInRva2VuMUJwcyI6NTAwMH0sInN1bW1hcnkiOiJTSElGVCB0aGUgTFAgcmFuZ2UgdG8gMC4uMjQwOyBwcm9qZWN0ZWQgbmV0IGJlbmVmaXQgaXMgMTggVVNEIGFmdGVyIGNvc3RzLiIsImFjdGlvblN0ZXBzIjpbIkNvbGxlY3QgZmVlcyBhbmQgcmVtb3ZlIHRoZSBjdXJyZW50IGxpcXVpZGl0eSBwb3NpdGlvbi4iLCJSZWJhbGFuY2UgaW52ZW50b3J5IHdpdGhpbiAzMCBicHMgc2xpcHBhZ2UuIiwiTWludCB0aGUgcmVwbGFjZW1lbnQgcG9zaXRpb24gYXQgdGlja3MgMCBhbmQgMjQwLiJdLCJpbnZhbGlkYXRpb25Db25kaXRpb25zIjpbIkN1cnJlbnQgdGljayBjaGFuZ2VzIG1hdGVyaWFsbHkgZnJvbSAxNTAuIiwiR2FzIGV4Y2VlZHMgMC4xMCBVU0Qgb3Igc3dhcCBjb3N0IGV4Y2VlZHMgMC45NSBVU0QuIiwiQ3VycmVudCB0aW1lIHBhc3NlcyAyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFouIl0sImxpbWl0YXRpb25zIjpbIlByb2plY3RlZCBmZWVzIHVzZSBjdXJyZW50IHBvb2wgZmVlcywgcG9vbCBzaGFyZSwgcmFuZ2UgZGVuc2l0eSwgYW5kIGEgZGlzY2xvc2VkIHVwdGltZSBmYWN0b3IuIiwiRXhhY3QgVjMgaW52ZW50b3J5IGNvbXBvc2l0aW9uIG11c3QgYmUgcmVjb21wdXRlZCBpbW1lZGlhdGVseSBiZWZvcmUgZXhlY3V0aW9uLiJdfQ==",
+              "createdAt": "2026-08-12T16:00:30.000Z"
+            },
+            "evaluation": {
+              "schemaVersion": "positioncrew.evaluation.v1",
+              "rubricVersion": "positioncrew.lp_rebalance.conformance.v1",
+              "requestHash": "sha256:77c30b4b66f92a3bcff1dbf7752fdc75cbde1365f344120f32f298ef4ec83ac5",
+              "deliverableHash": "sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b",
+              "evaluatorId": "positioncrew:evaluator:lp_rebalance:v1",
+              "evaluatedAt": "2026-08-12T16:00:30.000Z",
+              "score": 100,
+              "passed": true,
+              "checks": [
+                {
+                  "id": "schema",
+                  "label": "Strict versioned contracts parse",
+                  "weight": 10,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "positioncrew.lp-rebalance.request.v1 -> positioncrew.lp-rebalance.deliverable.v1"
+                },
+                {
+                  "id": "identity",
+                  "label": "Result is bound to the requested service and request ID",
+                  "weight": 10,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "LP_REBALANCE:v3-out-of-range-20260812-001"
+                },
+                {
+                  "id": "deterministic-output",
+                  "label": "Output reproduces from the frozen request and provider version",
+                  "weight": 60,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "expected=sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b"
+                },
+                {
+                  "id": "useful-payload",
+                  "label": "Actionable results contain the category-specific machine payload",
+                  "weight": 15,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "status=ACTIONABLE"
+                },
+                {
+                  "id": "bounded-expiry",
+                  "label": "Result never outlives the buyer request",
+                  "weight": 5,
+                  "critical": false,
+                  "passed": true,
+                  "evidence": "expiresAt=2026-08-12T16:04:00.000Z"
+                }
+              ],
+              "evaluationHash": "sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7"
+            },
+            "history": [
+              {
+                "state": "CREATED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:08bb812f47fd9f214fe52691e01f8a911396d526b8b2d6b5427dd3d8285a819d"
+              },
+              {
+                "state": "FUNDED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "memory-funding:job_a3a74cad54b6bee459b9c36d"
+              },
+              {
+                "state": "ASSIGNED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "positioncrew:provider:lp-rebalance:v1:positioncrew:evaluator:lp_rebalance:v1"
+              },
+              {
+                "state": "SUBMITTED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b"
+              },
+              {
+                "state": "EVALUATED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7"
+              },
+              {
+                "state": "COMPLETED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7"
+              }
+            ]
+          },
+          "request": {
+            "schemaVersion": "positioncrew.lp-rebalance.request.v1",
+            "service": "LP_REBALANCE",
+            "requestId": "v3-out-of-range-20260812-001",
+            "chainId": 56,
+            "account": "0x1111111111111111111111111111111111111111",
+            "protocol": "PancakeSwap V3",
+            "requestedAt": "2026-08-12T16:00:00.000Z",
+            "deadline": "2026-08-12T16:05:00.000Z",
+            "maxDataAgeSeconds": 300,
+            "maxActionUsd": "250",
+            "maxGasUsd": "0.10",
+            "maxSlippageBps": 30,
+            "sources": [
+              {
+                "sourceId": "pancake-v3-fixture-001",
+                "label": "Frozen PancakeSwap V3 pool and position snapshot",
+                "uri": "https://fixtures.positioncrew.invalid/pancake-v3-position-001.json",
+                "observedAt": "2026-08-12T15:59:00.000Z"
+              }
+            ],
+            "pool": "0x2222222222222222222222222222222222222222",
+            "token0": {
+              "symbol": "USDT",
+              "address": "0x55d398326f99059fF775485246999027B3197955",
+              "decimals": 18
+            },
+            "token1": {
+              "symbol": "WBNB",
+              "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+              "decimals": 18
+            },
+            "position": {
+              "lowerTick": -120,
+              "upperTick": 120,
+              "liquidity": "1000000",
+              "positionValueUsd": "10000",
+              "feesEarnedUsd": "42",
+              "token0ShareBps": 10000,
+              "token1ShareBps": 0
+            },
+            "marketState": {
+              "currentTick": 150,
+              "token0PriceUsd": "1",
+              "token1PriceUsd": "600",
+              "volume24hUsd": "5000000",
+              "fees24hUsd": "2000",
+              "poolLiquidityUsd": "1000000",
+              "realizedVolatilityBps": 400,
+              "observedAt": "2026-08-12T15:59:00.000Z",
+              "sourceId": "pancake-v3-fixture-001"
+            },
+            "constraints": {
+              "minimumWidthTicks": 120,
+              "maximumWidthTicks": 600,
+              "tickSpacing": 60,
+              "edgeBufferBps": 1000,
+              "highVolatilityBps": 1000,
+              "maximumToken0ShareBps": 7000,
+              "maximumToken1ShareBps": 7000,
+              "minimumNetBenefitUsd": "5",
+              "estimatedGasUsd": "0.05",
+              "estimatedSwapCostUsd": "0.95",
+              "evaluationHorizonHours": 24
+            }
+          },
+          "deliverable": {
+            "schemaVersion": "positioncrew.lp-rebalance.deliverable.v1",
+            "service": "LP_REBALANCE",
+            "requestId": "v3-out-of-range-20260812-001",
+            "generatedAt": "2026-08-12T16:00:30.000Z",
+            "expiresAt": "2026-08-12T16:04:00.000Z",
+            "status": "ACTIONABLE",
+            "decision": "SHIFT",
+            "proposedRange": {
+              "lowerTick": 0,
+              "upperTick": 240
+            },
+            "estimatedRebalanceCostUsd": "1",
+            "expectedGrossFeesUsd": "19",
+            "expectedNetBenefitUsd": "18",
+            "breakEvenHours": "1.2631",
+            "inventoryExposure": {
+              "token0Bps": 5000,
+              "token1Bps": 5000
+            },
+            "summary": "SHIFT the LP range to 0..240; projected net benefit is 18 USD after costs.",
+            "actionSteps": [
+              "Collect fees and remove the current liquidity position.",
+              "Rebalance inventory within 30 bps slippage.",
+              "Mint the replacement position at ticks 0 and 240."
+            ],
+            "invalidationConditions": [
+              "Current tick changes materially from 150.",
+              "Gas exceeds 0.10 USD or swap cost exceeds 0.95 USD.",
+              "Current time passes 2026-08-12T16:04:00.000Z."
+            ],
+            "limitations": [
+              "Projected fees use current pool fees, pool share, range density, and a disclosed uptime factor.",
+              "Exact V3 inventory composition must be recomputed immediately before execution."
+            ]
+          },
+          "evaluation": {
+            "schemaVersion": "positioncrew.evaluation.v1",
+            "rubricVersion": "positioncrew.lp_rebalance.conformance.v1",
+            "requestHash": "sha256:77c30b4b66f92a3bcff1dbf7752fdc75cbde1365f344120f32f298ef4ec83ac5",
+            "deliverableHash": "sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b",
+            "evaluatorId": "positioncrew:evaluator:lp_rebalance:v1",
+            "evaluatedAt": "2026-08-12T16:00:30.000Z",
+            "score": 100,
+            "passed": true,
+            "checks": [
+              {
+                "id": "schema",
+                "label": "Strict versioned contracts parse",
+                "weight": 10,
+                "critical": true,
+                "passed": true,
+                "evidence": "positioncrew.lp-rebalance.request.v1 -> positioncrew.lp-rebalance.deliverable.v1"
+              },
+              {
+                "id": "identity",
+                "label": "Result is bound to the requested service and request ID",
+                "weight": 10,
+                "critical": true,
+                "passed": true,
+                "evidence": "LP_REBALANCE:v3-out-of-range-20260812-001"
+              },
+              {
+                "id": "deterministic-output",
+                "label": "Output reproduces from the frozen request and provider version",
+                "weight": 60,
+                "critical": true,
+                "passed": true,
+                "evidence": "expected=sha256:4aeae7547f335af6383587dffc06e7747db74bdb4cf9b450856a4fcae31e009b"
+              },
+              {
+                "id": "useful-payload",
+                "label": "Actionable results contain the category-specific machine payload",
+                "weight": 15,
+                "critical": true,
+                "passed": true,
+                "evidence": "status=ACTIONABLE"
+              },
+              {
+                "id": "bounded-expiry",
+                "label": "Result never outlives the buyer request",
+                "weight": 5,
+                "critical": false,
+                "passed": true,
+                "evidence": "expiresAt=2026-08-12T16:04:00.000Z"
+              }
+            ],
+            "evaluationHash": "sha256:5ab153fa961ea2bf4c26ffcfea25c8f767c51a2e87e32cffb7d81680c75cc6d7"
+          }
+        }
+      }
+    },
+    {
+      "service": "YIELD_OPTIMIZATION",
+      "response": {
+        "schemaVersion": "positioncrew.fixture-job-response.v1",
+        "evidenceMode": "FROZEN_BSC_TEST_FIXTURE",
+        "commerceMode": "IN_MEMORY_CONFORMANCE",
+        "advantageStatus": "PENDING_INDEPENDENT_BLIND_EVALUATION",
+        "generatedAt": "2026-08-12T16:00:30.000Z",
+        "claimBoundary": [
+          "Frozen BSC test fixtures are used; no live wallet or protocol state is read.",
+          "The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.",
+          "A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established."
+        ],
+        "benchmarkLock": null,
+        "receipt": {
+          "mode": "PUBLIC_REPRODUCIBLE",
+          "path": "/api/receipts/sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb",
+          "evaluationHash": "sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb"
+        },
+        "result": {
+          "job": {
+            "jobId": "job_b1f9f0e3ee443bd0ff7903e2",
+            "envelope": {
+              "schemaVersion": "positioncrew.job-envelope.v1",
+              "idempotencyKey": "yield_optimization:yield-migration-20260812-001",
+              "service": "YIELD_OPTIMIZATION",
+              "requestId": "yield-migration-20260812-001",
+              "requestHash": "sha256:1b82dc92d4c77bee065638439d024fb4ce2397fcb30f2994b01c1c45804599d5",
+              "budget": {
+                "chainId": 56,
+                "token": {
+                  "symbol": "TEST_USDC",
+                  "address": "0x0000000000000000000000000000000000001001",
+                  "decimals": 6
+                },
+                "amount": "5"
+              },
+              "createdAt": "2026-08-12T16:00:30.000Z",
+              "deadline": "2026-08-12T16:05:00.000Z"
+            },
+            "envelopeHash": "sha256:e81dbc304fc766804949c7a0c3fc485fce8a05115ff0d331cc535b2a42b2f4d8",
+            "state": "COMPLETED",
+            "providerId": "positioncrew:provider:yield-optimization:v1",
+            "evaluatorId": "positioncrew:evaluator:yield_optimization:v1",
+            "funding": {
+              "tokenAddress": "0x0000000000000000000000000000000000001001",
+              "amount": "5",
+              "transactionReference": "memory-funding:job_b1f9f0e3ee443bd0ff7903e2",
+              "fundedAt": "2026-08-12T16:00:30.000Z"
+            },
+            "deliverable": {
+              "schemaVersion": "positioncrew.deliverable-manifest.v1",
+              "requestHash": "sha256:1b82dc92d4c77bee065638439d024fb4ce2397fcb30f2994b01c1c45804599d5",
+              "deliverableHash": "sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b",
+              "mediaType": "application/json",
+              "uri": "data:application/json;base64,eyJzY2hlbWFWZXJzaW9uIjoicG9zaXRpb25jcmV3LnlpZWxkLW9wdGltaXphdGlvbi5kZWxpdmVyYWJsZS52MSIsInNlcnZpY2UiOiJZSUVMRF9PUFRJTUlaQVRJT04iLCJyZXF1ZXN0SWQiOiJ5aWVsZC1taWdyYXRpb24tMjAyNjA4MTItMDAxIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA4LTEyVDE2OjAwOjMwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFoiLCJzdGF0dXMiOiJBQ1RJT05BQkxFIiwiZGVjaXNpb24iOiJNSUdSQVRFIiwic2VsZWN0ZWRPcHBvcnR1bml0eUlkIjoiYmVlZnktdXNkdC12YXVsdCIsImFsbG9jYXRpb25Vc2QiOiIxMDAwIiwiZ3Jvc3NBcHlCcHMiOjkwMCwiY3VycmVudFdlaWdodGVkQXB5QnBzIjo0MDAsImFubnVhbFlpZWxkVXBsaWZ0VXNkIjoiNTAiLCJuZXRCZW5lZml0VXNkIjoiMTAuMzI4NzY3IiwibWlncmF0aW9uQ29zdFVzZCI6IjIiLCJicmVha0V2ZW5EYXlzIjoiMTQuNiIsInN1bW1hcnkiOiJNSUdSQVRFIDEwMDAgVVNEIHRvIGJlZWZ5LXVzZHQtdmF1bHQ7IHByb2plY3RlZCA5MC1kYXkgbmV0IGJlbmVmaXQgaXMgMTAuMzIgVVNELiIsImFjdGlvblN0ZXBzIjpbIldpdGhkcmF3IHRoZSBib3VuZGVkIGFsbG9jYXRpb24gZnJvbSBjdXJyZW50IHBvc2l0aW9ucy4iLCJTdXBwbHkgMTAwMCBVU0QgdG8gMHg0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0LiIsIlJlLWV2YWx1YXRlIGJlZm9yZSAyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFouIl0sInJpc2tzIjpbIkJlZWZ5IHJpc2sgdGllciBpcyBNRURJVU0uIiwiUXVvdGVkIEFQWSBpcyB2YXJpYWJsZSBhbmQgaXMgbm90IGEgZ3VhcmFudGVlZCByZXR1cm4uIiwiTGlxdWlkaXR5IHNuYXBzaG90IGlzIDUwMDAwMDAgVVNELiJdLCJpbnZhbGlkYXRpb25Db25kaXRpb25zIjpbIkFQWSwgbGlxdWlkaXR5LCBsb2NrdXAsIHByb3RvY29sIGFsbG93bGlzdCwgb3Igcm91dGUgY29zdHMgY2hhbmdlLiIsIkN1cnJlbnQgdGltZSBwYXNzZXMgMjAyNi0wOC0xMlQxNjowNDowMC4wMDBaLiJdfQ==",
+              "createdAt": "2026-08-12T16:00:30.000Z"
+            },
+            "evaluation": {
+              "schemaVersion": "positioncrew.evaluation.v1",
+              "rubricVersion": "positioncrew.yield_optimization.conformance.v1",
+              "requestHash": "sha256:1b82dc92d4c77bee065638439d024fb4ce2397fcb30f2994b01c1c45804599d5",
+              "deliverableHash": "sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b",
+              "evaluatorId": "positioncrew:evaluator:yield_optimization:v1",
+              "evaluatedAt": "2026-08-12T16:00:30.000Z",
+              "score": 100,
+              "passed": true,
+              "checks": [
+                {
+                  "id": "schema",
+                  "label": "Strict versioned contracts parse",
+                  "weight": 10,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "positioncrew.yield-optimization.request.v1 -> positioncrew.yield-optimization.deliverable.v1"
+                },
+                {
+                  "id": "identity",
+                  "label": "Result is bound to the requested service and request ID",
+                  "weight": 10,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "YIELD_OPTIMIZATION:yield-migration-20260812-001"
+                },
+                {
+                  "id": "deterministic-output",
+                  "label": "Output reproduces from the frozen request and provider version",
+                  "weight": 60,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "expected=sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b"
+                },
+                {
+                  "id": "useful-payload",
+                  "label": "Actionable results contain the category-specific machine payload",
+                  "weight": 15,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "status=ACTIONABLE"
+                },
+                {
+                  "id": "bounded-expiry",
+                  "label": "Result never outlives the buyer request",
+                  "weight": 5,
+                  "critical": false,
+                  "passed": true,
+                  "evidence": "expiresAt=2026-08-12T16:04:00.000Z"
+                }
+              ],
+              "evaluationHash": "sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb"
+            },
+            "history": [
+              {
+                "state": "CREATED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:e81dbc304fc766804949c7a0c3fc485fce8a05115ff0d331cc535b2a42b2f4d8"
+              },
+              {
+                "state": "FUNDED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "memory-funding:job_b1f9f0e3ee443bd0ff7903e2"
+              },
+              {
+                "state": "ASSIGNED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "positioncrew:provider:yield-optimization:v1:positioncrew:evaluator:yield_optimization:v1"
+              },
+              {
+                "state": "SUBMITTED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b"
+              },
+              {
+                "state": "EVALUATED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb"
+              },
+              {
+                "state": "COMPLETED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb"
+              }
+            ]
+          },
+          "request": {
+            "schemaVersion": "positioncrew.yield-optimization.request.v1",
+            "service": "YIELD_OPTIMIZATION",
+            "requestId": "yield-migration-20260812-001",
+            "chainId": 56,
+            "account": "0x1111111111111111111111111111111111111111",
+            "protocol": "BSC Yield Router",
+            "requestedAt": "2026-08-12T16:00:00.000Z",
+            "deadline": "2026-08-12T16:05:00.000Z",
+            "maxDataAgeSeconds": 300,
+            "maxActionUsd": "20",
+            "maxGasUsd": "5",
+            "maxSlippageBps": 30,
+            "sources": [
+              {
+                "sourceId": "yield-fixture-001",
+                "label": "Frozen Venus and Beefy opportunity snapshot",
+                "uri": "https://fixtures.positioncrew.invalid/yield-opportunities-001.json",
+                "observedAt": "2026-08-12T15:59:00.000Z"
+              }
+            ],
+            "capitalUsd": "1000",
+            "currentPositions": [
+              {
+                "opportunityId": "venus-usdt",
+                "protocol": "Venus",
+                "vaultOrMarket": "0x3333333333333333333333333333333333333333",
+                "asset": {
+                  "symbol": "USDT",
+                  "address": "0x55d398326f99059fF775485246999027B3197955",
+                  "decimals": 18
+                },
+                "amountUsd": "1000",
+                "grossApyBps": 400,
+                "liquidityUsd": "10000000",
+                "lockupSeconds": 0,
+                "estimatedEntryCostUsd": "0",
+                "estimatedExitCostUsd": "1",
+                "riskTier": "LOW",
+                "observedAt": "2026-08-12T15:59:00.000Z",
+                "sourceId": "yield-fixture-001"
+              }
+            ],
+            "opportunities": [
+              {
+                "opportunityId": "beefy-usdt-vault",
+                "protocol": "Beefy",
+                "vaultOrMarket": "0x4444444444444444444444444444444444444444",
+                "asset": {
+                  "symbol": "USDT",
+                  "address": "0x55d398326f99059fF775485246999027B3197955",
+                  "decimals": 18
+                },
+                "amountUsd": "1000",
+                "grossApyBps": 900,
+                "liquidityUsd": "5000000",
+                "lockupSeconds": 0,
+                "estimatedEntryCostUsd": "1",
+                "estimatedExitCostUsd": "1",
+                "riskTier": "MEDIUM",
+                "observedAt": "2026-08-12T15:59:00.000Z",
+                "sourceId": "yield-fixture-001"
+              },
+              {
+                "opportunityId": "high-risk-farm",
+                "protocol": "Unknown Farm",
+                "vaultOrMarket": "0x5555555555555555555555555555555555555555",
+                "asset": {
+                  "symbol": "USDT",
+                  "address": "0x55d398326f99059fF775485246999027B3197955",
+                  "decimals": 18
+                },
+                "amountUsd": "1000",
+                "grossApyBps": 5000,
+                "liquidityUsd": "10000",
+                "lockupSeconds": 604800,
+                "estimatedEntryCostUsd": "1",
+                "estimatedExitCostUsd": "1",
+                "riskTier": "HIGH",
+                "observedAt": "2026-08-12T15:59:00.000Z",
+                "sourceId": "yield-fixture-001"
+              }
+            ],
+            "constraints": {
+              "protocolAllowlist": [
+                "Venus",
+                "Beefy"
+              ],
+              "maximumRiskTier": "MEDIUM",
+              "maximumProtocolConcentrationBps": 10000,
+              "maximumLockupSeconds": 0,
+              "minimumLiquidityUsd": "1000000",
+              "minimumNetBenefitUsd": "5",
+              "evaluationHorizonDays": 90
+            }
+          },
+          "deliverable": {
+            "schemaVersion": "positioncrew.yield-optimization.deliverable.v1",
+            "service": "YIELD_OPTIMIZATION",
+            "requestId": "yield-migration-20260812-001",
+            "generatedAt": "2026-08-12T16:00:30.000Z",
+            "expiresAt": "2026-08-12T16:04:00.000Z",
+            "status": "ACTIONABLE",
+            "decision": "MIGRATE",
+            "selectedOpportunityId": "beefy-usdt-vault",
+            "allocationUsd": "1000",
+            "grossApyBps": 900,
+            "currentWeightedApyBps": 400,
+            "annualYieldUpliftUsd": "50",
+            "netBenefitUsd": "10.328767",
+            "migrationCostUsd": "2",
+            "breakEvenDays": "14.6",
+            "summary": "MIGRATE 1000 USD to beefy-usdt-vault; projected 90-day net benefit is 10.32 USD.",
+            "actionSteps": [
+              "Withdraw the bounded allocation from current positions.",
+              "Supply 1000 USD to 0x4444444444444444444444444444444444444444.",
+              "Re-evaluate before 2026-08-12T16:04:00.000Z."
+            ],
+            "risks": [
+              "Beefy risk tier is MEDIUM.",
+              "Quoted APY is variable and is not a guaranteed return.",
+              "Liquidity snapshot is 5000000 USD."
+            ],
+            "invalidationConditions": [
+              "APY, liquidity, lockup, protocol allowlist, or route costs change.",
+              "Current time passes 2026-08-12T16:04:00.000Z."
+            ]
+          },
+          "evaluation": {
+            "schemaVersion": "positioncrew.evaluation.v1",
+            "rubricVersion": "positioncrew.yield_optimization.conformance.v1",
+            "requestHash": "sha256:1b82dc92d4c77bee065638439d024fb4ce2397fcb30f2994b01c1c45804599d5",
+            "deliverableHash": "sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b",
+            "evaluatorId": "positioncrew:evaluator:yield_optimization:v1",
+            "evaluatedAt": "2026-08-12T16:00:30.000Z",
+            "score": 100,
+            "passed": true,
+            "checks": [
+              {
+                "id": "schema",
+                "label": "Strict versioned contracts parse",
+                "weight": 10,
+                "critical": true,
+                "passed": true,
+                "evidence": "positioncrew.yield-optimization.request.v1 -> positioncrew.yield-optimization.deliverable.v1"
+              },
+              {
+                "id": "identity",
+                "label": "Result is bound to the requested service and request ID",
+                "weight": 10,
+                "critical": true,
+                "passed": true,
+                "evidence": "YIELD_OPTIMIZATION:yield-migration-20260812-001"
+              },
+              {
+                "id": "deterministic-output",
+                "label": "Output reproduces from the frozen request and provider version",
+                "weight": 60,
+                "critical": true,
+                "passed": true,
+                "evidence": "expected=sha256:59756a7e2e3164f7085f63b2922d662abb70b9880bdb37c055c11c5318cfb63b"
+              },
+              {
+                "id": "useful-payload",
+                "label": "Actionable results contain the category-specific machine payload",
+                "weight": 15,
+                "critical": true,
+                "passed": true,
+                "evidence": "status=ACTIONABLE"
+              },
+              {
+                "id": "bounded-expiry",
+                "label": "Result never outlives the buyer request",
+                "weight": 5,
+                "critical": false,
+                "passed": true,
+                "evidence": "expiresAt=2026-08-12T16:04:00.000Z"
+              }
+            ],
+            "evaluationHash": "sha256:268b606dacd6d27ddefbeb0e48d348b7e699bf699a211c5a5283bb6ddd93d0bb"
+          }
+        }
+      }
+    },
+    {
+      "service": "BOUNDED_GRID",
+      "response": {
+        "schemaVersion": "positioncrew.fixture-job-response.v1",
+        "evidenceMode": "FROZEN_BSC_TEST_FIXTURE",
+        "commerceMode": "IN_MEMORY_CONFORMANCE",
+        "advantageStatus": "PENDING_INDEPENDENT_BLIND_EVALUATION",
+        "generatedAt": "2026-08-12T16:00:30.000Z",
+        "claimBoundary": [
+          "Frozen BSC test fixtures are used; no live wallet or protocol state is read.",
+          "The lifecycle is an in-memory conformance rail, not an AACP or mainnet settlement.",
+          "A 100/100 receipt means the output satisfied deterministic contract checks, not that agent advantage has been established."
+        ],
+        "benchmarkLock": {
+          "schemaVersion": "positioncrew.benchmark-lock.v1",
+          "taskId": "bounded-grid-20260812-001",
+          "fixtureHash": "sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930",
+          "rubricHash": "sha256:19448c9350f99b7e7b65351b9c91513e59d708e02176c44e4188b4d4c9fca12d",
+          "protocolHash": "sha256:e85596cea18c8dd2a2d42407131aa817ac6f8647c24a1f643bdf52dd5b452988"
+        },
+        "receipt": {
+          "mode": "PUBLIC_REPRODUCIBLE",
+          "path": "/api/receipts/sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb",
+          "evaluationHash": "sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb"
+        },
+        "result": {
+          "job": {
+            "jobId": "job_7c7a1cf5a44023a0844bacbd",
+            "envelope": {
+              "schemaVersion": "positioncrew.job-envelope.v1",
+              "idempotencyKey": "bounded_grid:bounded-grid-20260812-001",
+              "service": "BOUNDED_GRID",
+              "requestId": "bounded-grid-20260812-001",
+              "requestHash": "sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930",
+              "budget": {
+                "chainId": 56,
+                "token": {
+                  "symbol": "TEST_USDC",
+                  "address": "0x0000000000000000000000000000000000001001",
+                  "decimals": 6
+                },
+                "amount": "5"
+              },
+              "createdAt": "2026-08-12T16:00:30.000Z",
+              "deadline": "2026-08-12T16:05:00.000Z"
+            },
+            "envelopeHash": "sha256:b06f6b5d1e6c7ca8e966120287a59527c4a5bdd646691a208fce385b2d756f81",
+            "state": "COMPLETED",
+            "providerId": "positioncrew:provider:bounded-grid:v1",
+            "evaluatorId": "positioncrew:evaluator:bounded_grid:v1",
+            "funding": {
+              "tokenAddress": "0x0000000000000000000000000000000000001001",
+              "amount": "5",
+              "transactionReference": "memory-funding:job_7c7a1cf5a44023a0844bacbd",
+              "fundedAt": "2026-08-12T16:00:30.000Z"
+            },
+            "deliverable": {
+              "schemaVersion": "positioncrew.deliverable-manifest.v1",
+              "requestHash": "sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930",
+              "deliverableHash": "sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce",
+              "mediaType": "application/json",
+              "uri": "data:application/json;base64,eyJzY2hlbWFWZXJzaW9uIjoicG9zaXRpb25jcmV3LmJvdW5kZWQtZ3JpZC5kZWxpdmVyYWJsZS52MSIsInNlcnZpY2UiOiJCT1VOREVEX0dSSUQiLCJyZXF1ZXN0SWQiOiJib3VuZGVkLWdyaWQtMjAyNjA4MTItMDAxIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA4LTEyVDE2OjAwOjMwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDI2LTA4LTEyVDE2OjA0OjAwLjAwMFoiLCJzdGF0dXMiOiJBQ1RJT05BQkxFIiwiZGVjaXNpb24iOiJCVUlMRF9HUklEIiwib3JkZXJzIjpbeyJzaWRlIjoiQlVZIiwicHJpY2UiOiI5IiwiYmFzZUFtb3VudCI6IjI3Ljc3Nzc3Nzc3Nzc3NyIsIm1heGltdW1RdW90ZUFtb3VudCI6IjI1MCJ9LHsic2lkZSI6IkJVWSIsInByaWNlIjoiOS41IiwiYmFzZUFtb3VudCI6IjI2LjMxNTc4OTQ3MzY4NCIsIm1heGltdW1RdW90ZUFtb3VudCI6IjI1MCJ9LHsic2lkZSI6IlNFTEwiLCJwcmljZSI6IjEwLjUiLCJiYXNlQW1vdW50IjoiMjMuODA5NTIzODA5NTIzIiwibWF4aW11bVF1b3RlQW1vdW50IjoiMjUwIn0seyJzaWRlIjoiU0VMTCIsInByaWNlIjoiMTEiLCJiYXNlQW1vdW50IjoiMjIuNzI3MjcyNzI3MjcyIiwibWF4aW11bVF1b3RlQW1vdW50IjoiMjUwIn1dLCJncm9zc1NwcmVhZENhcHR1cmVVc2QiOiIyNTAiLCJlc3RpbWF0ZWRGZWVzVXNkIjoiNjAiLCJlc3RpbWF0ZWRTbGlwcGFnZVVzZCI6IjIwIiwiZXN0aW1hdGVkR2FzVXNkIjoiMSIsImV4cGVjdGVkTmV0UHJvZml0VXNkIjoiMTY5Iiwid29yc3RDYXNlTG9zc1VzZCI6IjEzMSIsIm1heGltdW1JbnZlbnRvcnlVc2QiOiI1MDAiLCJzdW1tYXJ5IjoiQnVpbGQgNCBib3VuZGVkIG9yZGVycyBmcm9tIDkgdG8gMTE7IHByb2plY3RlZCBuZXQgcHJvZml0IGlzIDE2OSBVU0QuIiwiY2FuY2VsbGF0aW9uQ29uZGl0aW9ucyI6WyJDYW5jZWwgYXQgMjAyNi0wOC0xMlQxNjowNDowMC4wMDBaLiIsIkNhbmNlbCBpZiB2b2xhdGlsaXR5IGV4Y2VlZHMgMTAwMCBicHMuIiwiQ2FuY2VsIGlmIGF2YWlsYWJsZSBsaXF1aWRpdHkgZmFsbHMgYmVsb3cgMTAwMDAwIFVTRC4iLCJDYW5jZWwgaWYgaW52ZW50b3J5IHJlYWNoZXMgNjAwIFVTRC4iXSwibGltaXRhdGlvbnMiOlsiVGhlIHByb2ZpdCBtb2RlbCBhc3N1bWVzIDEwIGNvbXBsZXRlZCBjeWNsZXM7IGZpbGxzIGFyZSBub3QgZ3VhcmFudGVlZC4iLCJObyBhdmVyYWdpbmcgb3IgcmVwbGFjZW1lbnQgb3JkZXJzIG1heSBleGNlZWQgdGhlIGZyb3plbiBjYXBpdGFsLCBsb3NzLCBvciBpbnZlbnRvcnkgbGltaXRzLiJdfQ==",
+              "createdAt": "2026-08-12T16:00:30.000Z"
+            },
+            "evaluation": {
+              "schemaVersion": "positioncrew.evaluation.v1",
+              "rubricVersion": "positioncrew.bounded_grid.conformance.v1",
+              "requestHash": "sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930",
+              "deliverableHash": "sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce",
+              "evaluatorId": "positioncrew:evaluator:bounded_grid:v1",
+              "evaluatedAt": "2026-08-12T16:00:30.000Z",
+              "score": 100,
+              "passed": true,
+              "checks": [
+                {
+                  "id": "schema",
+                  "label": "Strict versioned contracts parse",
+                  "weight": 10,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "positioncrew.bounded-grid.request.v1 -> positioncrew.bounded-grid.deliverable.v1"
+                },
+                {
+                  "id": "identity",
+                  "label": "Result is bound to the requested service and request ID",
+                  "weight": 10,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "BOUNDED_GRID:bounded-grid-20260812-001"
+                },
+                {
+                  "id": "deterministic-output",
+                  "label": "Output reproduces from the frozen request and provider version",
+                  "weight": 60,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "expected=sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce"
+                },
+                {
+                  "id": "useful-payload",
+                  "label": "Actionable results contain the category-specific machine payload",
+                  "weight": 15,
+                  "critical": true,
+                  "passed": true,
+                  "evidence": "status=ACTIONABLE"
+                },
+                {
+                  "id": "bounded-expiry",
+                  "label": "Result never outlives the buyer request",
+                  "weight": 5,
+                  "critical": false,
+                  "passed": true,
+                  "evidence": "expiresAt=2026-08-12T16:04:00.000Z"
+                }
+              ],
+              "evaluationHash": "sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb"
+            },
+            "history": [
+              {
+                "state": "CREATED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:b06f6b5d1e6c7ca8e966120287a59527c4a5bdd646691a208fce385b2d756f81"
+              },
+              {
+                "state": "FUNDED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "memory-funding:job_7c7a1cf5a44023a0844bacbd"
+              },
+              {
+                "state": "ASSIGNED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "positioncrew:provider:bounded-grid:v1:positioncrew:evaluator:bounded_grid:v1"
+              },
+              {
+                "state": "SUBMITTED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce"
+              },
+              {
+                "state": "EVALUATED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb"
+              },
+              {
+                "state": "COMPLETED",
+                "at": "2026-08-12T16:00:30.000Z",
+                "reference": "sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb"
+              }
+            ]
+          },
+          "request": {
+            "schemaVersion": "positioncrew.bounded-grid.request.v1",
+            "service": "BOUNDED_GRID",
+            "requestId": "bounded-grid-20260812-001",
+            "chainId": 56,
+            "account": "0x1111111111111111111111111111111111111111",
+            "protocol": "PancakeSwap Grid Executor",
+            "requestedAt": "2026-08-12T16:00:00.000Z",
+            "deadline": "2026-08-12T16:05:00.000Z",
+            "maxDataAgeSeconds": 300,
+            "maxActionUsd": "1000",
+            "maxGasUsd": "2",
+            "maxSlippageBps": 10,
+            "sources": [
+              {
+                "sourceId": "grid-fixture-001",
+                "label": "Frozen BNB-USDT market snapshot",
+                "uri": "https://fixtures.positioncrew.invalid/bnb-usdt-grid-001.json",
+                "observedAt": "2026-08-12T15:59:00.000Z"
+              }
+            ],
+            "venue": "0x6666666666666666666666666666666666666666",
+            "baseAsset": {
+              "symbol": "WBNB",
+              "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+              "decimals": 18
+            },
+            "quoteAsset": {
+              "symbol": "USDT",
+              "address": "0x55d398326f99059fF775485246999027B3197955",
+              "decimals": 18
+            },
+            "marketState": {
+              "midPrice": "10",
+              "liquidityUsd": "1000000",
+              "realizedVolatilityBps": 300,
+              "venueFeeBps": 30,
+              "observedAt": "2026-08-12T15:59:00.000Z",
+              "sourceId": "grid-fixture-001"
+            },
+            "constraints": {
+              "capitalUsd": "1000",
+              "lowerPrice": "9",
+              "upperPrice": "11",
+              "levelCount": 5,
+              "maximumInventoryUsd": "600",
+              "maximumLossUsd": "150",
+              "minimumExpectedNetProfitUsd": "100",
+              "minimumLiquidityUsd": "100000",
+              "maximumVolatilityBps": 1000,
+              "expectedCompletedCycles": 10,
+              "estimatedGasUsd": "1",
+              "orderExpirySeconds": 300
+            }
+          },
+          "deliverable": {
+            "schemaVersion": "positioncrew.bounded-grid.deliverable.v1",
+            "service": "BOUNDED_GRID",
+            "requestId": "bounded-grid-20260812-001",
+            "generatedAt": "2026-08-12T16:00:30.000Z",
+            "expiresAt": "2026-08-12T16:04:00.000Z",
+            "status": "ACTIONABLE",
+            "decision": "BUILD_GRID",
+            "orders": [
+              {
+                "side": "BUY",
+                "price": "9",
+                "baseAmount": "27.777777777777",
+                "maximumQuoteAmount": "250"
+              },
+              {
+                "side": "BUY",
+                "price": "9.5",
+                "baseAmount": "26.315789473684",
+                "maximumQuoteAmount": "250"
+              },
+              {
+                "side": "SELL",
+                "price": "10.5",
+                "baseAmount": "23.809523809523",
+                "maximumQuoteAmount": "250"
+              },
+              {
+                "side": "SELL",
+                "price": "11",
+                "baseAmount": "22.727272727272",
+                "maximumQuoteAmount": "250"
+              }
+            ],
+            "grossSpreadCaptureUsd": "250",
+            "estimatedFeesUsd": "60",
+            "estimatedSlippageUsd": "20",
+            "estimatedGasUsd": "1",
+            "expectedNetProfitUsd": "169",
+            "worstCaseLossUsd": "131",
+            "maximumInventoryUsd": "500",
+            "summary": "Build 4 bounded orders from 9 to 11; projected net profit is 169 USD.",
+            "cancellationConditions": [
+              "Cancel at 2026-08-12T16:04:00.000Z.",
+              "Cancel if volatility exceeds 1000 bps.",
+              "Cancel if available liquidity falls below 100000 USD.",
+              "Cancel if inventory reaches 600 USD."
+            ],
+            "limitations": [
+              "The profit model assumes 10 completed cycles; fills are not guaranteed.",
+              "No averaging or replacement orders may exceed the frozen capital, loss, or inventory limits."
+            ]
+          },
+          "evaluation": {
+            "schemaVersion": "positioncrew.evaluation.v1",
+            "rubricVersion": "positioncrew.bounded_grid.conformance.v1",
+            "requestHash": "sha256:f232852a88ff6b1446d3496aec4ac311a210d30ee4d6da0af97ffaa88a89a930",
+            "deliverableHash": "sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce",
+            "evaluatorId": "positioncrew:evaluator:bounded_grid:v1",
+            "evaluatedAt": "2026-08-12T16:00:30.000Z",
+            "score": 100,
+            "passed": true,
+            "checks": [
+              {
+                "id": "schema",
+                "label": "Strict versioned contracts parse",
+                "weight": 10,
+                "critical": true,
+                "passed": true,
+                "evidence": "positioncrew.bounded-grid.request.v1 -> positioncrew.bounded-grid.deliverable.v1"
+              },
+              {
+                "id": "identity",
+                "label": "Result is bound to the requested service and request ID",
+                "weight": 10,
+                "critical": true,
+                "passed": true,
+                "evidence": "BOUNDED_GRID:bounded-grid-20260812-001"
+              },
+              {
+                "id": "deterministic-output",
+                "label": "Output reproduces from the frozen request and provider version",
+                "weight": 60,
+                "critical": true,
+                "passed": true,
+                "evidence": "expected=sha256:a3f957a586d3259d12856131b4a5fe7099cb172269178b957791a0f80a36a1ce"
+              },
+              {
+                "id": "useful-payload",
+                "label": "Actionable results contain the category-specific machine payload",
+                "weight": 15,
+                "critical": true,
+                "passed": true,
+                "evidence": "status=ACTIONABLE"
+              },
+              {
+                "id": "bounded-expiry",
+                "label": "Result never outlives the buyer request",
+                "weight": 5,
+                "critical": false,
+                "passed": true,
+                "evidence": "expiresAt=2026-08-12T16:04:00.000Z"
+              }
+            ],
+            "evaluationHash": "sha256:f63635c2639907bf6f0c85b61891d4f6241c1b6dd53ab61c75a3e4541e5f85fb"
+          }
+        }
+      }
+    }
+  ]
+}

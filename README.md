@@ -1,18 +1,18 @@
 # PositionCrew
 
-PositionCrew is a job-first BSC marketplace for bounded capital operations. A buyer chooses a task, sets hard limits, hires a provider, and receives either an immediately usable machine-readable action or an explicit refusal with the failed conditions.
+PositionCrew is a job-first BSC marketplace for capital decisions. A buyer chooses a task, sets limits, hires an eligible provider, and receives a machine-readable plan or an explicit refusal. Plans are unsigned assessments, not executable transactions or guarantees against loss.
 
 Public application: [positioncrew.dolepee.com](https://positioncrew.dolepee.com)
 
 [![Quality](https://github.com/qdeeworld/positioncrew/actions/workflows/quality.yml/badge.svg)](https://github.com/qdeeworld/positioncrew/actions/workflows/quality.yml)
 [![Production smoke](https://github.com/qdeeworld/positioncrew/actions/workflows/production-smoke.yml/badge.svg)](https://github.com/qdeeworld/positioncrew/actions/workflows/production-smoke.yml)
 
-The product covers all four Build the Era categories with equal depth:
+The product covers all four Build the Era categories; external-provider choice and execution evidence are not yet equal across them:
 
 - **Lending rescue:** compute the smallest feasible repay or collateral top-up for a target health factor.
 - **LP rebalancing:** move a concentrated-liquidity range only when fee, gas, slippage, inventory, and break-even checks pass.
 - **Yield optimisation:** recommend an allocation only when liquidity, uplift, concentration, and risk constraints are satisfied.
-- **Bounded grid construction:** construct orders only inside explicit inventory, fee, volatility, and worst-case-loss limits.
+- **Bounded grid construction:** size a finite order set against accumulated-fill inventory and zero-price principal-at-risk stress limits, including estimated costs. These are explicit scenarios, not guaranteed trading-loss or cancellation bounds.
 
 ## Product surfaces
 
@@ -30,7 +30,15 @@ The public hire API provides a D1-persisted outer lifecycle for all four current
 
 The current bounded-grid journey also auditions Brain on BNB ERC-8004 agent `#302258` against the same frozen PancakeSwap job. PositionCrew preserves the provider's raw replay claim, verifies its pool, pair, fee tier, capital, block window, activity, economics, range, expiry, and output contract, and exposes every acceptance or refusal in the durable receipt. A two-provider Live Match is claimed only when both providers remain actionable under that exact job; no payment, authority grant, order placement, swap, or protocol transaction occurs.
 
-Three separate historical tasks remain immutable: `lending-rescue`, `lp-rebalance`, and `bounded-grid`. They reproduce the committed frozen fixtures and do not widen historical evidence to yield optimisation.
+Three separate historical tasks remain immutable: `lending-rescue`, `lp-rebalance`, and `bounded-grid`. Their archived inputs and outputs retain their original commitments; running those inputs through corrected code can now produce a different result. They do not widen historical evidence to yield optimisation.
+
+### Financial-limit correction
+
+The September 5 audit found LP width rounding, accumulated Grid inventory, and final Yield protocol-concentration defects. A legacy 100/100 conformance score established agreement with the old generator, not independent financial correctness. Historical receipts and the founder comparison remain visible without being rewritten or promoted as evidence that these limits were correctly enforced.
+
+Current validation checks delivered limits independently of the strategy generator. LP ranges must fit the final aligned bounds; V3 inventory is valued using token decimals and supplied USD prices across the current tick interval. Grid checks all-buy/no-sell accumulation within the stated price interval and a separate zero-price stress. Yield checks explicit withdrawals, retained positions, post-cost protocol totals and the gas budget. Fee projections, oracle authenticity, market impact and unsigned execution remain distinct trust boundaries.
+
+The founder report's canonical output parity is not a correctness rating or a controlled end-to-end speedup. Authentic public-state tasks with equivalent manual and agent timing boundaries are needed for stronger Agent Advantage evidence; independent/blind evaluation is optional, not a TermiX eligibility rule.
 
 The persisted lifecycle uses these routes:
 

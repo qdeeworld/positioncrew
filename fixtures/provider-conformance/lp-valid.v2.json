@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "positioncrew.lp-rebalance.request.v1",
+  "service": "LP_REBALANCE",
+  "requestId": "synthetic-lp-conformance-20260905-v2",
+  "chainId": 56,
+  "account": "0x1111111111111111111111111111111111111111",
+  "protocol": "PancakeSwap V3",
+  "requestedAt": "2026-08-12T16:00:00.000Z",
+  "deadline": "2026-08-12T16:05:00.000Z",
+  "maxDataAgeSeconds": 300,
+  "maxActionUsd": "250",
+  "maxGasUsd": "0.10",
+  "maxSlippageBps": 30,
+  "sources": [
+    {
+      "sourceId": "synthetic-lp-conformance-v2",
+      "label": "Synthetic conformance example, not observed chain state or benchmark evidence",
+      "uri": "https://fixtures.positioncrew.invalid/provider-conformance/lp-valid.v2.json",
+      "observedAt": "2026-08-12T15:59:00.000Z"
+    }
+  ],
+  "pool": "0x0000000000000000000000000000000000000110",
+  "token0": {
+    "symbol": "TEST_A",
+    "address": "0x0000000000000000000000000000000000000101",
+    "decimals": 18
+  },
+  "token1": {
+    "symbol": "TEST_B",
+    "address": "0x0000000000000000000000000000000000000102",
+    "decimals": 18
+  },
+  "position": {
+    "lowerTick": -120,
+    "upperTick": 120,
+    "liquidity": "1000000",
+    "positionValueUsd": "10000",
+    "feesEarnedUsd": "42",
+    "token0ShareBps": 10000,
+    "token1ShareBps": 0
+  },
+  "marketState": {
+    "currentTick": 150,
+    "token0PriceUsd": "1.0151123033319565",
+    "token1PriceUsd": "1",
+    "volume24hUsd": "5000000",
+    "fees24hUsd": "2000",
+    "poolLiquidityUsd": "1000000",
+    "realizedVolatilityBps": 400,
+    "observedAt": "2026-08-12T15:59:00.000Z",
+    "sourceId": "synthetic-lp-conformance-v2"
+  },
+  "constraints": {
+    "minimumWidthTicks": 120,
+    "maximumWidthTicks": 600,
+    "tickSpacing": 60,
+    "edgeBufferBps": 1000,
+    "highVolatilityBps": 1000,
+    "maximumToken0ShareBps": 7000,
+    "maximumToken1ShareBps": 7000,
+    "minimumNetBenefitUsd": "5",
+    "estimatedGasUsd": "0.05",
+    "estimatedSwapCostUsd": "0.95",
+    "evaluationHorizonHours": 24
+  }
+}

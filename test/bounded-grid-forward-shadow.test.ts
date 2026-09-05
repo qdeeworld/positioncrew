@@ -55,6 +55,9 @@ function requestAndDeliverable(now = new Date(STARTED_AT)) {
   );
   request.requestedAt = now.toISOString();
   request.deadline = new Date(now.getTime() + 20 * 60_000).toISOString();
+  // This rebased synthetic run needs feasible profit after zero-price risk sizing.
+  // The historical fixture and its inventory/loss limits remain unchanged.
+  request.constraints.minimumExpectedNetProfitUsd = "1";
   const deliverable = createBoundedGridDeliverable(request, now);
   return { request, deliverable };
 }

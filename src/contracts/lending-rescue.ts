@@ -70,7 +70,8 @@ export const LendingActionPlanSchema = z
     amountBaseUnits: z.string().regex(/^\d+$/),
     amountUsd: PositiveDecimalSchema,
     estimatedGasUsd: UnsignedDecimalSchema,
-    projectedHealthFactor: PositiveDecimalSchema,
+    // Null means repayment clears all observed debt; admission verifies that condition.
+    projectedHealthFactor: PositiveDecimalSchema.nullable(),
     executeBefore: TimestampSchema,
     maxSlippageBps: z.number().int().min(0).max(2_000),
     preconditions: z.array(z.string().min(1).max(240)).min(1),

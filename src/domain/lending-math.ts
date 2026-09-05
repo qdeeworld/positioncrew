@@ -148,8 +148,7 @@ export function buildLendingActionCandidates(
         amount <= walletAvailable &&
         amount <= debtTokenAmount &&
         actualRepayUsd <= maxActionUsd &&
-        projectedHealthFactor !== null &&
-        projectedHealthFactor >= target
+        (projectedHealthFactor === null || projectedHealthFactor >= target)
       ) {
         const payload = {
           kind: "REPAY_DEBT" as const,
@@ -170,7 +169,7 @@ export function buildLendingActionCandidates(
             amount: formatFixed(amount, debt.decimals),
             amountBaseUnits: amountBaseUnits.toString(),
             amountUsd: formatFixed(actualRepayUsd, 6),
-            projectedHealthFactor: formatFixed(projectedHealthFactor, 8),
+            projectedHealthFactor: projectedHealthFactor === null ? null : formatFixed(projectedHealthFactor, 8),
           },
         });
       }

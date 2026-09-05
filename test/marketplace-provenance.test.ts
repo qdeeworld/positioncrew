@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runFrozenFixture } from "../src/api/fixture-jobs.js";
+import { getHistoricalFixtureByService } from "../src/api/historical-provider-receipts.js";
 import {
   captureMarketplaceInvocationEvidence,
   loadMarketplaceInvocationProtocol,
@@ -37,10 +38,25 @@ async function fixtureResponse(url: string): Promise<Response> {
   const slug = Object.keys(SERVICES).find((candidate) => url.includes(`/providers/${candidate}/`));
   if (!slug) return new Response("unknown provider", { status: 404 });
   const service = SERVICES[slug as keyof typeof SERVICES];
-  return Response.json(await runFrozenFixture(service), { status: 200 });
+  const archived = getHistoricalFixtureByService(service);
+  if (!archived) throw new Error(`Missing historical fixture capture for ${service}`);
+  return Response.json(archived, { status: 200 });
 }
 
 describe("marketplace invocation provenance", () => {
+  it("rejects corrected current output against the immutable historical protocol", async () => {
+    const evidence = await captureMarketplaceInvocationEvidence({
+      protocolCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      ...clocks(),
+      fetch: async (input) => {
+        const slug = Object.keys(SERVICES).find((candidate) => String(input).includes(`/providers/${candidate}/`));
+        if (!slug) return new Response("unknown provider", { status: 404 });
+        return Response.json(await runFrozenFixture(SERVICES[slug as keyof typeof SERVICES]));
+      },
+    });
+    expect(evidence.aggregate.successCount).toBe(0);
+    expect(evidence.records.every((record) => !record.success && record.error !== null)).toBe(true);
+  });
   it("binds the protocol to the frozen tasks and committed candidate outputs", () => {
     const protocol = loadMarketplaceInvocationProtocol();
     expect(() => verifyProtocolAgainstProject(protocol)).not.toThrow();

@@ -18,7 +18,7 @@ export interface LendingAction {
   amountBaseUnits: string;
   amountUsd: string;
   asset: AssetIdentity;
-  projectedHealthFactor: string;
+  projectedHealthFactor: string | null;
   estimatedGasUsd: string;
   executeBefore: string;
   maxSlippageBps: number;
@@ -55,6 +55,11 @@ export interface ProviderDeliverable {
   currentWeightedApyBps?: number;
   netBenefitUsd?: string;
   migrationCostUsd?: string;
+  withdrawals?: Array<{ opportunityId: string; amountUsd: string }>;
+  idleCapitalUsedUsd?: string;
+  finalProtocolAllocations?: Array<{ protocol: string; amountUsd: string }>;
+  remainingIdleCapitalUsd?: string;
+  postMigrationCapitalUsd?: string;
   breakEvenDays?: string | null;
   risks?: string[];
   orders?: Array<{
@@ -65,6 +70,7 @@ export interface ProviderDeliverable {
   }>;
   expectedNetProfitUsd?: string;
   worstCaseLossUsd?: string;
+  riskModel?: "FINITE_GRID_ZERO_PRICE_STRESS_V1";
   maximumInventoryUsd?: string;
   cancellationConditions?: string[];
 }

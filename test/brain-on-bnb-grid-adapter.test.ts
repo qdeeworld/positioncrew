@@ -42,7 +42,8 @@ const request: BoundedGridRequest = {
     levelCount: 5,
     maximumInventoryUsd: "600",
     maximumLossUsd: "150",
-    minimumExpectedNetProfitUsd: "5",
+    // A feasible synthetic success case after sizing to the unchanged $150 loss budget.
+    minimumExpectedNetProfitUsd: "1",
     minimumLiquidityUsd: "100000",
     maximumVolatilityBps: 1000,
     expectedCompletedCycles: 10,
@@ -908,7 +909,7 @@ describe("Brain on BNB Grid adapter", () => {
     expect(result.normalizedDeliverable).toBeUndefined();
   });
 
-  it("preserves evidence when downstream order prices are below eight-decimal precision", async () => {
+  it("normalizes valid downstream order prices below eight-decimal precision", async () => {
     const tinyRequest: BoundedGridRequest = {
       ...request,
       marketState: { ...request.marketState, midPrice: "0.000000002" },
@@ -918,7 +919,7 @@ describe("Brain on BNB Grid adapter", () => {
         upperPrice: "0.000000003",
       },
     };
-    const firstParty = createBoundedGridDeliverable(request, now);
+    const firstParty = createBoundedGridDeliverable(tinyRequest, now);
     const response = providerResponse({
       price_now: 0.000000002,
       best_range_after_paying_to_put_it_back: "±10%",
@@ -932,10 +933,14 @@ describe("Brain on BNB Grid adapter", () => {
       now,
       fetchImpl: vi.fn(async () => new Response(JSON.stringify(response), { status: 200 })) as typeof fetch,
     });
-    expect(result.outcome).toBe("INCOMPATIBLE");
+    expect(result.outcome).toBe("SEMANTICALLY_COMPARABLE");
     expect(result.externalRecommendation).toBe("BUILD_GRID");
     expect(result.providerRange).not.toBeNull();
-    expect(result.normalizedDeliverable).toBeUndefined();
+    expect(result.normalizedDeliverable?.decision).toBe("BUILD_GRID");
+    expect(result.normalizedDeliverable?.orders.map((order) => order.price)).toEqual([
+      "0.0000000018", "0.0000000019", "0.0000000021", "0.0000000022",
+    ]);
+    expect(result.checks.every((check) => check.status === "PASS")).toBe(true);
   });
 
   it("withholds activation when replay evidence is not bound to the requested pool", async () => {

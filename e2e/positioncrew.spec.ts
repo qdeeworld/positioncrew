@@ -1,4 +1,4 @@
-import { runCurrentBlockPinnedProviderRequest } from "../src/api/fixture-jobs.js";
+import { runCurrentBlockPinnedProviderDeliverable, runCurrentBlockPinnedProviderRequest } from "../src/api/fixture-jobs.js";
 import { sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -29,14 +29,14 @@ const lendingFixture = JSON.parse(
 
 const lpFixture = JSON.parse(
   readFileSync(
-    new URL("../fixtures/lp-rebalance/out-of-range-v3-position.v1.json", import.meta.url),
+    new URL("../fixtures/provider-conformance/lp-valid.v2.json", import.meta.url),
     "utf8",
   ),
 ) as Record<string, unknown>;
 
 const gridFixture = JSON.parse(
   readFileSync(
-    new URL("../fixtures/bounded-grid/bnb-usdt-grid.v1.json", import.meta.url),
+    new URL("../fixtures/provider-conformance/grid-valid.v2.json", import.meta.url),
     "utf8",
   ),
 ) as Record<string, unknown>;
@@ -451,6 +451,7 @@ async function installCurrentLendingHireRoutes(
     staleRunning?: boolean;
     getDelayMs?: number;
     failedMessage?: string;
+    earlyActionDeadline?: "recommendation" | "alternative";
   } = {},
 ) {
   const now = new Date();
@@ -473,7 +474,26 @@ async function installCurrentLendingHireRoutes(
     observedAt: String(source.observedAt),
     explorerUrl: `https://bscscan.com/block/${blockNumber}`,
   };
-  const response = await runCurrentBlockPinnedProviderRequest(rescueRequest, now);
+  let response = await runCurrentBlockPinnedProviderRequest(rescueRequest, now);
+  const actionDeadline = options.earlyActionDeadline
+    ? new Date(now.getTime() + 30_000).toISOString()
+    : null;
+  if (actionDeadline) {
+    const deliverable = structuredClone(response.result.deliverable);
+    if (deliverable.service !== "LENDING_RESCUE" || !deliverable.recommendation) {
+      throw new Error("The early-expiry browser fixture requires a genuine Lending recommendation.");
+    }
+    const action = options.earlyActionDeadline === "recommendation"
+      ? deliverable.recommendation
+      : deliverable.alternatives[0];
+    if (!action) throw new Error("The early-expiry browser fixture requires a genuine Lending alternative.");
+    action.executeBefore = actionDeadline;
+    // Evaluate and reseal the changed output through the normal receipt pipeline.
+    response = await runCurrentBlockPinnedProviderDeliverable(rescueRequest, deliverable, now, {});
+    expect(response.result.deliverable.status).toBe("ACTIONABLE");
+    expect(response.result.evaluation.passed).toBe(true);
+    expect(response.result.job.state).toBe("COMPLETED");
+  }
   const responseHash = await sha256Commitment(response);
   const createBodies: Array<Record<string, unknown>> = [];
   let runCount = 0;
@@ -647,12 +667,64 @@ async function installCurrentLendingHireRoutes(
     hireId,
     receiptId,
     responseHash,
+    actionDeadline,
+    deliverableExpiresAt: response.result.deliverable.expiresAt,
     rescueRequest,
     observation,
     createBodies,
     get runCount() { return runCount; },
     get receiptLoadCount() { return receiptLoadCount; },
   };
+}
+
+for (const earlyActionDeadline of ["recommendation", "alternative"] as const) {
+  test(`a Lending ${earlyActionDeadline} deadline expires the open result and its reloaded receipt before the outer deadline`, async ({ page }) => {
+    const mockedHire = await installCurrentLendingHireRoutes(page, { earlyActionDeadline });
+    if (!mockedHire.actionDeadline) throw new Error("Missing early action deadline.");
+    const actionDeadline = new Date(mockedHire.actionDeadline);
+    expect(Date.parse(mockedHire.deliverableExpiresAt)).toBeGreaterThan(actionDeadline.getTime());
+    // Advance Date and timers together so the expiry timeout cannot fire against a frozen Date.
+    await page.clock.install({ time: new Date(actionDeadline.getTime() - 30_000) });
+    await page.goto(`/#jobs/receipt/${mockedHire.receiptId}`);
+
+    const result = page.locator(".job-result");
+    const summary = result.locator(".result-summary-view");
+    const state = summary.locator(".decision-header .state-label");
+    await expect(state).toHaveText("ACTIONABLE");
+    await page.clock.pauseAt(new Date(actionDeadline.getTime() - 1));
+    await expect(state).toHaveText("ACTIONABLE");
+    await expect(summary.locator(".lending-threshold-plan")).toBeVisible();
+    await expect(summary.locator(".alternative-action")).toBeVisible();
+    await expect(summary.locator(".expires-label")).toHaveText(/^\s*Expires /);
+
+    // The component schedules its one-shot timeout for deadline + 1 ms.
+    await page.clock.runFor(2);
+    await expect(state).toHaveText("EXPIRED");
+    await expect(summary.getByRole("heading", { name: "Refresh evidence before acting" })).toBeVisible();
+    await expect(summary.locator(".expires-label")).toHaveText(/^\s*Expired /);
+    await expect(summary.locator(".result-meaning")).toContainText("This result has expired.");
+    await expect(summary.locator(".lending-threshold-plan")).toHaveCount(0);
+    await expect(summary.locator(".alternative-action")).toHaveCount(0);
+
+    await page.clock.resume();
+    await page.reload();
+    await expect(state).toHaveText("EXPIRED");
+    await expect(summary.getByRole("heading", { name: "Refresh evidence before acting" })).toBeVisible();
+    await expect(summary.locator(".lending-threshold-plan")).toHaveCount(0);
+    await expect(summary.locator(".alternative-action")).toHaveCount(0);
+    expect(mockedHire.receiptLoadCount).toBe(2);
+
+    await page.getByRole("tab", { name: "Receipt", exact: true }).click();
+    await expect(page.getByText("Score receipt", { exact: true })).toBeVisible();
+    await expect(page.getByText("SESSION EMBEDDED", { exact: true })).toBeVisible();
+    await expect(page.getByText("CURRENT BLOCK PINNED", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Reload durable receipt" })).toHaveAttribute(
+      "href",
+      `/api/benchmark-receipts/${mockedHire.receiptId}`,
+    );
+    expect(mockedHire.createBodies).toHaveLength(0);
+    expect(mockedHire.runCount).toBe(0);
+  });
 }
 
 test("a cold buyer can discover, hire, and inspect the lending provider", async ({ page }) => {

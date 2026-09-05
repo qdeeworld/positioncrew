@@ -13,6 +13,7 @@ import {
   type LpRebalanceRequest,
 } from "../contracts/lp-rebalance.js";
 import { canonicalHash } from "../core/canonical.js";
+import { evaluateFinancialInvariants } from "../evaluators/financial-invariants.js";
 import { HEYANON_V3_POOLS } from "./heyanon-v3pools-adapter.js";
 import { auditionHeyAnonV3LpJob } from "./heyanon-v3pools-lp-job-adapter.js";
 import {
@@ -172,6 +173,7 @@ export async function createLpLiveMatchAudition(
       selectable,
       rawResponseHash: assessment.invocation.rawResponseHash,
       normalizedResponseHash: assessment.invocation.normalizedResponseHash,
+      ...(assessment.invocation.materialTermsHash ? { materialTermsHash: assessment.invocation.materialTermsHash } : {}),
       latencyMilliseconds: assessment.invocation.latencyMilliseconds,
       checks: assessment.checks,
     });
@@ -325,12 +327,17 @@ function exactOutputEvaluator(expectedHash: string) {
     const requestHash = requestHashOverride ?? canonicalHash(request);
     const deliverableHash = canonicalHash(deliverable);
     const checks = [
-      { id: "schema", label: "Exact LP output contract parses", weight: 20, critical: true, passed: true, evidence: deliverable.schemaVersion },
-      { id: "identity", label: "Output binds the exact LP request", weight: 20, critical: true, passed: deliverable.requestId === request.requestId, evidence: deliverable.requestId },
-      { id: "selected-output", label: "Recorded output matches the selected-provider result", weight: 30, critical: true, passed: deliverableHash === expectedHash, evidence: expectedHash },
-      { id: "bounded-result", label: "Result is an action, hold, or named refusal", weight: 20, critical: true, passed: deliverable.status.length > 0, evidence: `${deliverable.status}:${deliverable.decision}` },
-      { id: "bounded-expiry", label: "Result never outlives the buyer request", weight: 10, critical: true, passed: Date.parse(deliverable.expiresAt) <= Date.parse(request.deadline), evidence: deliverable.expiresAt },
+      { id: "schema", label: "Exact LP output contract parses", weight: 5, critical: true, passed: true, evidence: deliverable.schemaVersion },
+      { id: "identity", label: "Output binds the exact LP request", weight: 10, critical: true, passed: deliverable.requestId === request.requestId, evidence: deliverable.requestId },
+      { id: "selected-output", label: "Recorded output matches the selected-provider result", weight: 15, critical: true, passed: deliverableHash === expectedHash, evidence: expectedHash },
+      { id: "bounded-result", label: "Result is an action, hold, or named refusal", weight: 5, critical: true, passed: deliverable.status.length > 0, evidence: `${deliverable.status}:${deliverable.decision}` },
+      { id: "bounded-expiry", label: "Result never outlives the buyer request", weight: 5, critical: true, passed: Date.parse(deliverable.expiresAt) <= Date.parse(request.deadline), evidence: deliverable.expiresAt },
     ];
+    const financialChecks = evaluateFinancialInvariants(request, deliverable);
+    checks.push({ id: "independent-financial-limits", label: "Independent buyer-limit invariants pass",
+      weight: 60, critical: true, passed: financialChecks.every((check) => check.passed),
+      evidence: financialChecks.filter((check) => !check.passed).map((check) => check.detail).join("; ") ||
+        "Independent checks passed; this is not proof of future economic performance." });
     const score = checks.reduce((total, check) => total + (check.passed ? check.weight : 0), 0);
     const body = {
       schemaVersion: "positioncrew.evaluation.v1" as const,
@@ -465,6 +472,7 @@ export async function executeLpLiveMatchProvider(input: {
       if (input.now.getTime() >= Date.parse(request.deadline)) {
         throw new Error("The selected-provider job expired before its fresh invocation");
       }
+      requireFreshCompletion(request);
       const assessment = await boundedExternalInvocation(
         auditionHeyAnonV3LpJob(request, positionTokenId, {
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
@@ -475,7 +483,12 @@ export async function executeLpLiveMatchProvider(input: {
       );
       rawResponseHash = assessment.invocation.rawResponseHash;
       requireFreshCompletion(request);
-      const stable = candidate.rawResponseHash === assessment.invocation.rawResponseHash;
+      // Preserve raw hashes as audit evidence, not as a live-price equality test.
+      // Older immutable auditions have no semantic commitment and retain the
+      // stricter legacy behavior until the user creates a new audition.
+      const stable = candidate.materialTermsHash
+        ? candidate.materialTermsHash === assessment.invocation.materialTermsHash
+        : candidate.rawResponseHash === assessment.invocation.rawResponseHash;
       const compatible = assessment.eligibleForLpRebalance &&
         assessment.checks.every((check) => check.status === "PASS");
       checks = [
@@ -484,8 +497,8 @@ export async function executeLpLiveMatchProvider(input: {
           code: "AUDITION_RESULT_STABLE",
           status: stable ? "PASS" : "FAIL",
           detail: stable
-            ? "The fresh provider response matches the response committed by the frozen audition."
-            : "The selected provider response changed after audition; PositionCrew refused instead of silently accepting it.",
+            ? "The selected provider's request, range, action and economic terms remain committed; fresh price evidence must independently pass coherence checks."
+            : "The selected provider's material terms changed after audition; a new buyer choice is required.",
         },
       ];
       deliverable = compatible && stable

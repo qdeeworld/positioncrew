@@ -300,7 +300,9 @@ function rebindSyntheticObservation(value, observedAt, sourceId) {
 }
 
 function syntheticCurrentProbe(definition, ordinal) {
-  const now = new Date(Date.now() + ordinal * 10);
+  // A fast local Worker may run before a future-dated synthetic request.
+  // Keep test timestamps in the past; production rejects pre-request output.
+  const now = new Date(Date.now() - ordinal * 10);
   const observedAt = new Date(now.getTime() - 15_000).toISOString();
   const explorerUrl = `https://bscscan.com/block/${definition.blockNumber}`;
   const fixture = JSON.parse(
@@ -449,7 +451,7 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
         }
       : { method: "POST", headers: { Origin: baseUrl } },
   );
-  assert.equal(run.response.status, 202, `${definition.service} job was not accepted`);
+  assert.equal(run.response.status, 202, `${definition.service} job was not accepted: ${JSON.stringify(run.body)}`);
 
   let completed;
   const deadline = Date.now() + 20_000;

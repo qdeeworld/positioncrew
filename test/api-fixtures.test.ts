@@ -333,7 +333,9 @@ describe("public fixture job boundary", () => {
       expect(response.benchmarkLock).toBeNull();
       expect(response.receipt).toMatchObject({ mode: "SESSION_EMBEDDED", path: null });
       expect(response.result.job.state).toBe("COMPLETED");
-      expect(response.result.deliverable.status).toBe("ACTIONABLE");
+      expect(response.result.evaluation.passed).toBe(true);
+      expect(response.result.deliverable.status).not.toBe("REFUSED_EXPIRED");
+      expect(response.result.deliverable.status).not.toBe("REFUSED_STALE_DATA");
       expect(new Date(response.result.deliverable.expiresAt).getTime()).toBeGreaterThan(now.getTime());
     }
   });

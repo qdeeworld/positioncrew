@@ -13,26 +13,8 @@ import {
   ratioFromBps,
 } from "../core/fixed.js";
 import { clampNonNegative, validateEvidence } from "./provider-utils.js";
-
-function alignDown(tick: number, spacing: number): number {
-  return Math.floor(tick / spacing) * spacing;
-}
-
-function boundedWidth(request: LpRebalanceRequest, desired: number): number {
-  const { minimumWidthTicks, maximumWidthTicks, tickSpacing } = request.constraints;
-  const bounded = Math.max(minimumWidthTicks, Math.min(maximumWidthTicks, desired));
-  return Math.max(tickSpacing * 2, Math.ceil(bounded / tickSpacing) * tickSpacing);
-}
-
-function centeredRange(
-  request: LpRebalanceRequest,
-  desiredWidth: number,
-): { lowerTick: number; upperTick: number } {
-  const width = boundedWidth(request, desiredWidth);
-  const center = alignDown(request.marketState.currentTick, request.constraints.tickSpacing);
-  const half = Math.ceil(width / (2 * request.constraints.tickSpacing)) * request.constraints.tickSpacing;
-  return { lowerTick: center - half, upperTick: center + half };
-}
+import { boundedLpRange, lpInventoryExposure } from "../core/lp-range.js";
+import { lpConstraintRefusalJustified } from "../evaluators/lp-refusal-feasibility.js";
 
 function refusal(
   request: LpRebalanceRequest,
@@ -131,6 +113,38 @@ export function createLpRebalanceDeliverable(
     ? `The 24-hour fee input is a run-rate extrapolated from ${request.marketState.volumeMeasurementWindowSeconds} seconds and ${request.marketState.swapCount ?? 0} onchain swaps.`
     : "Fee estimates use the frozen pool-share and uptime model, not guaranteed future volume.";
 
+  const declineCandidate = (reason: string): LpRebalanceDeliverable => {
+    if (lpConstraintRefusalJustified(request)) {
+      return refusal(request, now, "REFUSED_CONSTRAINTS", evidence.expiresAt, [
+        reason,
+        "A request-only check establishes an impossible hard cost ceiling, aligned range, or aggregate inventory policy.",
+      ]);
+    }
+    return LpRebalanceDeliverableSchema.parse({
+      schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
+      service: "LP_REBALANCE",
+      requestId: request.requestId,
+      generatedAt: now.toISOString(),
+      expiresAt: evidence.expiresAt,
+      status: "NO_ACTION",
+      decision: "HOLD",
+      proposedRange: null,
+      estimatedRebalanceCostUsd: "0",
+      expectedGrossFeesUsd: formatFixed(currentGrossFees, 6),
+      expectedNetBenefitUsd: "0",
+      breakEvenHours: null,
+      inventoryExposure: { token0Bps: request.position.token0ShareBps, token1Bps: request.position.token1ShareBps },
+      summary: "The native strategy did not produce a qualifying range; no rebalance is proposed.",
+      actionSteps: [],
+      invalidationConditions: ["Refresh if the position, pool state, execution costs, or buyer limits change."],
+      limitations: [
+        reason,
+        "This candidate decline does not prove every provider must refuse or certify the existing inventory as within policy.",
+        volumeBoundary,
+      ],
+    });
+  };
+
   if (proposedDecision === null) {
     return LpRebalanceDeliverableSchema.parse({
       schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
@@ -161,8 +175,30 @@ export function createLpRebalanceDeliverable(
     });
   }
 
-  const proposedRange = centeredRange(request, desiredWidth);
+  const proposedRange = boundedLpRange(request, desiredWidth);
+  if (!proposedRange) {
+    return declineCandidate("The native strategy did not construct a tick-aligned range containing the current tick within the requested bounds.");
+  }
+  const inventory = lpInventoryExposure(request, proposedRange);
+  if (!inventory || inventory.maximumToken0Bps > request.constraints.maximumToken0ShareBps ||
+      inventory.maximumToken1Bps > request.constraints.maximumToken1ShareBps) {
+    return declineCandidate("The native candidate's V3 inventory, valued across the current tick interval, exceeds a token-share cap or cannot be calculated.");
+  }
   const proposedWidth = proposedRange.upperTick - proposedRange.lowerTick;
+  if (proposedRange.lowerTick === request.position.lowerTick && proposedRange.upperTick === request.position.upperTick) {
+    return LpRebalanceDeliverableSchema.parse({
+      schemaVersion: "positioncrew.lp-rebalance.deliverable.v1", service: "LP_REBALANCE",
+      requestId: request.requestId, generatedAt: now.toISOString(), expiresAt: evidence.expiresAt,
+      status: "NO_ACTION", decision: "HOLD", proposedRange: null,
+      estimatedRebalanceCostUsd: "0", expectedGrossFeesUsd: formatFixed(currentGrossFees, 6),
+      expectedNetBenefitUsd: "0", breakEvenHours: null,
+      inventoryExposure: { token0Bps: request.position.token0ShareBps, token1Bps: request.position.token1ShareBps },
+      summary: "No feasible range change remains after tick alignment and width limits; keep the existing position.",
+      actionSteps: [], invalidationConditions: ["Refresh if the position, volatility or buyer limits change."],
+      limitations: ["An unchanged range is not credited with improved fee uptime or hypothetical rebalance profit.", volumeBoundary],
+    });
+  }
+  proposedDecision = proposedWidth > width ? "WIDEN" : proposedWidth < width ? "NARROW" : "SHIFT";
   const widthDensity = (BigInt(width) * FIXED_SCALE) / BigInt(proposedWidth);
   const proposedUptimeBps = proposedDecision === "NARROW" ? 7_500 : 9_500;
   const expectedGrossFees = multiplyFixed(
@@ -174,15 +210,12 @@ export function createLpRebalanceDeliverable(
   const totalCostUsd = gasUsd + swapCostUsd;
   const incrementalFees = expectedGrossFees - currentGrossFees;
   const netBenefit = clampNonNegative(incrementalFees - totalCostUsd);
-  const inventorySafe =
-    request.constraints.maximumToken0ShareBps >= 5_000 &&
-    request.constraints.maximumToken1ShareBps >= 5_000;
   const economicsPass =
     incrementalFees > 0n &&
+    incrementalFees >= totalCostUsd &&
     netBenefit >= parseFixed(request.constraints.minimumNetBenefitUsd) &&
     gasUsd <= parseFixed(request.maxGasUsd) &&
-    totalCostUsd <= parseFixed(request.maxActionUsd) &&
-    inventorySafe;
+    totalCostUsd <= parseFixed(request.maxActionUsd);
 
   if (!economicsPass) {
     return LpRebalanceDeliverableSchema.parse({
@@ -211,10 +244,9 @@ export function createLpRebalanceDeliverable(
     });
   }
 
-  const hourlyIncrementalFees =
-    (incrementalFees * FIXED_SCALE) /
-    (BigInt(request.constraints.evaluationHorizonHours) * FIXED_SCALE);
-  const breakEvenHours = divideFixed(totalCostUsd, hourlyIncrementalFees);
+  const breakEvenHours = divideFixed(
+    totalCostUsd * BigInt(request.constraints.evaluationHorizonHours), incrementalFees,
+  );
   return LpRebalanceDeliverableSchema.parse({
     schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
     service: "LP_REBALANCE",
@@ -224,12 +256,13 @@ export function createLpRebalanceDeliverable(
     status: "ACTIONABLE",
     decision: proposedDecision,
     proposedRange,
-    estimatedRebalanceCostUsd: formatFixed(totalCostUsd, 6),
-    expectedGrossFeesUsd: formatFixed(expectedGrossFees, 6),
-    expectedNetBenefitUsd: formatFixed(netBenefit, 6),
-    breakEvenHours: formatFixed(breakEvenHours, 4),
-    inventoryExposure: { token0Bps: 5_000, token1Bps: 5_000 },
-    summary: `${proposedDecision} the LP range to ${proposedRange.lowerTick}..${proposedRange.upperTick}; projected net benefit is ${formatFixed(netBenefit, 2)} USD after costs.`,
+    estimatedRebalanceCostUsd: formatFixed(totalCostUsd, 18),
+    expectedGrossFeesUsd: formatFixed(expectedGrossFees, 18),
+    expectedNetBenefitUsd: formatFixed(netBenefit, 18),
+    breakEvenHours: formatFixed(breakEvenHours, 18),
+    feeProjection: { model: "POOL_SHARE_UPTIME_V1", currentUptimeBps, proposedUptimeBps },
+    inventoryExposure: { token0Bps: inventory.token0Bps, token1Bps: inventory.token1Bps },
+    summary: `${proposedDecision} the LP range to ${proposedRange.lowerTick}..${proposedRange.upperTick}; modeled net benefit is ${formatFixed(netBenefit, 2)} USD after costs, assuming ${currentUptimeBps / 100}% current and ${proposedUptimeBps / 100}% proposed fee uptime.`,
     actionSteps: [
       "Collect fees and remove the current liquidity position.",
       `Rebalance inventory within ${request.maxSlippageBps} bps slippage.`,
@@ -241,9 +274,9 @@ export function createLpRebalanceDeliverable(
       `Current time passes ${evidence.expiresAt}.`,
     ],
     limitations: [
-      "Projected fees use current pool fees, pool share, range density, and a disclosed uptime factor.",
+      `Fee uptime is a model assumption, not a forecast: current ${currentUptimeBps / 100}%, proposed ${proposedUptimeBps / 100}%. Fees may not cover costs.`,
       ...(request.marketState.volumeMeasurementWindowSeconds ? [volumeBoundary] : []),
-      "Exact V3 inventory composition must be recomputed immediately before execution.",
+      "V3 inventory uses supplied USD prices and token decimals; share caps include both ends of the current tick interval plus a rounding margin. Revalidate prices, sqrt price and execution amounts before any transaction.",
     ],
   });
 }
