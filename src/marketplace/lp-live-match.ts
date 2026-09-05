@@ -16,7 +16,7 @@ import { canonicalHash } from "../core/canonical.js";
 import { evaluateFinancialInvariants } from "../evaluators/financial-invariants.js";
 import { HEYANON_V3_POOLS } from "./heyanon-v3pools-adapter.js";
 import { auditionHeyAnonV3LpJob } from "./heyanon-v3pools-lp-job-adapter.js";
-import { BscVerificationRpcError } from "./bsc-verification-rpc.js";
+import { BscPositionVerificationError } from "./bsc-verification-rpc.js";
 import {
   LpLiveMatchAuditionSchema,
   LpLiveMatchExecutionSchema,
@@ -209,7 +209,7 @@ export async function createLpLiveMatchAudition(
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "External provider unavailable";
-    const verificationUnavailable = error instanceof BscVerificationRpcError;
+    const verificationUnavailable = error instanceof BscPositionVerificationError;
     const failureCode = verificationUnavailable ? "BSC_POSITION_VERIFICATION" : "FRESH_PROVIDER_AUDITION";
     candidates.push({
       ...HEYANON_LP,
@@ -528,7 +528,7 @@ export async function executeLpLiveMatchProvider(input: {
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Selected external provider failed";
       deliverable = refusal(request, new Date(), reason);
-      checks = [{ code: error instanceof BscVerificationRpcError ? "BSC_POSITION_VERIFICATION" : "FRESH_SELECTED_PROVIDER_RUN", status: "FAIL", detail: reason }];
+      checks = [{ code: error instanceof BscPositionVerificationError ? "BSC_POSITION_VERIFICATION" : "FRESH_SELECTED_PROVIDER_RUN", status: "FAIL", detail: reason }];
     }
     response = await runCurrentBlockPinnedProviderDeliverable(
       request,

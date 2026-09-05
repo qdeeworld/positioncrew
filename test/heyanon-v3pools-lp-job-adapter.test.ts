@@ -161,6 +161,71 @@ const fetchImpl: typeof fetch = async (input, init) => {
 };
 
 describe("HeyAnon V3 Pools exact LP job adapter", () => {
+  it.each(["position-abi", "factory-abi", "unsupported-fee"])(
+    "attributes %s prerequisite failure to verification without invoking HeyAnon",
+    async (failure) => {
+      let mcpCalls = 0;
+      const invalidVerificationFetch: typeof fetch = async (input, init) => {
+        if (String(input).includes("heyanon.ai")) {
+          mcpCalls += 1;
+          return fetchImpl(input, init);
+        }
+        const body = JSON.parse(String(init?.body)) as { method: string; params?: Array<{ data?: string } | string> };
+        const call = Array.isArray(body.params) ? body.params[0] : undefined;
+        const data = typeof call === "object" ? call?.data : undefined;
+        let malformed: string | undefined;
+        if (body.method === "eth_call" && data?.startsWith("0x99fbab88")) {
+          if (failure === "position-abi") malformed = "0x";
+          if (failure === "unsupported-fee") {
+            const position = positionResponse();
+            malformed = position.slice(0, 2 + 4 * 64) + word(300n) + position.slice(2 + 5 * 64);
+          }
+        }
+        if (body.method === "eth_call" && data?.startsWith("0x1698ee82") && failure === "factory-abi") {
+          malformed = "0x";
+        }
+        return malformed !== undefined
+          ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: malformed }))
+          : fetchImpl(input, init);
+      };
+      const result = await createLpLiveMatchAudition(request, {
+        blockNumber: "118955550", observedAt: "2026-08-30T11:59:00.000Z", explorerUrl: "https://bscscan.com/block/118955550",
+      }, canonicalHash(request), new Date("2026-08-30T12:00:30.000Z"), { fetchImpl: invalidVerificationFetch });
+      const external = result.audition.candidates.find((candidate) => candidate.providerKey === "HEYANON");
+      expect(mcpCalls).toBe(0);
+      expect(external?.status).toBe("UNAVAILABLE");
+      expect(external?.selectable).toBe(false);
+      expect(external?.checks[0]?.code).toBe("BSC_POSITION_VERIFICATION");
+      expect(external?.checks[0]?.detail).toContain("PositionCrew BSC position verification failed");
+      expect(result.externalProviderComparison.checks).toEqual(external?.checks);
+      expect(result.externalProviderComparison.attributableResult).toBe(false);
+      expect(result.externalProviderComparison.boundary).toContain("HeyAnon was not invoked");
+      expect(result.externalProviderComparison.boundary).toContain("not evidence of a HeyAnon outage");
+    },
+  );
+
+  it("keeps genuine MCP failure separate from verification failure without retrying MCP", async () => {
+    let mcpCalls = 0;
+    const unavailableProviderFetch: typeof fetch = async (input, init) => {
+      if (String(input).includes("heyanon.ai")) {
+        mcpCalls += 1;
+        return new Response(null, { status: 503 });
+      }
+      return fetchImpl(input, init);
+    };
+    const result = await createLpLiveMatchAudition(request, {
+      blockNumber: "118955550", observedAt: "2026-08-30T11:59:00.000Z", explorerUrl: "https://bscscan.com/block/118955550",
+    }, canonicalHash(request), new Date("2026-08-30T12:00:30.000Z"), { fetchImpl: unavailableProviderFetch });
+    const external = result.audition.candidates.find((candidate) => candidate.providerKey === "HEYANON");
+    expect(mcpCalls).toBe(2);
+    expect(external?.checks[0]?.code).toBe("FRESH_PROVIDER_AUDITION");
+    expect(external?.checks[0]?.detail).toContain("HeyAnon V3 MCP returned HTTP 503");
+    expect(result.externalProviderComparison.checks).toEqual([
+      { code: "REMOTE_PROVIDER_AVAILABLE", status: "FAIL", detail: "HeyAnon V3 MCP returned HTTP 503" },
+    ]);
+    expect(result.externalProviderComparison.boundary).not.toContain("HeyAnon was not invoked");
+  });
+
   it("falls back for factory verification at the same NFT block without relaxing range limits", async () => {
     const factoryCalls: Array<{ url: string; block: unknown }> = [];
     const resilientFetch: typeof fetch = async (input, init) => {

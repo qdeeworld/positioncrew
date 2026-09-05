@@ -2,7 +2,14 @@ import { bscReadRpcFallbacks } from "../telemetry/bsc.js";
 
 type ReadMethod = "eth_blockNumber" | "eth_call";
 
-export class BscVerificationRpcError extends Error {
+export class BscPositionVerificationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BscPositionVerificationError";
+  }
+}
+
+export class BscVerificationRpcError extends BscPositionVerificationError {
   constructor(detail: string) {
     super(`PositionCrew BSC position verification RPC unavailable: ${detail}`);
     this.name = "BscVerificationRpcError";
