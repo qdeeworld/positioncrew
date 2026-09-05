@@ -5,6 +5,8 @@ import type {
 } from "../contracts/index.js";
 import { FIXED_SCALE, ceilDivide, parseFixed } from "../core/fixed.js";
 import { gridConstraintRefusalJustified } from "./grid-refusal-feasibility.js";
+import { lpConstraintRefusalJustified } from "./lp-refusal-feasibility.js";
+import { yieldConstraintRefusalJustified } from "./yield-refusal-feasibility.js";
 
 export interface FinancialInvariantCheck { id: string; passed: boolean; detail: string }
 const sum = (values: bigint[]): bigint => values.reduce((total, value) => total + value, 0n);
@@ -61,22 +63,28 @@ function lpShare0(request: LpRebalanceRequest, lower: number, upper: number, tic
   return 10_000 / (1 + Math.exp(logRatio));
 }
 
+function lpCurrentUptimeBps(request: LpRebalanceRequest): number {
+  const width = request.position.upperTick - request.position.lowerTick;
+  const tick = request.marketState.currentTick;
+  const inside = tick >= request.position.lowerTick && tick < request.position.upperTick;
+  const edgeBps = inside ? Math.floor(Math.min(tick - request.position.lowerTick, request.position.upperTick - tick) * 10_000 / width) : 0;
+  return !inside ? 0 : edgeBps < request.constraints.edgeBufferBps ? 3_500
+    : request.marketState.realizedVolatilityBps >= request.constraints.highVolatilityBps ? 5_500 : 9_000;
+}
+
 function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): FinancialInvariantCheck[] {
   const exposure = output.inventoryExposure;
+  const currentUptime = lpCurrentUptimeBps(request);
   if (output.status !== "ACTIONABLE") {
     const hold = output.status === "NO_ACTION" && output.decision === "HOLD";
-    const width = request.position.upperTick - request.position.lowerTick;
-    const tick = request.marketState.currentTick;
-    const inside = tick >= request.position.lowerTick && tick < request.position.upperTick;
-    const edgeBps = inside ? Math.floor(Math.min(tick - request.position.lowerTick, request.position.upperTick - tick) * 10_000 / width) : 0;
-    const defaultUptime = !inside ? 0 : edgeBps < request.constraints.edgeBufferBps ? 3_500
-      : request.marketState.realizedVolatilityBps >= request.constraints.highVolatilityBps ? 5_500 : 9_000;
     const share = parseFixed(request.position.positionValueUsd) * FIXED_SCALE / parseFixed(request.marketState.poolLiquidityUsd);
     const daily = parseFixed(request.marketState.fees24hUsd) * share / FIXED_SCALE;
     const horizon = BigInt(request.constraints.evaluationHorizonHours) * FIXED_SCALE / 24n;
-    const currentFees = ((daily * horizon / FIXED_SCALE) * BigInt(defaultUptime)) / 10_000n;
+    const currentFees = ((daily * horizon / FIXED_SCALE) * BigInt(currentUptime)) / 10_000n;
     const gross = parseFixed(output.expectedGrossFeesUsd);
     return [
+    check("lp-refusal-feasibility", output.status !== "REFUSED_CONSTRAINTS" || lpConstraintRefusalJustified(request),
+      "A constraint refusal requires a request-proven blocker for every admitted range; an unproven strategy decline is HOLD, not certified infeasibility."),
     check("lp-inactive-payload", output.actionSteps.length === 0 && output.proposedRange === null
       && (hold || (output.status !== "NO_ACTION" && output.decision === "NONE")), "A hold or refusal cannot introduce a range or executable steps."),
     check("lp-current-exposure", exposure.token0Bps === request.position.token0ShareBps && exposure.token1Bps === request.position.token1ShareBps,
@@ -86,8 +94,8 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
       "No rebalance means zero incremental cost and benefit and no break-even time."),
     check("lp-inactive-fees", hold
       ? (gross === currentFees || gross === currentFees / 1_000_000_000_000n * 1_000_000_000_000n)
-        && (output.feeProjection === undefined || output.feeProjection.currentUptimeBps === defaultUptime
-          && output.feeProjection.proposedUptimeBps === defaultUptime)
+        && (output.feeProjection === undefined || output.feeProjection.currentUptimeBps === currentUptime
+          && output.feeProjection.proposedUptimeBps === currentUptime)
       : gross === 0n && output.feeProjection === undefined,
       "HOLD fees use frozen pool share, horizon and request-derived current uptime, allowing exact six-decimal truncation. Any supplied projection must match that uptime; refusals earn no projected fees."),
     ];
@@ -127,6 +135,8 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
   result.push(check("lp-fee-projection", projection !== undefined,
     "Actionable range economics require an explicit POOL_SHARE_UPTIME_V1 projection; uptime is a model assumption, not observed future income."));
   if (projection !== undefined) {
+    result.push(check("lp-current-uptime", projection.currentUptimeBps === currentUptime,
+      "The current position uptime is derived from the frozen range, edge distance and volatility, not chosen by the provider."));
     // Derive the declared model independently from frozen pool data and final ticks.
     // Fixed-point ratios truncate at each operation, as specified by the model.
     const share = parseFixed(request.position.positionValueUsd) * FIXED_SCALE / parseFixed(request.marketState.poolLiquidityUsd);
@@ -134,7 +144,7 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
     const horizonRatio = BigInt(request.constraints.evaluationHorizonHours) * FIXED_SCALE / 24n;
     const feeBase = dailyFees * horizonRatio / FIXED_SCALE;
     const density = BigInt(oldWidth) * FIXED_SCALE / BigInt(width);
-    const currentFees = feeBase * BigInt(projection.currentUptimeBps) / 10_000n;
+    const currentFees = feeBase * BigInt(currentUptime) / 10_000n;
     const proposedFees = (feeBase * density / FIXED_SCALE) * BigInt(projection.proposedUptimeBps) / 10_000n;
     const incrementalFees = proposedFees - currentFees;
     const cost = parseFixed(output.estimatedRebalanceCostUsd);
@@ -253,7 +263,9 @@ function yieldChecks(request: YieldOptimizationRequest, output: YieldOptimizatio
       (unchanged.get(protocolKey(item.protocol)) ?? 0n) + parseFixed(item.amountUsd));
     const supplied = output.finalProtocolAllocations === undefined ? null
       : new Map(output.finalProtocolAllocations.map((item) => [protocolKey(item.protocol), parseFixed(item.amountUsd)]));
-    return [check("yield-inactive-payload", output.selectedOpportunityId === null
+    return [check("yield-refusal-feasibility", output.status !== "REFUSED_CONSTRAINTS" || yieldConstraintRefusalJustified(request),
+      "A constraint refusal requires request-only proof that no supported destination can be funded within policy; unknown feasibility is not certified."),
+    check("yield-inactive-payload", output.selectedOpportunityId === null
     && parseFixed(output.allocationUsd) === 0n && output.actionSteps.length === 0 && (output.withdrawals?.length ?? 0) === 0
     && output.decision === (output.status === "NO_ACTION" ? "HOLD" : "NONE"),
     "An inactive yield result cannot allocate or withdraw; NO_ACTION requires HOLD and every refusal requires NONE. Retained concentrations are not certified safe."),

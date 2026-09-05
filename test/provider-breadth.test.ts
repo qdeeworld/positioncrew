@@ -18,13 +18,13 @@ function fixture(relativePath: string): unknown {
 }
 
 describe("main-track provider breadth", () => {
-  it("refuses the legacy synthetic LP fixture whose tick-price exposure exceeds policy", () => {
+  it("declines the legacy synthetic LP candidate without claiming every alternative is impossible", () => {
     const request = LpRebalanceRequestSchema.parse(
       fixture("lp-rebalance/out-of-range-v3-position.v1.json"),
     );
     const result = createLpRebalanceDeliverable(request, FIXTURE_NOW);
 
-    expect(result.status).toBe("REFUSED_CONSTRAINTS");
+    expect(result).toMatchObject({ status: "NO_ACTION", decision: "HOLD" });
     expect(result.proposedRange).toBeNull();
   });
 

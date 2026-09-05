@@ -14,6 +14,7 @@ import {
 } from "../core/fixed.js";
 import { clampNonNegative, validateEvidence } from "./provider-utils.js";
 import { boundedLpRange, lpInventoryExposure } from "../core/lp-range.js";
+import { lpConstraintRefusalJustified } from "../evaluators/lp-refusal-feasibility.js";
 
 function refusal(
   request: LpRebalanceRequest,
@@ -112,6 +113,38 @@ export function createLpRebalanceDeliverable(
     ? `The 24-hour fee input is a run-rate extrapolated from ${request.marketState.volumeMeasurementWindowSeconds} seconds and ${request.marketState.swapCount ?? 0} onchain swaps.`
     : "Fee estimates use the frozen pool-share and uptime model, not guaranteed future volume.";
 
+  const declineCandidate = (reason: string): LpRebalanceDeliverable => {
+    if (lpConstraintRefusalJustified(request)) {
+      return refusal(request, now, "REFUSED_CONSTRAINTS", evidence.expiresAt, [
+        reason,
+        "A request-only check establishes an impossible hard cost ceiling, aligned range, or aggregate inventory policy.",
+      ]);
+    }
+    return LpRebalanceDeliverableSchema.parse({
+      schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
+      service: "LP_REBALANCE",
+      requestId: request.requestId,
+      generatedAt: now.toISOString(),
+      expiresAt: evidence.expiresAt,
+      status: "NO_ACTION",
+      decision: "HOLD",
+      proposedRange: null,
+      estimatedRebalanceCostUsd: "0",
+      expectedGrossFeesUsd: formatFixed(currentGrossFees, 6),
+      expectedNetBenefitUsd: "0",
+      breakEvenHours: null,
+      inventoryExposure: { token0Bps: request.position.token0ShareBps, token1Bps: request.position.token1ShareBps },
+      summary: "The native strategy did not produce a qualifying range; no rebalance is proposed.",
+      actionSteps: [],
+      invalidationConditions: ["Refresh if the position, pool state, execution costs, or buyer limits change."],
+      limitations: [
+        reason,
+        "This candidate decline does not prove every provider must refuse or certify the existing inventory as within policy.",
+        volumeBoundary,
+      ],
+    });
+  };
+
   if (proposedDecision === null) {
     return LpRebalanceDeliverableSchema.parse({
       schemaVersion: "positioncrew.lp-rebalance.deliverable.v1",
@@ -144,16 +177,12 @@ export function createLpRebalanceDeliverable(
 
   const proposedRange = boundedLpRange(request, desiredWidth);
   if (!proposedRange) {
-    return refusal(request, now, "REFUSED_CONSTRAINTS", evidence.expiresAt, [
-      "No tick-aligned range containing the current tick fits both width bounds and the V3 tick domain.",
-    ]);
+    return declineCandidate("The native strategy did not construct a tick-aligned range containing the current tick within the requested bounds.");
   }
   const inventory = lpInventoryExposure(request, proposedRange);
   if (!inventory || inventory.maximumToken0Bps > request.constraints.maximumToken0ShareBps ||
       inventory.maximumToken1Bps > request.constraints.maximumToken1ShareBps) {
-    return refusal(request, now, "REFUSED_CONSTRAINTS", evidence.expiresAt, [
-      "The proposed V3 inventory, valued with the supplied prices across the current tick interval, exceeds a token-share cap or cannot be calculated.",
-    ]);
+    return declineCandidate("The native candidate's V3 inventory, valued across the current tick interval, exceeds a token-share cap or cannot be calculated.");
   }
   const proposedWidth = proposedRange.upperTick - proposedRange.lowerTick;
   if (proposedRange.lowerTick === request.position.lowerTick && proposedRange.upperTick === request.position.upperTick) {
