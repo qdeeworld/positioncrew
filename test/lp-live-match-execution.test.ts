@@ -8,6 +8,7 @@ import { auditionHeyAnonV3LpJob } from "../src/marketplace/heyanon-v3pools-lp-jo
 import { validatedFreshMarketplaceChain } from "../web/src/job-history.js";
 import { FixtureJobResponseSchema } from "../src/api/fixture-response-schema.js";
 import { sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
+import { BscPositionVerificationError, BscVerificationRpcError } from "../src/marketplace/bsc-verification-rpc.js";
 
 vi.mock("../src/marketplace/heyanon-v3pools-lp-job-adapter.js", () => ({ auditionHeyAnonV3LpJob: vi.fn() }));
 const mockAudition = vi.mocked(auditionHeyAnonV3LpJob);
@@ -45,6 +46,38 @@ async function prepared() {
 beforeEach(() => mockAudition.mockReset());
 
 describe("selected external LP execution", () => {
+  it.each(["position-abi", "factory-abi", "unsupported-fee", "rpc-429"])(
+    "persists %s as a verification refusal without provider substitution",
+    async (failure) => {
+      const input = await prepared();
+      const error = failure === "rpc-429"
+        ? new BscVerificationRpcError("HTTP 429")
+        : new BscPositionVerificationError(`PositionCrew BSC position verification failed: ${failure}`);
+      mockAudition.mockRejectedValueOnce(error);
+      const response = await executeLpLiveMatchProvider(input);
+      expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+      expect(response.result.deliverable.decision).toBe("NONE");
+      expect(response.result.job.providerId).toBe("erc8004:56:45650");
+      expect(response.liveMatchExecution?.invocation.rawResponseHash).toBeNull();
+      expect(response.liveMatchExecution?.invocation.checks).toEqual([
+        { code: "BSC_POSITION_VERIFICATION", status: "FAIL", detail: error.message },
+      ]);
+      expect(mockAudition).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("retains provider-stage attribution for a genuine selected-provider MCP failure", async () => {
+    const input = await prepared();
+    mockAudition.mockRejectedValueOnce(new Error("HeyAnon V3 MCP returned HTTP 503"));
+    const response = await executeLpLiveMatchProvider(input);
+    expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+    expect(response.result.job.providerId).toBe("erc8004:56:45650");
+    expect(response.liveMatchExecution?.invocation.checks).toEqual([
+      { code: "FRESH_SELECTED_PROVIDER_RUN", status: "FAIL", detail: "HeyAnon V3 MCP returned HTTP 503" },
+    ]);
+    expect(mockAudition).toHaveBeenCalledTimes(2);
+  });
+
   it("refuses evidence that becomes stale during the external call even before the deadline", async () => {
     vi.useFakeTimers();
     try {

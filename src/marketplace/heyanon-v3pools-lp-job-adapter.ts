@@ -17,6 +17,7 @@ import { clampNonNegative, validateEvidence } from "../providers/provider-utils.
 import { lpInventoryExposure } from "../core/lp-range.js";
 import { evaluateFinancialInvariants } from "../evaluators/financial-invariants.js";
 import { canonicalHash } from "../core/canonical.js";
+import { BscPositionVerificationError, createBscVerificationRpc, type BscVerificationRpc } from "./bsc-verification-rpc.js";
 import {
   HEYANON_V3_POOLS,
   fetchPinnedPancakeV3Position,
@@ -142,29 +143,14 @@ async function fetchPancakeV3Pool(
   token1: string,
   fee: number,
   blockNumber: number,
-  rpcUrl: string,
-  fetchImpl: typeof fetch,
+  verificationRpc: BscVerificationRpc,
 ): Promise<string> {
-  const response = await fetchImpl(rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_call",
-      params: [{
-        to: PANCAKE_V3_FACTORY,
-        data: `0x1698ee82${addressArgument(token0)}${addressArgument(token1)}${BigInt(fee).toString(16).padStart(64, "0")}`,
-      }, `0x${blockNumber.toString(16)}`],
-    }),
-  });
-  if (!response.ok) throw new Error(`BSC factory RPC returned HTTP ${response.status}`);
-  const parsed = z.object({
-    jsonrpc: z.literal("2.0"),
-    id: z.union([z.string(), z.number()]),
-    result: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
-  }).parse(await response.json());
-  return `0x${parsed.result.slice(-40)}`.toLowerCase();
+  const raw = await verificationRpc.request("eth_call", [{
+    to: PANCAKE_V3_FACTORY,
+    data: `0x1698ee82${addressArgument(token0)}${addressArgument(token1)}${BigInt(fee).toString(16).padStart(64, "0")}`,
+  }, `0x${blockNumber.toString(16)}`]);
+  const result = z.string().regex(/^0x[a-fA-F0-9]{64}$/).parse(raw);
+  return `0x${result.slice(-40)}`.toLowerCase();
 }
 
 function priceToTick(price: number, rounding: "DOWN" | "UP"): number {
@@ -334,32 +320,52 @@ function normalizeExternalRange(
 export async function auditionHeyAnonV3LpJob(
   input: LpRebalanceRequest,
   positionId: string,
-  options: { fetchImpl?: typeof fetch; now?: Date; rpcUrl?: string } = {},
+  options: { fetchImpl?: typeof fetch; now?: Date; rpcUrl?: string; signal?: AbortSignal } = {},
 ): Promise<HeyAnonV3LpJobAssessment> {
   const invocationStartedAt = new Date().toISOString();
   const invocationStartedPerformance = performance.now();
   const request = LpRebalanceRequestSchema.parse(input);
-  const fetchImpl = options.fetchImpl ?? fetch;
-  if (!new RegExp(`^pancake-position-${positionId}-`).test(request.requestId)) {
-    throw new Error("The PositionCrew request does not bind the requested position ID");
-  }
-  const pinnedPosition = await fetchPinnedPancakeV3Position(
-    positionId,
-    options.rpcUrl,
-    fetchImpl,
-  );
-  const feeTier = pinnedPosition.fee;
-  const tickSpacingByFee = new Map([[100, 1], [500, 10], [2_500, 50], [10_000, 200]]);
-  const pinnedTickSpacing = tickSpacingByFee.get(feeTier);
-  if (!pinnedTickSpacing) throw new Error("The pinned PancakeSwap position uses an unsupported fee tier");
-  const pinnedPool = await fetchPancakeV3Pool(
-    pinnedPosition.token0,
-    pinnedPosition.token1,
-    feeTier,
-    pinnedPosition.blockNumber,
-    options.rpcUrl ?? DEFAULT_BSC_RPC,
-    fetchImpl,
-  );
+  const rawFetch = options.fetchImpl ?? fetch;
+  const callerSignal = options.signal;
+  const fetchImpl: typeof fetch = callerSignal
+    ? (resource, init) => rawFetch(resource, {
+        ...init,
+        signal: init?.signal ? AbortSignal.any([init.signal, callerSignal]) : callerSignal,
+      })
+    : rawFetch;
+  // This entire prerequisite stage runs before either HeyAnon tool is called.
+  // Decode/fee failures are verification failures too, not provider outages.
+  const { pinnedPosition, feeTier, pinnedTickSpacing, pinnedPool } = await (async () => {
+    try {
+      if (!new RegExp(`^pancake-position-${positionId}-`).test(request.requestId)) {
+        throw new Error("The PositionCrew request does not bind the requested position ID");
+      }
+      const verificationRpc = createBscVerificationRpc(options.rpcUrl ?? DEFAULT_BSC_RPC, fetchImpl,
+        callerSignal ? { signal: callerSignal } : {});
+      const pinnedPosition = await fetchPinnedPancakeV3Position(
+        positionId,
+        options.rpcUrl,
+        fetchImpl,
+        verificationRpc,
+      );
+      const feeTier = pinnedPosition.fee;
+      const tickSpacingByFee = new Map([[100, 1], [500, 10], [2_500, 50], [10_000, 200]]);
+      const pinnedTickSpacing = tickSpacingByFee.get(feeTier);
+      if (!pinnedTickSpacing) throw new Error("The pinned PancakeSwap position uses an unsupported fee tier");
+      const pinnedPool = await fetchPancakeV3Pool(
+        pinnedPosition.token0,
+        pinnedPosition.token1,
+        feeTier,
+        pinnedPosition.blockNumber,
+        verificationRpc,
+      );
+      return { pinnedPosition, feeTier, pinnedTickSpacing, pinnedPool };
+    } catch (error) {
+      if (error instanceof BscPositionVerificationError) throw error;
+      const detail = error instanceof Error ? error.message : "Position or pool verification failed";
+      throw new BscPositionVerificationError(`PositionCrew BSC position verification failed: ${detail}`);
+    }
+  })();
   const args = {
     chainName: "bsc",
     token0: request.token0.address,

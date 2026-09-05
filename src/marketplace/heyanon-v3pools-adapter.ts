@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createBscVerificationRpc, type BscVerificationRpc } from "./bsc-verification-rpc.js";
 
 export const HEYANON_V3_POOLS = {
   name: "V3 Pools powered by HeyAnon",
@@ -46,12 +47,6 @@ const McpResponseSchema = z.object({
   }).passthrough(),
 }).passthrough();
 
-const RpcResponseSchema = z.object({
-  jsonrpc: z.literal("2.0"),
-  id: z.union([z.string(), z.number()]),
-  result: z.string(),
-}).passthrough();
-
 export type HeyAnonV3Position = z.infer<typeof ExternalPositionSchema>;
 
 export interface PinnedPancakeV3Position {
@@ -86,23 +81,6 @@ export interface HeyAnonV3PositionAssessment {
 function parseEventStream(raw: string): unknown {
   const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
   return JSON.parse(dataLine ? dataLine.slice(6) : raw) as unknown;
-}
-
-async function rpc(
-  rpcUrl: string,
-  method: string,
-  params: unknown[],
-  fetchImpl: typeof fetch,
-): Promise<string> {
-  const response = await fetchImpl(rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  if (!response.ok) {
-    throw new Error(`BSC RPC returned HTTP ${response.status}`);
-  }
-  return RpcResponseSchema.parse(await response.json()).result;
 }
 
 function argument(positionId: string): string {
@@ -161,19 +139,20 @@ export async function fetchPinnedPancakeV3Position(
   positionId: string,
   rpcUrl = "https://bsc-rpc.publicnode.com",
   fetchImpl: typeof fetch = fetch,
+  verificationRpc: BscVerificationRpc = createBscVerificationRpc(rpcUrl, fetchImpl),
 ): Promise<PinnedPancakeV3Position> {
   const encoded = argument(positionId);
-  const blockHex = await rpc(rpcUrl, "eth_blockNumber", [], fetchImpl);
+  const blockHex = await verificationRpc.request("eth_blockNumber", []);
   const blockNumber = Number(BigInt(blockHex));
   const [positionRaw, ownerRaw] = await Promise.all([
-    rpc(rpcUrl, "eth_call", [{
+    verificationRpc.request("eth_call", [{
       to: PANCAKE_V3_POSITION_MANAGER,
       data: `0x99fbab88${encoded}`,
-    }, blockHex], fetchImpl),
-    rpc(rpcUrl, "eth_call", [{
+    }, blockHex]),
+    verificationRpc.request("eth_call", [{
       to: PANCAKE_V3_POSITION_MANAGER,
       data: `0x6352211e${encoded}`,
-    }, blockHex], fetchImpl),
+    }, blockHex]),
   ]);
   const body = positionRaw.slice(2);
   if (body.length !== 64 * 12) {
