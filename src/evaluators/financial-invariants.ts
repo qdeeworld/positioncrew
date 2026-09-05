@@ -4,6 +4,7 @@ import type {
   YieldOptimizationDeliverable, YieldOptimizationRequest,
 } from "../contracts/index.js";
 import { FIXED_SCALE, ceilDivide, parseFixed } from "../core/fixed.js";
+import { gridConstraintRefusalJustified } from "./grid-refusal-feasibility.js";
 
 export interface FinancialInvariantCheck { id: string; passed: boolean; detail: string }
 const sum = (values: bigint[]): bigint => values.reduce((total, value) => total + value, 0n);
@@ -164,6 +165,8 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
 
 function gridChecks(request: BoundedGridRequest, output: BoundedGridDeliverable): FinancialInvariantCheck[] {
   if (output.status !== "ACTIONABLE") return [
+    check("grid-refusal-feasibility", output.status !== "REFUSED_CONSTRAINTS" || gridConstraintRefusalJustified(request),
+      "A constraint refusal requires independently provable infeasibility; unknown feasibility is not certified."),
     check("grid-inactive-payload", output.orders.length === 0
       && output.decision === (output.status === "NO_ACTION" ? "NO_GRID" : "NONE"),
       "Inactive grids cannot contain orders; NO_ACTION requires NO_GRID and every refusal requires NONE."),
@@ -386,7 +389,7 @@ function lendingChecks(request: LendingRescueRequest, output: LendingRescueDeliv
     const projectedWeighted = kind === "ADD_COLLATERAL" ? weighted + value * threshold / 10_000n : weighted;
     const projectedDebt = kind === "REPAY_DEBT" ? debt - value : debt;
     const projected = projectedDebt > 0n ? projectedWeighted * FIXED_SCALE / projectedDebt : null;
-    if (projected === null || projected < target) return null;
+    if (projectedDebt < 0n || (projected !== null && projected < target)) return null;
     return { asset, units, amount, value, projected };
   };
   const actionValid = (action: LendingActionPlan): boolean => {

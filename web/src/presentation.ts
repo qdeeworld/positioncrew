@@ -160,7 +160,7 @@ export function metricsFor(deliverable: ProviderDeliverable) {
     return [
       { label: "Current health", value: deliverable.position?.currentHealthFactor ?? "-" },
       { label: "Stress health", value: deliverable.position?.stressedHealthFactor ?? "-", tone: "warn" },
-      { label: "Projected health", value: deliverable.recommendation?.projectedHealthFactor ?? "-", tone: "good" },
+      { label: "Projected health", value: deliverable.recommendation?.projectedHealthFactor ?? (deliverable.recommendation?.kind === "REPAY_DEBT" && deliverable.recommendation.projectedHealthFactor === null ? "No debt" : "-"), tone: "good" },
       { label: "Action value", value: `$${deliverable.recommendation?.amountUsd ?? "0"}` },
     ];
   }
@@ -307,6 +307,9 @@ function recommendationText(deliverable: ProviderDeliverable): string {
   const action = deliverable.recommendation;
   if (!action) return "No executable recommendation was produced.";
   const actionLabel = action.kind === "REPAY_DEBT" ? "Repay" : "Add";
+  if (action.kind === "REPAY_DEBT" && action.projectedHealthFactor === null) {
+    return `Repay ${action.amount} ${action.asset.symbol} to clear all observed debt. Projected health: no debt. Revalidate the snapshot before any wallet action.`;
+  }
   const projected = finiteNumber(action.projectedHealthFactor);
   return `${actionLabel} ${action.amount} ${action.asset.symbol}${projected === null ? "" : ` to target a projected ${projected.toFixed(4)} health factor`}. Revalidate the snapshot before any wallet action.`;
 }

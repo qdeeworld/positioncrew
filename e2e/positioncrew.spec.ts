@@ -683,19 +683,22 @@ for (const earlyActionDeadline of ["recommendation", "alternative"] as const) {
     if (!mockedHire.actionDeadline) throw new Error("Missing early action deadline.");
     const actionDeadline = new Date(mockedHire.actionDeadline);
     expect(Date.parse(mockedHire.deliverableExpiresAt)).toBeGreaterThan(actionDeadline.getTime());
-    // Keep real timers running so the mounted expiry effect, not navigation, updates the result.
-    await page.clock.setFixedTime(new Date(actionDeadline.getTime() - 1));
+    // Advance Date and timers together so the expiry timeout cannot fire against a frozen Date.
+    await page.clock.install({ time: new Date(actionDeadline.getTime() - 30_000) });
     await page.goto(`/#jobs/receipt/${mockedHire.receiptId}`);
 
     const result = page.locator(".job-result");
     const summary = result.locator(".result-summary-view");
     const state = summary.locator(".decision-header .state-label");
     await expect(state).toHaveText("ACTIONABLE");
+    await page.clock.pauseAt(new Date(actionDeadline.getTime() - 1));
+    await expect(state).toHaveText("ACTIONABLE");
     await expect(summary.locator(".lending-threshold-plan")).toBeVisible();
     await expect(summary.locator(".alternative-action")).toBeVisible();
     await expect(summary.locator(".expires-label")).toHaveText(/^\s*Expires /);
 
-    await page.clock.setFixedTime(actionDeadline);
+    // The component schedules its one-shot timeout for deadline + 1 ms.
+    await page.clock.runFor(2);
     await expect(state).toHaveText("EXPIRED");
     await expect(summary.getByRole("heading", { name: "Refresh evidence before acting" })).toBeVisible();
     await expect(summary.locator(".expires-label")).toHaveText(/^\s*Expired /);
@@ -703,6 +706,7 @@ for (const earlyActionDeadline of ["recommendation", "alternative"] as const) {
     await expect(summary.locator(".lending-threshold-plan")).toHaveCount(0);
     await expect(summary.locator(".alternative-action")).toHaveCount(0);
 
+    await page.clock.resume();
     await page.reload();
     await expect(state).toHaveText("EXPIRED");
     await expect(summary.getByRole("heading", { name: "Refresh evidence before acting" })).toBeVisible();
