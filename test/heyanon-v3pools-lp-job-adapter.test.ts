@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { LpRebalanceRequestSchema } from "../src/contracts/lp-rebalance.js";
 import { auditionHeyAnonV3LpJob } from "../src/marketplace/heyanon-v3pools-lp-job-adapter.js";
+import { createLpLiveMatchAudition } from "../src/marketplace/lp-live-match.js";
+import { canonicalHash } from "../src/core/canonical.js";
 
 const positionId = "7284554";
 const token0 = "0x55d398326f99059fF775485246999027B3197955";
@@ -159,6 +161,51 @@ const fetchImpl: typeof fetch = async (input, init) => {
 };
 
 describe("HeyAnon V3 Pools exact LP job adapter", () => {
+  it("falls back for factory verification at the same NFT block without relaxing range limits", async () => {
+    const factoryCalls: Array<{ url: string; block: unknown }> = [];
+    const resilientFetch: typeof fetch = async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as { method: string; params?: Array<{ data?: string } | string> };
+      const call = Array.isArray(body.params) ? body.params[0] : undefined;
+      if (body.method === "eth_call" && typeof call === "object" && call?.data?.startsWith("0x1698ee82")) {
+        factoryCalls.push({ url: String(input), block: body.params?.[1] });
+        if (String(input) === "https://bsc-rpc.publicnode.com") return new Response(null, { status: 429 });
+      }
+      return fetchImpl(input, init);
+    };
+    const result = await auditionHeyAnonV3LpJob(request, positionId, { fetchImpl: resilientFetch, now: new Date("2026-08-30T12:00:30.000Z") });
+    expect(factoryCalls).toHaveLength(2);
+    expect(factoryCalls.map((call) => call.block)).toEqual(["0x7170000", "0x7170000"]);
+    expect(factoryCalls[0]?.url).not.toBe(factoryCalls[1]?.url);
+    expect(result.checks.find((check) => check.code === "EXACT_POOL_BINDING")?.status).toBe("PASS");
+    expect(result.checks.find((check) => check.code === "RANGE_WIDTH_POLICY")?.status).toBe("FAIL");
+    expect(result.eligibleForLpRebalance).toBe(false);
+  });
+
+  it("retains an NFT identity mismatch after transport fallback", async () => {
+    const fallbackFetch: typeof fetch = async (input, init) => String(input) === "https://bsc-rpc.publicnode.com"
+      ? new Response(null, { status: 429 }) : fetchImpl(input, init);
+    const altered = LpRebalanceRequestSchema.parse({ ...request, position: { ...request.position, liquidity: "1" } });
+    const result = await auditionHeyAnonV3LpJob(altered, positionId, { fetchImpl: fallbackFetch });
+    expect(result.checks.find((check) => check.code === "EXACT_POSITION_BINDING")?.status).toBe("FAIL");
+    expect(result.eligibleForLpRebalance).toBe(false);
+  });
+
+  it("attributes exhausted RPC prerequisites to PositionCrew and never invokes HeyAnon", async () => {
+    let mcpCalls = 0;
+    const unavailableFetch: typeof fetch = async (input) => {
+      if (String(input).includes("heyanon.ai")) mcpCalls += 1;
+      return new Response(null, { status: 429 });
+    };
+    const result = await createLpLiveMatchAudition(request, {
+      blockNumber: "118955550", observedAt: "2026-08-30T11:59:00.000Z", explorerUrl: "https://bscscan.com/block/118955550",
+    }, canonicalHash(request), new Date("2026-08-30T12:00:30.000Z"), { fetchImpl: unavailableFetch });
+    const external = result.audition.candidates.find((candidate) => candidate.providerKey === "HEYANON");
+    expect(mcpCalls).toBe(0);
+    expect(external?.selectable).toBe(false);
+    expect(external?.checks[0]?.code).toBe("BSC_POSITION_VERIFICATION");
+    expect(result.externalProviderComparison.boundary).toContain("not evidence of a HeyAnon outage");
+  });
+
   it("preserves an attributable recommendation while rejecting a range outside buyer limits", async () => {
     const result = await auditionHeyAnonV3LpJob(request, positionId, { fetchImpl });
     expect(result.attributableResult).toBe(true);

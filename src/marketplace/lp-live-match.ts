@@ -16,6 +16,7 @@ import { canonicalHash } from "../core/canonical.js";
 import { evaluateFinancialInvariants } from "../evaluators/financial-invariants.js";
 import { HEYANON_V3_POOLS } from "./heyanon-v3pools-adapter.js";
 import { auditionHeyAnonV3LpJob } from "./heyanon-v3pools-lp-job-adapter.js";
+import { BscVerificationRpcError } from "./bsc-verification-rpc.js";
 import {
   LpLiveMatchAuditionSchema,
   LpLiveMatchExecutionSchema,
@@ -157,6 +158,7 @@ export async function createLpLiveMatchAudition(
               : controller.signal,
           }),
           ...(options.rpcUrl ? { rpcUrl: options.rpcUrl } : {}),
+          signal: controller.signal,
           now,
         }),
         8_000,
@@ -207,6 +209,8 @@ export async function createLpLiveMatchAudition(
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "External provider unavailable";
+    const verificationUnavailable = error instanceof BscVerificationRpcError;
+    const failureCode = verificationUnavailable ? "BSC_POSITION_VERIFICATION" : "FRESH_PROVIDER_AUDITION";
     candidates.push({
       ...HEYANON_LP,
       status: "UNAVAILABLE",
@@ -214,7 +218,7 @@ export async function createLpLiveMatchAudition(
       rawResponseHash: null,
       normalizedResponseHash: null,
       latencyMilliseconds: elapsed(externalStarted),
-      checks: [{ code: "FRESH_PROVIDER_AUDITION", status: "FAIL", detail }],
+      checks: [{ code: failureCode, status: "FAIL", detail }],
     });
     externalProviderComparison = {
       schemaVersion: "positioncrew.external-lp-comparison-summary.v1",
@@ -235,8 +239,10 @@ export async function createLpLiveMatchAudition(
       eligibleForPositionAssessmentActivation: false,
       eligibleForLiveMatch: false,
       adapterNormalized: false,
-      checks: [{ code: "REMOTE_PROVIDER_AVAILABLE", status: "FAIL", detail }],
-      boundary: "The external outage did not select or invoke another provider. No external result or ranking is claimed.",
+      checks: [{ code: verificationUnavailable ? "BSC_POSITION_VERIFICATION" : "REMOTE_PROVIDER_AVAILABLE", status: "FAIL", detail }],
+      boundary: verificationUnavailable
+        ? "PositionCrew could not independently verify the BSC position, so HeyAnon was not invoked. This is not evidence of a HeyAnon outage. No external result or ranking is claimed."
+        : "The external outage did not select or invoke another provider. No external result or ranking is claimed.",
     };
   }
 
@@ -473,14 +479,23 @@ export async function executeLpLiveMatchProvider(input: {
         throw new Error("The selected-provider job expired before its fresh invocation");
       }
       requireFreshCompletion(request);
-      const assessment = await boundedExternalInvocation(
-        auditionHeyAnonV3LpJob(request, positionTokenId, {
-          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
-          ...(input.rpcUrl ? { rpcUrl: input.rpcUrl } : {}),
-          now: new Date(),
-        }),
-        10_000,
-      );
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      let assessment: Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>;
+      try {
+        assessment = await boundedExternalInvocation(
+          auditionHeyAnonV3LpJob(request, positionTokenId, {
+            ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+            ...(input.rpcUrl ? { rpcUrl: input.rpcUrl } : {}),
+            signal: controller.signal,
+            now: new Date(),
+          }),
+          10_000,
+        );
+      } finally {
+        clearTimeout(timeout);
+        controller.abort();
+      }
       rawResponseHash = assessment.invocation.rawResponseHash;
       requireFreshCompletion(request);
       // Preserve raw hashes as audit evidence, not as a live-price equality test.
@@ -513,7 +528,7 @@ export async function executeLpLiveMatchProvider(input: {
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Selected external provider failed";
       deliverable = refusal(request, new Date(), reason);
-      checks = [{ code: "FRESH_SELECTED_PROVIDER_RUN", status: "FAIL", detail: reason }];
+      checks = [{ code: error instanceof BscVerificationRpcError ? "BSC_POSITION_VERIFICATION" : "FRESH_SELECTED_PROVIDER_RUN", status: "FAIL", detail: reason }];
     }
     response = await runCurrentBlockPinnedProviderDeliverable(
       request,

@@ -276,6 +276,8 @@ async function rpcBatchOnce(rpcUrl: string, calls: readonly RpcCall[]): Promise<
   });
 }
 
+export { rpcFallbacks as bscReadRpcFallbacks };
+
 async function rpcBatch(rpcUrl: string, calls: readonly RpcCall[]): Promise<unknown[]> {
   const failures: string[] = [];
   const candidates = rpcFallbacks(rpcUrl);
