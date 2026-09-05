@@ -76,6 +76,7 @@ export const BoundedGridDeliverableSchema = z
     estimatedSlippageUsd: UnsignedDecimalSchema,
     estimatedGasUsd: UnsignedDecimalSchema,
     expectedNetProfitUsd: UnsignedDecimalSchema,
+    riskModel: z.literal("FINITE_GRID_ZERO_PRICE_STRESS_V1").optional(),
     worstCaseLossUsd: UnsignedDecimalSchema,
     maximumInventoryUsd: UnsignedDecimalSchema,
     summary: z.string().min(1).max(400),

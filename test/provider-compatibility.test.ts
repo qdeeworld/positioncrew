@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runFrozenMatrix } from "../src/api/fixture-jobs.js";
+import { createProviderConformanceExamples } from "../src/marketplace/provider-conformance-examples.js";
 import { PROVIDER_CATALOG } from "../src/marketplace/catalog.js";
 import {
   buildProviderContractTemplate,
@@ -11,14 +11,13 @@ import {
 type ServiceId = ProviderContractPacket["service"];
 
 async function templates(): Promise<Record<ServiceId, ProviderContractPacket>> {
-  const matrix = await runFrozenMatrix();
-  return Object.fromEntries(matrix.map((response) => {
-    const provider = PROVIDER_CATALOG.find((candidate) => candidate.service === response.result.request.service);
+  return Object.fromEntries(createProviderConformanceExamples().map((example) => {
+    const provider = PROVIDER_CATALOG.find((candidate) => candidate.service === example.request.service);
     if (!provider) throw new Error("Missing provider");
-    return [response.result.request.service, buildProviderContractTemplate(
+    return [example.request.service, buildProviderContractTemplate(
       provider,
-      response.result.request,
-      response.result.deliverable,
+      example.request,
+      example.deliverable,
     )];
   })) as Record<ServiceId, ProviderContractPacket>;
 }
@@ -174,5 +173,13 @@ describe("provider contract preflight", () => {
       ...result,
       checks: result.checks.map((check, index) => index === 0 ? { ...check, summary: "Tampered" } : check),
     })).toBe(false);
+  });
+
+  it("does not hide an executable yield withdrawal inside a refusal example", async () => {
+    const packet = (await templates()).YIELD_OPTIMIZATION;
+    if (packet.refusalDeliverable.service !== "YIELD_OPTIMIZATION" || packet.actionableDeliverable.service !== "YIELD_OPTIMIZATION") throw new Error("Expected yield");
+    expect(packet.refusalDeliverable.withdrawals).toBeUndefined();
+    packet.refusalDeliverable.withdrawals = structuredClone(packet.actionableDeliverable.withdrawals!);
+    expect(runProviderContractPreflight(packet).outcome).toBe("CONTRACT_FAIL");
   });
 });

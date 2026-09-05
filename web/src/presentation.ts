@@ -1,4 +1,40 @@
-import type { FixtureJobResponse, ProviderDeliverable, ServiceId } from "./types";
+import type { CurrentBlockPinnedMarketplaceEvidence, FixtureJobResponse, ProviderDeliverable, ServiceId } from "./types.js";
+
+export function isResultExpired(expiresAt: string, now = Date.now()): boolean {
+  const expiry = Date.parse(expiresAt);
+  return !Number.isFinite(expiry) || expiry <= now;
+}
+
+export function gridRiskCopy(deliverable: ProviderDeliverable) {
+  const currentModel = deliverable.riskModel === "FINITE_GRID_ZERO_PRICE_STRESS_V1";
+  return {
+    lossLabel: currentModel ? "Zero-price stress loss" : "Modeled scenario loss",
+    inventoryLabel: currentModel ? "In-range inventory bound" : "Scenario inventory estimate",
+    assumptions: currentModel
+      ? "Stress loss includes all funded base falling to zero and estimated costs, with the quote worth $1. The inventory bound ends at the range ceiling. Orders are unsigned; cancellation is not guaranteed and actual costs may be higher."
+      : "This saved result uses an older loss scenario and inventory estimate. Neither is a hard maximum. Refresh the grid for current fill-path sizing; orders and cancellation remain unsigned.",
+  };
+}
+
+export function yieldComparisonDescription(
+  comparison: CurrentBlockPinnedMarketplaceEvidence["externalYieldComparison"],
+): string {
+  const inspected = `PositionCrew evaluated ${comparison?.marketCount ?? 0} Venus markets.`;
+  if (!comparison || comparison.outcome === "UNAVAILABLE") {
+    return `${inspected} AiKi was unavailable, so no external rate result was obtained.`;
+  }
+  if (!comparison.attributable || !comparison.persisted || !comparison.externalRecommendedMarket?.trim() ||
+      typeof comparison.externalSimpleAnnualRateBps !== "number" || !Number.isFinite(comparison.externalSimpleAnnualRateBps)) {
+    return `${inspected} AiKi's response could not be verified as a completed rate assessment. Use the PositionCrew result and inspect the failed checks.`;
+  }
+  if (comparison.outcome === "SEMANTICALLY_COMPARABLE" && comparison.eligibleForLiveMatch) {
+    return `${inspected} AiKi supplied an attributable rate thesis. PositionCrew independently bound pinned rates and applied the full buyer contract.`;
+  }
+  if (comparison.outcome === "PARTIAL_COMPATIBILITY") {
+    return `${inspected} AiKi supplied an attributable rate-only candidate. PositionCrew also evaluated liquidity, risk, costs, and horizon benefit.`;
+  }
+  return `${inspected} AiKi returned rate evidence that did not pass the buyer-contract comparison. The external result is not eligible for selection.`;
+}
 
 export function shortHash(value: string | undefined, lead = 12): string {
   if (!value) return "Pending";
@@ -129,8 +165,8 @@ export function metricsFor(deliverable: ProviderDeliverable) {
   return [
     { label: "Orders", value: String(deliverable.orders?.length ?? 0) },
     { label: "Expected net", value: `$${deliverable.expectedNetProfitUsd ?? "0"}`, tone: "good" },
-    { label: "Worst-case loss", value: `$${deliverable.worstCaseLossUsd ?? "0"}`, tone: "warn" },
-    { label: "Inventory cap", value: `$${deliverable.maximumInventoryUsd ?? "0"}` },
+    { label: gridRiskCopy(deliverable).lossLabel, value: `$${deliverable.worstCaseLossUsd ?? "0"}`, tone: "warn" },
+    { label: gridRiskCopy(deliverable).inventoryLabel, value: `$${deliverable.maximumInventoryUsd ?? "0"}` },
   ];
 }
 
@@ -154,15 +190,18 @@ export function actionDetails(deliverable: ProviderDeliverable): Array<{ label: 
   if (deliverable.service === "YIELD_OPTIMIZATION") {
     return [
       { label: "Destination", value: deliverable.selectedOpportunityId ?? "No migration" },
-      { label: "Migration cost", value: `$${deliverable.migrationCostUsd ?? "0"}` },
+      { label: deliverable.postMigrationCapitalUsd === undefined ? "Migration cost" : "Reserved migration cost", value: `$${deliverable.migrationCostUsd ?? "0"}` },
       { label: "Break-even", value: `${deliverable.breakEvenDays ?? "-"} days` },
       { label: "Expires", value: formatTimestamp(deliverable.expiresAt) + " UTC" },
+      ...(deliverable.withdrawals ?? []).map((withdrawal) => ({ label: `Withdraw from ${withdrawal.opportunityId}`, value: `$${withdrawal.amountUsd}` })),
+      ...(deliverable.remainingIdleCapitalUsd === undefined ? [] : [{ label: "Remaining idle capital", value: `$${deliverable.remainingIdleCapitalUsd}` }]),
+      ...(deliverable.postMigrationCapitalUsd === undefined ? [] : [{ label: "Capital after costs", value: `$${deliverable.postMigrationCapitalUsd}` }]),
     ];
   }
   return [
     { label: "Decision", value: deliverable.decision.replaceAll("_", " ") },
     { label: "Order count", value: String(deliverable.orders?.length ?? 0) },
-    { label: "Maximum loss", value: `$${deliverable.worstCaseLossUsd ?? "0"}` },
+    { label: gridRiskCopy(deliverable).lossLabel, value: `$${deliverable.worstCaseLossUsd ?? "0"}` },
     { label: "Expires", value: formatTimestamp(deliverable.expiresAt) + " UTC" },
   ];
 }
@@ -427,6 +466,7 @@ function yieldDecisionPlan(deliverable: ProviderDeliverable): CapitalDecisionPla
 
 function gridDecisionPlan(deliverable: ProviderDeliverable): CapitalDecisionPlan {
   const actionable = deliverable.status === "ACTIONABLE";
+  const risk = gridRiskCopy(deliverable);
   const prices = (deliverable.orders ?? []).map((order) => finiteNumber(order.price)).filter((value): value is number => value !== null);
   const buys = (deliverable.orders ?? []).filter((order) => order.side === "BUY").length;
   const sells = (deliverable.orders ?? []).filter((order) => order.side === "SELL").length;
@@ -438,24 +478,26 @@ function gridDecisionPlan(deliverable: ProviderDeliverable): CapitalDecisionPlan
     state: actionable ? "GRID READY" : "NO GRID",
     title: actionable ? "Review the bounded grid" : "Do not place this grid",
     body: actionable
-      ? "The order ladder clears the configured range, liquidity, volatility, profit, loss and inventory limits. Fills are not guaranteed."
-      : "The requested grid failed at least one market, profit, inventory or maximum-loss limit, so no orders were emitted.",
+      ? deliverable.riskModel === "FINITE_GRID_ZERO_PRICE_STRESS_V1"
+        ? "The proposed orders fit the modeled profit, stress-loss and in-range inventory budgets. Fills and cancellation are not guaranteed."
+        : "This saved grid uses an older loss scenario and inventory estimate. Refresh the evidence and sizing before relying on its risk figures."
+      : "No grid size met the market, profit, inventory and modeled loss limits, so no orders were emitted.",
     details: {
       metrics: [
         { label: "Order range", value: range },
         { label: "Order sides", value: actionable ? `${buys} buy · ${sells} sell` : "No orders" },
         { label: "Projected net profit", value: money(deliverable.expectedNetProfitUsd) },
-        { label: "Worst-case loss", value: money(deliverable.worstCaseLossUsd) },
+        { label: risk.lossLabel, value: money(deliverable.worstCaseLossUsd) },
       ],
       basis: actionable
-        ? `${money(deliverable.maximumInventoryUsd)} maximum inventory across ${deliverable.orders?.length ?? 0} bounded orders`
+        ? `${risk.inventoryLabel}: ${money(deliverable.maximumInventoryUsd)} across ${deliverable.orders?.length ?? 0} proposed orders`
         : deliverable.summary,
       trigger: firstUseful(deliverable.cancellationConditions ?? [], "Reload when price, volatility, liquidity or available capital changes."),
       nextStepLabel: actionable ? "Before placing orders" : "When to check again",
       nextStep: actionable
-        ? "Re-quote every order, confirm the frozen capital and loss limits, and cancel the whole grid if any listed condition is crossed."
+        ? "Re-quote every order and check funded inventory, costs and expiry. Cancellation conditions require execution support; they do not guarantee a stop-loss."
         : "Adjust the requested range or reload after liquidity, volatility, expected profit, inventory or loss conditions change.",
-      caveat: firstUseful(deliverable.limitations ?? [], "Projected fills and profit are not guaranteed."),
+      caveat: risk.assumptions,
     },
   };
 }

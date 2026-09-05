@@ -22,14 +22,14 @@ async function prepared() {
   const request = LpRebalanceRequestSchema.parse({
     ...fixture, requestId: "pancake-position-9000001-test", requestedAt: now.toISOString(), deadline: new Date(now.getTime() + 300000).toISOString(),
     sources: [{ sourceId: "test-block", label: "Test block observation", uri: source.explorerUrl, observedAt: source.observedAt }],
-    marketState: { ...fixture.marketState, sourceId: "test-block", observedAt: source.observedAt },
+    marketState: { ...fixture.marketState, token1PriceUsd: String(1 / 1.0001 ** fixture.marketState.currentTick), sourceId: "test-block", observedAt: source.observedAt },
   });
   const response = await runCurrentBlockPinnedProviderRequest(request, now);
   const assessment = {
     eligibleForLpRebalance: true, attributableResult: true,
     normalizedDeliverable: response.result.deliverable,
     recommendation: { lowerTick: 0, upperTick: 240, widthTicks: 240 },
-    invocation: { rawResponseHash: hash, normalizedResponseHash: canonicalHash(response.result.deliverable), latencyMilliseconds: 3 },
+    invocation: { rawResponseHash: hash, materialTermsHash: hash, normalizedResponseHash: canonicalHash(response.result.deliverable), latencyMilliseconds: 3 },
     checks: [{ code: "EXACT_JOB", status: "PASS", detail: "Selected provider passes this job." }],
     claimBoundary: ["Controlled adapter response for this test."],
   } as unknown as Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>;
@@ -109,12 +109,23 @@ describe("selected external LP execution", () => {
   it.each(["outage", "changed", "incompatible"])("persists a refusal for %s without changing the selected provider", async (failure) => {
     const input = await prepared();
     if (failure === "outage") mockAudition.mockRejectedValueOnce(new Error("Provider unavailable"));
-    if (failure === "changed") mockAudition.mockResolvedValueOnce({ ...input.assessment, invocation: { ...input.assessment.invocation, rawResponseHash: `sha256:${"b".repeat(64)}` } });
+    if (failure === "changed") mockAudition.mockResolvedValueOnce({ ...input.assessment, invocation: { ...input.assessment.invocation, materialTermsHash: `sha256:${"b".repeat(64)}` } });
     if (failure === "incompatible") mockAudition.mockResolvedValueOnce({ ...input.assessment, eligibleForLpRebalance: false });
     const response = await executeLpLiveMatchProvider(input);
     expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
     expect(response.result.deliverable.decision).toBe("NONE");
     expect(response.result.job.providerId).toBe("erc8004:56:45650");
     expect(mockAudition).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts independently coherent live evidence changes when committed material terms are unchanged", async () => {
+    const input = await prepared();
+    mockAudition.mockResolvedValueOnce({ ...input.assessment, invocation: {
+      ...input.assessment.invocation, rawResponseHash: `sha256:${"b".repeat(64)}`,
+    } });
+    const response = await executeLpLiveMatchProvider(input);
+    expect(response.liveMatchExecution?.outcome).toBe("DELIVERED");
+    expect(response.liveMatchExecution?.invocation.rawResponseHash).not.toBe(hash);
+    expect(response.result.job.providerId).toBe("erc8004:56:45650");
   });
 });

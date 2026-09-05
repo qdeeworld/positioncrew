@@ -27,6 +27,8 @@ import {
   capitalDecisionPlan,
   conditionsFor,
   formatTimestamp,
+  gridRiskCopy,
+  isResultExpired,
   metricsFor,
   lendingThresholdPlan,
   resultHeadline,
@@ -34,6 +36,7 @@ import {
   serviceLabel,
   shortHash,
   statusTone,
+  yieldComparisonDescription,
 } from "../presentation";
 import { TASKS } from "../task-config";
 import type {
@@ -981,9 +984,7 @@ function GridAndYieldExternalComparisonPanel({
       : grid?.outcome === "UNAVAILABLE"
         ? "Brain on BNB was unavailable, so no external grid evidence was obtained. PositionCrew failed closed and retained the first-party result."
         : "The external grid evidence remains visible, but PositionCrew did not treat it as an eligible bounded plan because one or more buyer-bound checks failed."
-    : comparable
-      ? `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied the attributable rate thesis; PositionCrew independently bound pinned rates and applied the full buyer contract.`
-      : `Both providers inspected ${yieldComparison?.marketCount ?? 0} Venus markets. AiKi supplied a rate-only candidate; PositionCrew also evaluated liquidity, risk, costs, and horizon benefit.`;
+    : yieldComparisonDescription(yieldComparison);
   const scopedRole = isGrid ? (comparable ? "Grid plan" : "Range assessment") : comparable ? "Yield job" : "Rate ranking";
 
   return (
@@ -1227,7 +1228,20 @@ function SummaryResult({
   founderAdvantagePublicationLoadState: PublicationLoadState;
 }) {
   const deliverable = response.result.deliverable;
-  const meaning = resultMeaning(deliverable);
+  const [resultClock, setResultClock] = useState(Date.now);
+  useEffect(() => {
+    setResultClock(Date.now());
+    const remaining = Date.parse(deliverable.expiresAt) - Date.now();
+    if (!Number.isFinite(remaining) || remaining <= 0) return;
+    const timer = window.setTimeout(() => setResultClock(Date.now()), Math.min(remaining + 1, 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [deliverable.expiresAt]);
+  const expired = response.evidenceMode !== "FROZEN_BSC_TEST_FIXTURE" && isResultExpired(deliverable.expiresAt, resultClock);
+  const meaning = expired ? {
+    tone: "hold" as const,
+    title: "This result has expired.",
+    body: "Reload the market or position in the request panel, then run a new free check before acting. The saved receipt remains available.",
+  } : resultMeaning(deliverable);
   const MeaningIcon = meaning.tone === "refused" ? AlertTriangle : meaning.tone === "action" ? CheckCircle2 : ShieldCheck;
   const metrics = metricsFor(deliverable);
   const details = actionDetails(deliverable);
@@ -1235,8 +1249,10 @@ function SummaryResult({
   const thresholdPlan = lendingThresholdPlan(deliverable, response.result.request);
   const categoryPlan = capitalDecisionPlan(deliverable, response.result.request);
   const showCurrentLendingThresholds = deliverable.service === "LENDING_RESCUE"
+    && !expired
     && response.evidenceMode !== "FROZEN_BSC_TEST_FIXTURE";
   const showCurrentCategoryPlan = deliverable.service !== "LENDING_RESCUE"
+    && !expired
     && response.evidenceMode === "CURRENT_BLOCK_PINNED"
     && categoryPlan.details !== null;
   const sources = Array.isArray(response.result.request.sources)
@@ -1258,13 +1274,13 @@ function SummaryResult({
     <div className="result-summary-view">
       <div className="decision-header">
         <div>
-          <span className={`state-label ${statusTone(deliverable.status)}`}>
-            <MeaningIcon size={13} /> {deliverable.status.replaceAll("_", " ")}
+          <span className={`state-label ${expired ? "warn" : statusTone(deliverable.status)}`}>
+            <MeaningIcon size={13} /> {expired ? "EXPIRED" : deliverable.status.replaceAll("_", " ")}
           </span>
-          <h2>{resultHeadline(deliverable)}</h2>
+          <h2>{expired ? "Refresh evidence before acting" : resultHeadline(deliverable)}</h2>
           <p>{deliverable.summary}</p>
         </div>
-        <span className="expires-label"><Clock3 size={13} /> Expires {formatTimestamp(deliverable.expiresAt)} UTC</span>
+        <span className="expires-label"><Clock3 size={13} /> {expired ? "Expired" : "Expires"} {formatTimestamp(deliverable.expiresAt)} UTC</span>
       </div>
       <section className={`result-meaning ${meaning.tone}`} aria-label="What this result means">
         <MeaningIcon size={18} aria-hidden="true" />
@@ -1348,6 +1364,9 @@ function SummaryResult({
           </div>
         ))}
       </div>
+      {deliverable.service === "BOUNDED_GRID" && (
+        <p className="capital-plan-caveat" aria-label="Grid risk assumptions">{gridRiskCopy(deliverable).assumptions}</p>
+      )}
       <div className="decision-detail-grid">
         <section>
           <h3>{meaning.tone === "action" ? "Action specification" : "Decision record"}</h3>
@@ -2243,7 +2262,7 @@ export function JobWorkspace({
               <YieldMarketProbe onUseRequest={useLiveRequest} onClearRequest={clearLiveRequest} />
               <div className="request-context"><span>Venus stablecoin markets</span><strong>Base rates only</strong><small>No incentive assumptions</small></div>
               <div className="form-grid">
-                <NumberField label="Capital (USD)" value={draft.yieldCapital} onChange={(value) => updateDraft("yieldCapital", value)} disabled={inputsDisabled} min="1" max="10000000" step="1" />
+                <NumberField label="Total capital, including current holdings (USD)" value={draft.yieldCapital} onChange={(value) => updateDraft("yieldCapital", value)} disabled={inputsDisabled} min="1" max="10000000" step="1" />
                 <NumberField label="Leading base APY (bps)" value={draft.yieldCandidateApy} onChange={(value) => updateDraft("yieldCandidateApy", value)} disabled={inputsDisabled || Boolean(liveRequest)} min="0" max="1000000" step="1" />
                 <NumberField label="Minimum liquidity (USD)" value={draft.yieldMinimumLiquidity} onChange={(value) => updateDraft("yieldMinimumLiquidity", value)} disabled={inputsDisabled} min="0" max="10000000000" step="1" />
                 <NumberField label="Minimum net benefit (USD)" value={draft.yieldMinimumBenefit} onChange={(value) => updateDraft("yieldMinimumBenefit", value)} disabled={inputsDisabled} min="0" max="1000000" step="0.01" />

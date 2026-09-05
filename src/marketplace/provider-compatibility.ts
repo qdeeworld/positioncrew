@@ -17,17 +17,14 @@ import {
 } from "../contracts/index.js";
 import { canonicalHash } from "../core/canonical.js";
 import { parseFixed } from "../core/fixed.js";
-import { createBoundedGridDeliverable } from "../providers/bounded-grid.js";
-import { createLendingRescueDeliverable } from "../providers/lending-rescue.js";
-import { createLpRebalanceDeliverable } from "../providers/lp-rebalance.js";
-import { createYieldOptimizationDeliverable } from "../providers/yield-optimization.js";
+import { evaluateProviderConformance } from "../evaluators/provider-conformance.js";
 import type { ProviderListing } from "./catalog.js";
 
 export const PROVIDER_CONTRACT_PREFLIGHT_ROUTE = "/api/provider-contract-preflight";
 export const PROVIDER_CONTRACT_PREFLIGHT_BOUNDARY =
-  "This checks only caller-supplied packet structure, request binding, declared buyer limits, and the deterministic PositionCrew reference actionability gate. It does not prove ownership, identity binding, liveness, uptime, latency, real delivery, output accuracy, quality, safety, demand, payment, performance, integration, certification, or hireability.";
+  "This checks caller-supplied packet structure, request binding, and independent declared financial constraints on the submitted output. It does not prove ownership, identity binding, liveness, uptime, latency, real delivery, complete output accuracy, quality, safety, demand, payment, performance, integration, certification, or hireability.";
 export const PROVIDER_CONTRACT_PREFLIGHT_VALIDATOR_VERSION =
-  "positioncrew.provider-contract-preflight.v1";
+  "positioncrew.provider-contract-preflight.v2";
 
 type ServiceId = PositionCrewRequest["service"];
 type JsonRecord = Record<string, unknown>;
@@ -366,32 +363,6 @@ function actionableRequestBindingDetails(
   return details;
 }
 
-function canonicalReferenceActionabilityDetails(
-  request: PositionCrewRequest,
-  deliverable: PositionCrewDeliverable,
-): string[] {
-  try {
-    const now = new Date(deliverable.generatedAt);
-    const reference = request.service === "LENDING_RESCUE"
-      ? createLendingRescueDeliverable(request, now)
-      : request.service === "LP_REBALANCE"
-        ? createLpRebalanceDeliverable(request, now)
-        : request.service === "YIELD_OPTIMIZATION"
-          ? createYieldOptimizationDeliverable(request, now)
-          : createBoundedGridDeliverable(request, now);
-    const details: string[] = [];
-    if (reference.status !== "ACTIONABLE") {
-      details.push(`PositionCrew reference provider returned ${reference.status}: ${reference.summary}`);
-    }
-    if (Date.parse(deliverable.expiresAt) > Date.parse(reference.expiresAt)) {
-      details.push("Submitted deliverable outlives the reference evidence window.");
-    }
-    return details;
-  } catch (error) {
-    return [`PositionCrew reference provider could not evaluate the request: ${error instanceof Error ? error.message : String(error)}`];
-  }
-}
-
 function actionableLimitDetails(
   service: ServiceId,
   request: PositionCrewRequest,
@@ -490,6 +461,9 @@ function refusalSemanticDetails(service: ServiceId, deliverable: PositionCrewDel
   } else if (service === "YIELD_OPTIMIZATION") {
     if (value.selectedOpportunityId !== null || Number(value.allocationUsd) !== 0) {
       details.push("Yield refusal cannot select or allocate to an opportunity.");
+    }
+    if (Array.isArray(value.withdrawals) && value.withdrawals.length > 0) {
+      details.push("Yield refusal cannot contain withdrawals.");
     }
     if (Array.isArray(value.actionSteps) && value.actionSteps.length > 0) {
       details.push("Yield refusal cannot contain action steps.");
@@ -599,11 +573,12 @@ export function runProviderContractPreflight(input: unknown): ProviderContractPr
       "Actionable example contains a concrete category-specific action.",
       semanticDetails,
     ));
-    const referenceDetails = canonicalReferenceActionabilityDetails(request, actionable);
+    const referenceDetails = evaluateProviderConformance(request, actionable, "positioncrew:contract-preflight:v2", new Date(actionable.generatedAt))
+      .checks.filter((item) => !item.passed).map((item) => `${item.id}: ${item.evidence}`);
     checks.push(contractCheck(
       "canonical-reference-actionability",
       referenceDetails.length === 0,
-      "Representative request clears the deterministic PositionCrew reference actionability gate.",
+      "Submitted output clears independent financial constraints without requiring a native strategy match.",
       referenceDetails,
     ));
     const limitDetails = actionableLimitDetails(packet.service, request, actionable);
@@ -663,6 +638,11 @@ function refusalFromActionable(deliverable: PositionCrewDeliverable): PositionCr
     decision: "NONE" as const,
     summary: "Reference refusal: the supplied constraints do not permit an executable action.",
   };
+  if (deliverable.service === "YIELD_OPTIMIZATION") {
+    for (const field of ["withdrawals", "idleCapitalUsedUsd", "finalProtocolAllocations", "remainingIdleCapitalUsd", "postMigrationCapitalUsd"]) {
+      delete (common as JsonRecord)[field];
+    }
+  }
   if (deliverable.service === "LENDING_RESCUE") {
     return PositionCrewDeliverableSchema.parse({
       ...common,

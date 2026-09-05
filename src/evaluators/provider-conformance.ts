@@ -10,7 +10,7 @@ import {
   type EvaluationCheck,
   type EvaluationReceipt,
 } from "../commerce/types.js";
-import { executeProvider } from "../providers/index.js";
+import { evaluateFinancialInvariants } from "./financial-invariants.js";
 
 function check(
   id: string,
@@ -31,7 +31,7 @@ function usefulPayload(deliverable: PositionCrewDeliverable): boolean {
     case "LENDING_RESCUE":
       return deliverable.recommendation !== null;
     case "LP_REBALANCE":
-      return deliverable.proposedRange !== null && deliverable.actionSteps.length >= 3;
+      return (deliverable.decision === "EXIT" || deliverable.proposedRange !== null) && deliverable.actionSteps.length >= 3;
     case "YIELD_OPTIMIZATION":
       return deliverable.selectedOpportunityId !== null && deliverable.actionSteps.length >= 2;
     case "BOUNDED_GRID":
@@ -51,7 +51,14 @@ export function evaluateProviderConformance(
 ): EvaluationReceipt {
   const request = PositionCrewRequestSchema.parse(requestInput);
   const deliverable = PositionCrewDeliverableSchema.parse(deliverableInput);
-  const expected = executeProvider(request, now);
+  const financialChecks = evaluateFinancialInvariants(request, deliverable);
+  const sourceExpiry = Math.min(Date.parse(request.deadline), ...request.sources.map((source) => Date.parse(source.observedAt) + request.maxDataAgeSeconds * 1_000));
+  const observations = request.service === "LENDING_RESCUE" ? [...request.position.collateral, ...request.position.debt]
+    : request.service === "YIELD_OPTIMIZATION" ? [...request.currentPositions, ...request.opportunities] : [request.marketState];
+  const evidenceConsistent = observations.every((observation) => request.sources.some((source) => source.sourceId === observation.sourceId
+    && source.observedAt === observation.observedAt) && Date.parse(observation.observedAt) <= now.getTime());
+  const evidenceFresh = request.sources.every((source) => Date.parse(source.observedAt) <= now.getTime()
+    && now.getTime() - Date.parse(source.observedAt) <= request.maxDataAgeSeconds * 1_000);
   const requestHash = requestHashOverride ?? canonicalHash(request);
   const deliverableHash = canonicalHash(deliverable);
   const checks: EvaluationCheck[] = [
@@ -72,12 +79,12 @@ export function evaluateProviderConformance(
       `${deliverable.service}:${deliverable.requestId}`,
     ),
     check(
-      "deterministic-output",
-      "Output reproduces from the frozen request and provider version",
+      "financial-invariants",
+      "Submitted output satisfies independent financial constraints",
       60,
       true,
-      canonicalHash(deliverable) === canonicalHash(expected),
-      `expected=${canonicalHash(expected)}`,
+      financialChecks.every((item) => item.passed),
+      "Final-output constraints are independent of native reproduction; future execution and performance are not proven.",
     ),
     check(
       "useful-payload",
@@ -91,16 +98,25 @@ export function evaluateProviderConformance(
       "bounded-expiry",
       "Result never outlives the buyer request",
       5,
-      false,
+      true,
       Date.parse(deliverable.expiresAt) <= Date.parse(request.deadline),
       `expiresAt=${deliverable.expiresAt}`,
     ),
+    check("evidence-window", "Actionable output uses current evidence and bounded generation/expiry times", 0, true,
+      deliverable.status === "ACTIONABLE"
+        ? evidenceConsistent && evidenceFresh && Date.parse(deliverable.generatedAt) >= Date.parse(request.requestedAt)
+          && Date.parse(deliverable.generatedAt) <= now.getTime() && Date.parse(deliverable.expiresAt) > now.getTime()
+          && Date.parse(deliverable.expiresAt) <= sourceExpiry
+        : (now.getTime() < Date.parse(request.deadline) || deliverable.status === "REFUSED_EXPIRED")
+          && (deliverable.status !== "NO_ACTION" || evidenceConsistent && evidenceFresh),
+      `sourceExpiry=${new Date(sourceExpiry).toISOString()}; status=${deliverable.status}`),
+    ...financialChecks.map((item) => check(item.id, "Independent submitted-output invariant", 0, true, item.passed, item.detail)),
   ];
   const score = checks.reduce((total, item) => total + (item.passed ? item.weight : 0), 0);
   const passed = score >= 90 && !checks.some((item) => item.critical && !item.passed);
   const body = {
     schemaVersion: "positioncrew.evaluation.v1" as const,
-    rubricVersion: `positioncrew.${request.service.toLowerCase()}.conformance.v1`,
+    rubricVersion: `positioncrew.${request.service.toLowerCase()}.conformance.v2`,
     requestHash,
     deliverableHash,
     evaluatorId,

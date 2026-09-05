@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { runFrozenMatrix } from "../api/fixture-jobs.js";
+import { createProviderConformanceExamples } from "./provider-conformance-examples.js";
 import { canonicalHash } from "../core/canonical.js";
 import { PROVIDER_CATALOG } from "./catalog.js";
 import {
@@ -35,15 +35,14 @@ export type ProviderConformanceBundle = z.infer<typeof ProviderConformanceBundle
 const SERVICE_ORDER = ServiceIdSchema.options;
 
 export async function buildProviderConformanceBundle(): Promise<ProviderConformanceBundle> {
-  const matrix = await runFrozenMatrix();
-  const packets = Object.fromEntries(matrix.map((response) => {
-    const service = response.result.request.service;
+  const packets = Object.fromEntries(createProviderConformanceExamples().map((example) => {
+    const service = example.request.service;
     const provider = PROVIDER_CATALOG.find((candidate) => candidate.service === service);
     if (!provider) throw new Error(`Provider catalog is missing ${service}`);
     return [service, buildProviderContractTemplate(
       provider,
-      response.result.request,
-      response.result.deliverable,
+      example.request,
+      example.deliverable,
     )];
   }));
   const results = Object.fromEntries(SERVICE_ORDER.map((service) => {

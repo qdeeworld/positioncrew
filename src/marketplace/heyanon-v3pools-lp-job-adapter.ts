@@ -13,8 +13,9 @@ import {
   parseFixed,
   ratioFromBps,
 } from "../core/fixed.js";
-import { clampNonNegative } from "../providers/provider-utils.js";
-import { createLpRebalanceDeliverable } from "../providers/lp-rebalance.js";
+import { clampNonNegative, validateEvidence } from "../providers/provider-utils.js";
+import { lpInventoryExposure } from "../core/lp-range.js";
+import { evaluateFinancialInvariants } from "../evaluators/financial-invariants.js";
 import { canonicalHash } from "../core/canonical.js";
 import {
   HEYANON_V3_POOLS,
@@ -57,7 +58,7 @@ const McpResponseSchema = z.object({
 }).passthrough();
 
 interface ExternalRange {
-  shortcut: "wide";
+  shortcut: "risky" | "wide" | "safe";
   providerPool: string;
   lowerPoolPrice: string;
   upperPoolPrice: string;
@@ -87,6 +88,7 @@ export interface HeyAnonV3LpJobAssessment {
     latencyMilliseconds: number;
     rawResponseHash: string;
     normalizedResponseHash: string;
+    materialTermsHash: string;
   };
   claimBoundary: string[];
 }
@@ -176,19 +178,57 @@ function relativeDifferenceBps(left: number, right: number): number {
   return Math.abs(left - right) / right * 10_000;
 }
 
+export function selectHeyAnonRangeShortcut(request: LpRebalanceRequest): ExternalRange["shortcut"] {
+  // Provider-advertised presets: +/-1%, +/-5%, +/-10%. Pick before calling,
+  // against the buyer's unchanged bounds. Actual returned ticks still undergo
+  // full independent validation; this estimate never makes a result eligible.
+  const spacing = request.constraints.tickSpacing;
+  for (const [shortcut, deviation] of [["safe", 0.10], ["wide", 0.05], ["risky", 0.01]] as const) {
+    const rawWidth = Math.log((1 + deviation) / (1 - deviation)) / Math.log1p(0.0001);
+    if (rawWidth >= request.constraints.minimumWidthTicks &&
+        Math.ceil(rawWidth / spacing) * spacing + 2 * spacing <= request.constraints.maximumWidthTicks) {
+      return shortcut;
+    }
+  }
+  // Retain an attributable refusal when none of the advertised presets fits;
+  // do not synthesize a recommendation or modify the buyer's limits.
+  return "wide";
+}
+
 function normalizeExternalRange(
   request: LpRebalanceRequest,
   lowerTick: number,
   upperTick: number,
   now: Date,
 ): LpRebalanceDeliverable {
-  const firstParty = createLpRebalanceDeliverable(request, now);
-  if (firstParty.status.startsWith("REFUSED_")) {
-    return LpRebalanceDeliverableSchema.parse({
-      ...firstParty,
-      summary: "The external range was not evaluated because the frozen request failed PositionCrew's evidence gate.",
-      limitations: [...firstParty.limitations, "HeyAnon supplied a range only; PositionCrew supplied the evidence and policy evaluation."],
-    });
+  // Evidence checks must not depend on whether our own strategy would propose
+  // or refuse a different range. A different safe external strategy may pass.
+  const evidence = validateEvidence({ sources: request.sources, observations: [request.marketState],
+    requestedAt: request.requestedAt, deadline: request.deadline,
+    maxDataAgeSeconds: request.maxDataAgeSeconds, now });
+  const firstParty = LpRebalanceDeliverableSchema.parse({
+    schemaVersion: "positioncrew.lp-rebalance.deliverable.v1", service: "LP_REBALANCE",
+    requestId: request.requestId, generatedAt: now.toISOString(), expiresAt: evidence.expiresAt,
+    status: evidence.status === "OK" ? "NO_ACTION" : evidence.status, decision: "NONE",
+    proposedRange: null, estimatedRebalanceCostUsd: "0", expectedGrossFeesUsd: "0",
+    expectedNetBenefitUsd: "0", breakEvenHours: null,
+    inventoryExposure: { token0Bps: request.position.token0ShareBps, token1Bps: request.position.token1ShareBps },
+    summary: "The external range requires current evidence and independent buyer-limit checks.",
+    actionSteps: [], invalidationConditions: ["Refresh the pool and position snapshot before retrying."],
+    limitations: evidence.reasons.length ? evidence.reasons : ["This assessment is unsigned and does not execute a rebalance."],
+  });
+  if (evidence.status !== "OK") return firstParty;
+  const proposedInventory = lpInventoryExposure(request, { lowerTick, upperTick });
+  const width = upperTick - lowerTick;
+  const spacing = request.constraints.tickSpacing;
+  if (width < request.constraints.minimumWidthTicks || width > request.constraints.maximumWidthTicks ||
+      lowerTick % spacing !== 0 || upperTick % spacing !== 0 ||
+      request.marketState.currentTick < lowerTick || request.marketState.currentTick >= upperTick ||
+      !proposedInventory || proposedInventory.maximumToken0Bps > request.constraints.maximumToken0ShareBps ||
+      proposedInventory.maximumToken1Bps > request.constraints.maximumToken1ShareBps) {
+    return LpRebalanceDeliverableSchema.parse({ ...firstParty, status: "REFUSED_CONSTRAINTS",
+      summary: "The external range does not satisfy the buyer's range or V3 inventory limits.",
+      limitations: ["Final aligned range and USD inventory shares, including tick-price uncertainty, must satisfy the same limits for every provider."] });
   }
 
   const currentWidth = request.position.upperTick - request.position.lowerTick;
@@ -231,9 +271,7 @@ function normalizeExternalRange(
   const economicsPass = incrementalFees > 0n &&
     netBenefit >= parseFixed(request.constraints.minimumNetBenefitUsd) &&
     parseFixed(request.constraints.estimatedGasUsd) <= parseFixed(request.maxGasUsd) &&
-    totalCostUsd <= parseFixed(request.maxActionUsd) &&
-    request.constraints.maximumToken0ShareBps >= 5_000 &&
-    request.constraints.maximumToken1ShareBps >= 5_000;
+    totalCostUsd <= parseFixed(request.maxActionUsd);
   const attribution = "HeyAnon supplied the range; PositionCrew supplied block-pinned economics and evaluated the buyer's limits.";
 
   if (!economicsPass) {
@@ -256,8 +294,6 @@ function normalizeExternalRange(
     });
   }
 
-  const hourlyIncrementalFees = incrementalFees /
-    BigInt(request.constraints.evaluationHorizonHours);
   const decision = proposedWidth > currentWidth
     ? "WIDEN" as const
     : proposedWidth < currentWidth
@@ -272,12 +308,12 @@ function normalizeExternalRange(
     status: "ACTIONABLE",
     decision,
     proposedRange: { lowerTick, upperTick },
-    estimatedRebalanceCostUsd: formatFixed(totalCostUsd, 6),
-    expectedGrossFeesUsd: formatFixed(proposedGrossFees, 6),
-    expectedNetBenefitUsd: formatFixed(netBenefit, 6),
-    breakEvenHours: formatFixed(divideFixed(totalCostUsd, hourlyIncrementalFees), 4),
-    inventoryExposure: { token0Bps: 5_000, token1Bps: 5_000 },
-    summary: `The external range clears PositionCrew's pinned economics and buyer constraints.`,
+    estimatedRebalanceCostUsd: formatFixed(totalCostUsd, 18),
+    expectedGrossFeesUsd: formatFixed(proposedGrossFees, 18),
+    expectedNetBenefitUsd: formatFixed(netBenefit, 18),
+    breakEvenHours: formatFixed(divideFixed(totalCostUsd * BigInt(request.constraints.evaluationHorizonHours), incrementalFees), 18),
+    inventoryExposure: { token0Bps: proposedInventory.token0Bps, token1Bps: proposedInventory.token1Bps },
+    summary: `The external range clears the screening model: ${formatFixed(netBenefit, 2)} USD net benefit assuming ${currentUptimeBps / 100}% current and 95% proposed fee uptime, not a fee forecast.`,
     actionSteps: [
       "Collect fees and remove the current liquidity position.",
       `Rebalance inventory within ${request.maxSlippageBps} bps slippage.`,
@@ -288,7 +324,8 @@ function normalizeExternalRange(
       `Gas exceeds ${request.maxGasUsd} USD or swap cost exceeds ${request.constraints.estimatedSwapCostUsd} USD.`,
       `Current time passes ${firstParty.expiresAt}.`,
     ],
-    limitations: [attribution, "The normalized result remains unsigned and requires revalidation before execution."],
+    limitations: [attribution, "Fee uptime and range density are model assumptions. Actual fees may not cover costs.",
+      "Inventory uses supplied USD prices, decimals and both tick-interval endpoints with a rounding margin. Revalidate exact sqrt price and transaction amounts before execution."],
   });
 }
 
@@ -327,11 +364,12 @@ export async function auditionHeyAnonV3LpJob(
     token1: request.token1.address,
     fee: feeTier,
   };
+  const shortcut = selectHeyAnonRangeShortcut(request);
   const [priceEnvelope, rangeEnvelope] = await Promise.all([
     callTool("getCurrentPoolPrice", args, fetchImpl).then((value) =>
       PoolPriceEnvelopeSchema.parse(value)
     ),
-    callTool("getPredefinedPriceRanges", { ...args, shortcut: "wide" }, fetchImpl).then(
+    callTool("getPredefinedPriceRanges", { ...args, shortcut }, fetchImpl).then(
       (value) => RangeEnvelopeSchema.parse(value),
     ),
   ]);
@@ -392,7 +430,7 @@ export async function auditionHeyAnonV3LpJob(
     {
       code: "ATTRIBUTABLE_RANGE_RECOMMENDATION",
       status: "PASS" as const,
-      detail: "The listed provider returned its precommitted wide range for the exact pool and fee tier.",
+      detail: `The listed provider returned the ${shortcut} preset chosen from the buyer's unchanged width bounds for the exact pool and fee tier.`,
     },
     {
       code: "RANGE_CONTAINS_CURRENT_TICK",
@@ -426,6 +464,9 @@ export async function auditionHeyAnonV3LpJob(
     options.now ?? new Date(),
   );
   const evidenceAccepted = !normalizedDeliverable.status.startsWith("REFUSED_");
+  checks.push(...evaluateFinancialInvariants(request, normalizedDeliverable).map((check) => ({
+    code: check.id, status: check.passed ? "PASS" as const : "FAIL" as const, detail: check.detail,
+  })));
   checks.push({
     code: "NORMALIZED_EVIDENCE_GATE",
     status: evidenceAccepted ? "PASS" : "FAIL",
@@ -442,7 +483,7 @@ export async function auditionHeyAnonV3LpJob(
     requestId: request.requestId,
     positionId,
     recommendation: {
-      shortcut: "wide",
+      shortcut,
       providerPool: rangeEnvelope.data.pool,
       lowerPoolPrice: rangeEnvelope.data.lowerPrice,
       upperPoolPrice: rangeEnvelope.data.upperPrice,
@@ -468,6 +509,22 @@ export async function auditionHeyAnonV3LpJob(
         range: rangeEnvelope,
       }),
       normalizedResponseHash: canonicalHash(normalizedDeliverable),
+      materialTermsHash: canonicalHash({
+        provider: HEYANON_V3_POOLS,
+        requestHash: canonicalHash(request),
+        recommendation: { providerPool: rangeEnvelope.data.pool, lowerTick, upperTick, shortcut },
+        status: normalizedDeliverable.status, decision: normalizedDeliverable.decision,
+        proposedRange: normalizedDeliverable.proposedRange,
+        inventoryExposure: normalizedDeliverable.inventoryExposure,
+        estimatedRebalanceCostUsd: normalizedDeliverable.estimatedRebalanceCostUsd,
+        expectedGrossFeesUsd: normalizedDeliverable.expectedGrossFeesUsd,
+        expectedNetBenefitUsd: normalizedDeliverable.expectedNetBenefitUsd,
+        breakEvenHours: normalizedDeliverable.breakEvenHours,
+        actionSteps: normalizedDeliverable.actionSteps,
+        expiresAt: normalizedDeliverable.expiresAt,
+        invalidationConditions: normalizedDeliverable.invalidationConditions,
+        commerce: { directCostUsd: "0.00", payment: "NONE" },
+      }),
     },
     claimBoundary: [
       "The external agent produced the attributable range recommendation; PositionCrew supplied the pinned position and market economics.",

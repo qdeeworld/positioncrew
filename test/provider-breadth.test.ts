@@ -18,17 +18,14 @@ function fixture(relativePath: string): unknown {
 }
 
 describe("main-track provider breadth", () => {
-  it("shifts an out-of-range V3 position only when fees clear costs", () => {
+  it("refuses the legacy synthetic LP fixture whose tick-price exposure exceeds policy", () => {
     const request = LpRebalanceRequestSchema.parse(
       fixture("lp-rebalance/out-of-range-v3-position.v1.json"),
     );
     const result = createLpRebalanceDeliverable(request, FIXTURE_NOW);
 
-    expect(result.status).toBe("ACTIONABLE");
-    expect(result.decision).toBe("SHIFT");
-    expect(result.proposedRange).toEqual({ lowerTick: 0, upperTick: 240 });
-    expect(Number(result.expectedNetBenefitUsd)).toBeGreaterThan(5);
-    expect(Number(result.breakEvenHours)).toBeGreaterThan(0);
+    expect(result.status).toBe("REFUSED_CONSTRAINTS");
+    expect(result.proposedRange).toBeNull();
   });
 
   it("holds an LP when execution cost erases the benefit", () => {
@@ -36,6 +33,7 @@ describe("main-track provider breadth", () => {
       fixture("lp-rebalance/out-of-range-v3-position.v1.json"),
     );
     request.constraints.estimatedSwapCostUsd = "50";
+    request.marketState.token1PriceUsd = "1";
     const result = createLpRebalanceDeliverable(request, FIXTURE_NOW);
 
     expect(result.status).toBe("NO_ACTION");
@@ -47,6 +45,7 @@ describe("main-track provider breadth", () => {
       fixture("lp-rebalance/out-of-range-v3-position.v1.json"),
     );
     request.marketState.currentTick = request.position.upperTick;
+    request.marketState.token1PriceUsd = "1";
     const result = createLpRebalanceDeliverable(request, FIXTURE_NOW);
 
     expect(result.status).toBe("ACTIONABLE");
@@ -78,20 +77,15 @@ describe("main-track provider breadth", () => {
     expect(result.decision).toBe("HOLD");
   });
 
-  it("builds a bounded two-sided grid after all costs", () => {
+  it("refuses the historical grid when truthful risk sizing cannot fund its requested profit", () => {
     const request = BoundedGridRequestSchema.parse(
       fixture("bounded-grid/bnb-usdt-grid.v1.json"),
     );
     const result = createBoundedGridDeliverable(request, FIXTURE_NOW);
 
-    expect(result.status).toBe("ACTIONABLE");
-    expect(result.decision).toBe("BUILD_GRID");
-    expect(result.orders).toHaveLength(4);
-    expect(new Set(result.orders.map((order) => order.side))).toEqual(
-      new Set(["BUY", "SELL"]),
-    );
-    expect(Number(result.expectedNetProfitUsd)).toBeGreaterThan(100);
-    expect(Number(result.worstCaseLossUsd)).toBeLessThanOrEqual(150);
+    expect(result.status).toBe("NO_ACTION");
+    expect(result.decision).toBe("NO_GRID");
+    expect(result.orders).toEqual([]);
   });
 
   it("rejects a grid when volatility exceeds policy", () => {
@@ -106,7 +100,7 @@ describe("main-track provider breadth", () => {
     expect(result.orders).toEqual([]);
   });
 
-  it("fails a schema-valid deliverable that no longer matches the frozen request", () => {
+  it("accepts a financially valid explanation change without equating wording with correctness", () => {
     const request = LpRebalanceRequestSchema.parse(
       fixture("lp-rebalance/out-of-range-v3-position.v1.json"),
     );
@@ -119,10 +113,8 @@ describe("main-track provider breadth", () => {
       FIXTURE_NOW,
     );
 
-    expect(evaluation.passed).toBe(false);
-    expect(evaluation.score).toBe(40);
-    expect(
-      evaluation.checks.find((check) => check.id === "deterministic-output")?.passed,
-    ).toBe(false);
+    expect(evaluation.passed).toBe(true);
+    expect(evaluation.score).toBe(100);
+    expect(evaluation.checks.some((check) => check.id === "deterministic-output")).toBe(false);
   });
 });

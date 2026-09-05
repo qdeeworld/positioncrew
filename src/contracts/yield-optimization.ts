@@ -33,7 +33,9 @@ export const YieldOptimizationRequestSchema = z
     schemaVersion: z.literal("positioncrew.yield-optimization.request.v1"),
     service: z.literal("YIELD_OPTIMIZATION"),
     ...BaseRequestFields,
-    capitalUsd: PositiveDecimalSchema,
+    capitalUsd: PositiveDecimalSchema.describe(
+      "Total managed principal, including current positions and idle funds; migration costs are funded from this amount.",
+    ),
     currentPositions: z.array(YieldPositionSchema),
     opportunities: z.array(YieldPositionSchema).min(1),
     constraints: z
@@ -68,6 +70,19 @@ export const YieldOptimizationDeliverableSchema = z
     netBenefitUsd: UnsignedDecimalSchema,
     migrationCostUsd: UnsignedDecimalSchema,
     breakEvenDays: UnsignedDecimalSchema.nullable(),
+    // Optional for historical v1 records. New actionable results include the
+    // complete funding plan so an independent evaluator can reconstruct it.
+    withdrawals: z.array(z.object({
+      opportunityId: z.string().min(1).max(160),
+      amountUsd: PositiveDecimalSchema,
+    }).strict()).optional(),
+    idleCapitalUsedUsd: UnsignedDecimalSchema.optional(),
+    finalProtocolAllocations: z.array(z.object({
+      protocol: z.string().min(1).max(80),
+      amountUsd: UnsignedDecimalSchema,
+    }).strict()).optional(),
+    remainingIdleCapitalUsd: UnsignedDecimalSchema.optional(),
+    postMigrationCapitalUsd: UnsignedDecimalSchema.optional(),
     summary: z.string().min(1).max(400),
     actionSteps: z.array(z.string().min(1).max(240)),
     risks: z.array(z.string().min(1).max(240)).min(1),

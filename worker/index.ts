@@ -23,6 +23,8 @@ import {
   type AacpProductionReadiness,
 } from "../src/commerce/aacp-production.js";
 import { buildErc8183TestnetDeliverable } from "../src/commerce/erc8183-evidence.js";
+import { getHistoricalFixtureReceipt } from "../src/api/historical-provider-receipts.js";
+import { createProviderConformanceExamples } from "../src/marketplace/provider-conformance-examples.js";
 import {
   FreshMarketplaceStore,
   isFreshMarketplaceCapacityExceeded,
@@ -343,15 +345,14 @@ async function boundedJson(request: Request): Promise<unknown> {
 
 async function providerContractPreflight(request: Request): Promise<Response> {
   if (request.method === "GET") {
-    const matrix = await runFrozenMatrix();
-    const templates = Object.fromEntries(matrix.map((response) => {
-      const service = response.result.request.service;
+    const templates = Object.fromEntries(createProviderConformanceExamples().map((example) => {
+      const service = example.request.service;
       const provider = PROVIDER_CATALOG.find((candidate) => candidate.service === service);
       if (!provider) throw new Error(`Provider catalog is missing ${service}`);
       return [service, buildProviderContractTemplate(
         provider,
-        response.result.request,
-        response.result.deliverable,
+        example.request,
+        example.deliverable,
       )];
     }));
     return json({
@@ -1892,12 +1893,12 @@ async function providerHealth(service: ServiceId): Promise<Response> {
 }
 
 async function publicReceipt(hash: string): Promise<Response> {
-  const matrix = await runFrozenMatrix();
-  const response = matrix.find(
+  const archived = getHistoricalFixtureReceipt(hash);
+  const response = archived ?? (await runFrozenMatrix()).find(
     (candidate) => candidate.result.evaluation.evaluationHash.toLowerCase() === hash.toLowerCase(),
   );
   if (!response) return apiError(404, "RECEIPT_NOT_FOUND", ["No public fixture receipt matches this hash."]);
-  return json(
+  const receipt = json(
     {
       schemaVersion: "positioncrew.public-receipt.v1",
       publishedAt: response.generatedAt,
@@ -1911,6 +1912,8 @@ async function publicReceipt(hash: string): Promise<Response> {
     200,
     "public, max-age=3600, s-maxage=86400, immutable",
   );
+  if (archived) receipt.headers.set("X-PositionCrew-Receipt-Provenance", "historical-v1-archive");
+  return receipt;
 }
 
 async function loadProductionTrackRecord(): Promise<ProductionTrackRecord> {

@@ -8,13 +8,13 @@ import {
 import type { z } from "zod";
 import {
   FIXED_SCALE,
+  ceilDivide,
   divideFixed,
   formatFixed,
-  multiplyFixed,
   parseFixed,
-  ratioFromBps,
 } from "../core/fixed.js";
 import { clampNonNegative, validateEvidence } from "./provider-utils.js";
+import { calculateBoundedGridRisk } from "./bounded-grid-risk.js";
 
 type GridOrder = z.infer<typeof GridOrderSchema>;
 
@@ -40,6 +40,7 @@ function emptyResult(
     estimatedSlippageUsd: "0",
     estimatedGasUsd: "0",
     expectedNetProfitUsd: "0",
+    riskModel: "FINITE_GRID_ZERO_PRICE_STRESS_V1",
     worstCaseLossUsd: "0",
     maximumInventoryUsd: "0",
     summary,
@@ -96,7 +97,7 @@ export function createBoundedGridDeliverable(
 
   const step = (upper - lower) / BigInt(request.constraints.levelCount - 1);
   const levels = Array.from({ length: request.constraints.levelCount }, (_, index) =>
-    lower + step * BigInt(index),
+    lower + ((upper - lower) * BigInt(index)) / BigInt(request.constraints.levelCount - 1),
   );
   const buyLevels = levels.filter((price) => price < mid);
   const sellLevels = levels.filter((price) => price > mid);
@@ -111,43 +112,67 @@ export function createBoundedGridDeliverable(
     );
   }
 
-  const buyCapital = capital / 2n;
-  const sellCapital = capital - buyCapital;
-  const buyQuotePerOrder = buyCapital / BigInt(buyLevels.length);
-  const sellQuotePerOrder = sellCapital / BigInt(sellLevels.length);
-  const orders: GridOrder[] = [
-    ...buyLevels.map((price) => ({
-      side: "BUY" as const,
-      price: formatFixed(price, 8),
-      baseAmount: formatFixed(divideFixed(buyQuotePerOrder, price), 12),
-      maximumQuoteAmount: formatFixed(buyQuotePerOrder, 6),
-    })),
-    ...sellLevels.map((price) => ({
-      side: "SELL" as const,
-      price: formatFixed(price, 8),
-      baseAmount: formatFixed(divideFixed(sellQuotePerOrder, price), 12),
-      maximumQuoteAmount: formatFixed(sellQuotePerOrder, 6),
-    })),
-  ];
-  const spacingRatio = divideFixed(step, mid);
-  const turnover = capital * BigInt(request.constraints.expectedCompletedCycles);
-  const grossSpreadCapture = multiplyFixed(turnover / 2n, spacingRatio);
-  const twoLegTurnover = turnover * 2n;
-  const fees = multiplyFixed(
-    twoLegTurnover,
-    ratioFromBps(request.marketState.venueFeeBps),
-  );
-  const slippage = multiplyFixed(twoLegTurnover, ratioFromBps(request.maxSlippageBps));
   const gas = parseFixed(request.constraints.estimatedGasUsd);
-  const netProfit = clampNonNegative(grossSpreadCapture - fees - slippage - gas);
-  const downsideRatio = divideFixed(mid - lower, mid);
-  const worstCaseLoss = multiplyFixed(buyCapital, downsideRatio) + fees + slippage + gas;
-  const maximumInventory = buyCapital > sellCapital ? buyCapital : sellCapital;
+  const inventoryLimit = parseFixed(request.constraints.maximumInventoryUsd);
+  const lossLimit = parseFixed(request.constraints.maximumLossUsd);
+  const baseDecimals = Math.min(18, request.baseAsset.decimals);
+  const quoteUnit = FIXED_SCALE / 10n ** BigInt(Math.min(18, request.quoteAsset.decimals));
+  function planForBudget(budget: bigint) {
+    const buyCapital = budget / 2n;
+    const sellCapital = budget - buyCapital;
+    const buyQuote = (buyCapital / BigInt(buyLevels.length) / quoteUnit) * quoteUnit;
+    const sellQuote = (sellCapital / BigInt(sellLevels.length) / quoteUnit) * quoteUnit;
+    const orders: GridOrder[] = [
+      ...buyLevels.map((price) => ({
+        side: "BUY" as const,
+        price: formatFixed(price, 18),
+        baseAmount: formatFixed(divideFixed(buyQuote, price), baseDecimals),
+        maximumQuoteAmount: formatFixed(buyQuote, 18),
+      })),
+      ...sellLevels.map((price) => ({
+        side: "SELL" as const,
+        price: formatFixed(price, 18),
+        baseAmount: formatFixed(divideFixed(sellQuote, price), baseDecimals),
+        maximumQuoteAmount: formatFixed(sellQuote, 18),
+      })),
+    ];
+    const risk = calculateBoundedGridRisk(orders, mid, upper);
+    const turnover = risk.deployedNotional * BigInt(request.constraints.expectedCompletedCycles);
+    const grossSpreadCapture = (turnover * step) / (2n * mid);
+    const fees = ceilDivide(turnover * 2n * BigInt(request.marketState.venueFeeBps), 10_000n);
+    const slippage = ceilDivide(turnover * 2n * BigInt(request.maxSlippageBps), 10_000n);
+    const netProfit = clampNonNegative(grossSpreadCapture - fees - slippage - gas);
+    return {
+      orders,
+      ...risk,
+      grossSpreadCapture,
+      fees,
+      slippage,
+      netProfit,
+      worstCaseLoss: risk.principalAtRisk + fees + slippage + gas,
+    };
+  }
+  const respectsRiskLimits = (plan: ReturnType<typeof planForBudget>) =>
+    plan.maximumInventory <= inventoryLimit && plan.worstCaseLoss <= lossLimit;
+
+  // Risk is monotone in funded order size. Keep unused capital outside this grid.
+  let budgetLower = 0n;
+  let budgetUpper = capital;
+  let plan = planForBudget(capital);
+  if (!respectsRiskLimits(plan)) {
+    while (budgetLower < budgetUpper) {
+      const budget = (budgetLower + budgetUpper + 1n) / 2n;
+      if (respectsRiskLimits(planForBudget(budget))) budgetLower = budget;
+      else budgetUpper = budget - 1n;
+    }
+    plan = planForBudget(budgetLower);
+  }
+  const { orders, grossSpreadCapture, fees, slippage, netProfit, worstCaseLoss, maximumInventory } = plan;
   const economicsPass =
+    orders.every((order) => parseFixed(order.baseAmount) > 0n && parseFixed(order.maximumQuoteAmount) > 0n) &&
     grossSpreadCapture > fees + slippage + gas &&
     netProfit >= parseFixed(request.constraints.minimumExpectedNetProfitUsd) &&
-    worstCaseLoss <= parseFixed(request.constraints.maximumLossUsd) &&
-    maximumInventory <= parseFixed(request.constraints.maximumInventoryUsd) &&
+    respectsRiskLimits(plan) &&
     gas <= parseFixed(request.maxGasUsd);
 
   if (!economicsPass) {
@@ -156,9 +181,10 @@ export function createBoundedGridDeliverable(
       now,
       evidence.expiresAt,
       "NO_ACTION",
-      "The grid was rejected because net profit, inventory, or worst-case loss fails policy.",
+      "No grid size meets the profit target, reachable inventory cap, zero-price stress loss budget, and order precision limits.",
       [
-        `Projected gross ${formatFixed(grossSpreadCapture, 4)} USD, net ${formatFixed(netProfit, 4)} USD, worst-case loss ${formatFixed(worstCaseLoss, 4)} USD.`,
+        `After risk sizing: projected net ${formatFixed(netProfit, 6)} USD; zero-price stress loss ${formatFixed(worstCaseLoss, 6)} USD; in-range inventory bound ${formatFixed(maximumInventory, 6)} USD.`,
+        "The loss model includes all funded base inventory falling to zero plus estimated costs; it is not an execution-enforced loss guarantee.",
       ],
     );
   }
@@ -178,23 +204,29 @@ export function createBoundedGridDeliverable(
     status: "ACTIONABLE",
     decision: "BUILD_GRID",
     orders,
-    grossSpreadCaptureUsd: formatFixed(grossSpreadCapture, 6),
-    estimatedFeesUsd: formatFixed(fees, 6),
-    estimatedSlippageUsd: formatFixed(slippage, 6),
-    estimatedGasUsd: formatFixed(gas, 6),
-    expectedNetProfitUsd: formatFixed(netProfit, 6),
-    worstCaseLossUsd: formatFixed(worstCaseLoss, 6),
-    maximumInventoryUsd: formatFixed(maximumInventory, 6),
-    summary: `Build ${orders.length} bounded orders from ${request.constraints.lowerPrice} to ${request.constraints.upperPrice}; projected net profit is ${formatFixed(netProfit, 2)} USD.`,
+    grossSpreadCaptureUsd: formatFixed(grossSpreadCapture, 18),
+    estimatedFeesUsd: formatFixed(fees, 18),
+    estimatedSlippageUsd: formatFixed(slippage, 18),
+    estimatedGasUsd: formatFixed(gas, 18),
+    expectedNetProfitUsd: formatFixed(netProfit, 18),
+    riskModel: "FINITE_GRID_ZERO_PRICE_STRESS_V1",
+    worstCaseLossUsd: formatFixed(worstCaseLoss, 18),
+    maximumInventoryUsd: formatFixed(maximumInventory, 18),
+    summary: `Propose ${orders.length} unsigned orders using ${formatFixed(plan.deployedNotional, 2)} USD of the capital budget; projected net ${formatFixed(netProfit, 2)} USD and zero-price stress loss ${formatFixed(worstCaseLoss, 2)} USD.`,
     cancellationConditions: [
       `Cancel at ${orderExpiry}.`,
       `Cancel if volatility exceeds ${request.constraints.maximumVolatilityBps} bps.`,
       `Cancel if available liquidity falls below ${request.constraints.minimumLiquidityUsd} USD.`,
+      `Cancel if price leaves ${request.constraints.lowerPrice} to ${request.constraints.upperPrice}; cancellation is not guaranteed.`,
       `Cancel if inventory reaches ${request.constraints.maximumInventoryUsd} USD.`,
     ],
     limitations: [
       `The profit model assumes ${request.constraints.expectedCompletedCycles} completed cycles; fills are not guaranteed.`,
-      "No averaging or replacement orders may exceed the frozen capital, loss, or inventory limits.",
+      "Inventory includes initial SELL base plus every BUY fill, valued at upperPrice, with no SELL fills assumed. Marks above upperPrice can exceed this USD bound.",
+      "worstCaseLossUsd is a zero-price stress scenario: initial SELL base valued at midPrice, every BUY reservation, and estimated fees, slippage, and gas.",
+      "No hard loss guarantee: gaps, cancellation failures, and costs above estimates are not execution-enforced. A lowerPrice cancellation is not a stop-loss guarantee.",
+      "Assumes quote remains worth 1 USD, pre-funded SELL base, no leverage, and each order fills at most once. Replacement orders require a fresh inventory and risk check.",
+      "Unused requested capital remains outside the proposed orders. Cycle profit is hypothetical; additional fills require new authorization and risk checks.",
     ],
   });
 }
