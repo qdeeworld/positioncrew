@@ -29,7 +29,10 @@ type Source = z.infer<typeof SourceSchema>;
 
 export class SourceObservationBindingError extends Error {
   readonly code = "REFRESH_REQUIRED";
-  constructor(message = "Reload the market or position to obtain a current server-bound observation before creating or running this hire.") {
+  constructor(
+    message = "Reload the market or position to obtain a current server-bound observation before creating or running this hire.",
+    readonly reason: "INVALID" | "EXPIRED" = "INVALID",
+  ) {
     super(message);
     this.name = "SourceObservationBindingError";
   }
@@ -72,7 +75,7 @@ function parseRequest(input: unknown): PositionCrewRequest {
   return parsed.data;
 }
 
-function checkSource(request: PositionCrewRequest, input: Source, now: Date): Source {
+function checkSource(request: PositionCrewRequest, input: Source, now: Date, allowExpired = false): Source {
   const parsed = SourceSchema.safeParse(input);
   if (!parsed.success) throw new SourceObservationBindingError();
   const source = parsed.data;
@@ -85,7 +88,7 @@ function checkSource(request: PositionCrewRequest, input: Source, now: Date): So
       observed > clock || Date.parse(request.requestedAt) > clock) {
     throw new SourceObservationBindingError();
   }
-  if (clock >= Math.min(Date.parse(request.deadline), observed + request.maxDataAgeSeconds * 1_000)) {
+  if (!allowExpired && clock >= Math.min(Date.parse(request.deadline), observed + request.maxDataAgeSeconds * 1_000)) {
     throw new SourceObservationBindingError("This server observation has expired. Reload the market or position before continuing.");
   }
   return source;
@@ -139,8 +142,8 @@ export async function verifyServerObservationBinding(
     blockNumber: observation.blockNumber,
     observedAt: observation.observedAt,
     explorerUrl: observation.explorerUrl,
-  }, now);
-  if (now.getTime() < Date.parse(binding.issuedAt) || now.getTime() >= Date.parse(binding.expiresAt) ||
+  }, now, true);
+  if (now.getTime() < Date.parse(binding.issuedAt) ||
       request.requestId !== binding.snapshotId || request.service !== binding.service ||
       request.chainId !== binding.chainId || request.account !== binding.account ||
       canonicalJson(source) !== canonicalJson(binding.observation) ||
@@ -149,6 +152,15 @@ export async function verifyServerObservationBinding(
       request.maxDataAgeSeconds > binding.maxDataAgeSeconds ||
       (request.service === "LP_REBALANCE" && request.maxSlippageBps > binding.maximumSlippageBps)) {
     throw new SourceObservationBindingError("The request changed authenticated observations or exceeded their validity limits. Reload the market or position.");
+  }
+  // Only a fully authenticated, matching observation can authorize expired-lease
+  // cleanup. Invalid signatures, changed inputs, and missing keys stay INVALID.
+  if (now.getTime() >= Math.min(Date.parse(binding.expiresAt), Date.parse(request.deadline),
+      Date.parse(source.observedAt) + request.maxDataAgeSeconds * 1_000)) {
+    throw new SourceObservationBindingError(
+      "This server observation has expired. Reload the market or position before continuing.",
+      "EXPIRED",
+    );
   }
   return binding;
 }

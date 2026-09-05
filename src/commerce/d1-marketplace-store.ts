@@ -682,6 +682,41 @@ export class FreshMarketplaceStore {
     return this.getHire(hireId);
   }
 
+  async failExpiredRunningJob(
+    hireId: string,
+    jobId: string,
+    claimToken: string,
+    completedAt: string,
+    apiDurationMilliseconds: number,
+    code: string,
+    message: string,
+  ): Promise<FreshMarketplaceChain | null> {
+    const completedAtMilliseconds = Date.parse(completedAt);
+    if (!Number.isFinite(completedAtMilliseconds)) {
+      throw new Error("D1 expired-job finalization requires a valid ISO timestamp");
+    }
+    const staleBefore = new Date(
+      completedAtMilliseconds - FRESH_MARKETPLACE_JOB_LEASE_MILLISECONDS,
+    ).toISOString();
+    // One compare-and-set fences newer workers and preserves completed receipts.
+    const result = await this.db.prepare([
+      "UPDATE fresh_marketplace_jobs SET state = 'FAILED', completed_at = ?,",
+      "api_duration_milliseconds = ?, error_code = ?, error_message = ?",
+      "WHERE job_id = ? AND hire_id = ? AND state = 'RUNNING'",
+      "AND started_at = ? AND started_at <= ? AND completed_at IS NULL",
+      "AND NOT EXISTS (",
+      "SELECT 1 FROM fresh_marketplace_receipts r",
+      "WHERE r.job_id = fresh_marketplace_jobs.job_id",
+      "OR r.hire_id = fresh_marketplace_jobs.hire_id",
+      ")",
+    ].join(" ")).bind(
+      completedAt, apiDurationMilliseconds, code, message,
+      jobId, hireId, claimToken, staleBefore,
+    ).run();
+    if (!result.success) throw new Error(result.error ?? "D1 expired-job finalization failed");
+    return this.getHire(hireId);
+  }
+
   private async getByIdempotencyKey(idempotencyKey: string): Promise<FreshMarketplaceChain | null> {
     const row = await this.db.prepare(JOINED_SELECT + " WHERE h.idempotency_key = ?")
       .bind(idempotencyKey)

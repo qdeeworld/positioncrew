@@ -1744,8 +1744,22 @@ async function runFreshMarketplaceHire(
   const terminal = existing.job.state === "COMPLETED" || existing.job.state === "FAILED";
   const evidence = existing.hire.evidence;
   if (!terminal && existing.hire.evidenceMode === "CURRENT_BLOCK_PINNED") {
-    if (evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED") throw new SourceObservationBindingError();
-    await verifyServerObservationBinding(existing.hire.request, { ...evidence.source, binding: evidence.observationBinding }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date());
+    const verificationTime = new Date();
+    try {
+      if (evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED") throw new SourceObservationBindingError();
+      await verifyServerObservationBinding(existing.hire.request, { ...evidence.source, binding: evidence.observationBinding }, env.SOURCE_OBSERVATION_HMAC_KEY, verificationTime);
+    } catch (error) {
+      if (!(error instanceof SourceObservationBindingError) || error.reason !== "EXPIRED" ||
+          existing.job.state !== "RUNNING" || existing.job.startedAt === null) throw error;
+      const current = await store.failExpiredRunningJob(
+        hireId, existing.job.jobId, existing.job.startedAt, verificationTime.toISOString(),
+        Math.max(1, Math.round(performance.now() - startedAtPerformance)), error.code, error.message,
+      );
+      if (!current) return apiError(404, "HIRE_NOT_FOUND", ["Unknown persisted hire ID."]);
+      // A competing completion or newer/active lease can win the CAS. Return its
+      // actual persisted state, never claim that cleanup necessarily succeeded.
+      return json(current, current.job.state === "RUNNING" ? 202 : 200);
+    }
   }
   const lpLiveMatchAudition = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
     ? evidence.lpLiveMatchAudition
