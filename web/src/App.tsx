@@ -462,9 +462,14 @@ export default function App() {
     try {
       const service = request.service as ServiceId;
       const currentPinnedHire = mode === "CALLER_SUPPLIED_OBSERVATIONS";
-      if (currentPinnedHire && !observation) {
-        throw new Error("Current marketplace hire is missing its block-pinned observation");
+      if (currentPinnedHire && !observation?.binding) {
+        throw new Error("Reload the market or position to obtain a server-bound observation before creating this hire.");
       }
+      const sourceObservation = observation ? {
+        blockNumber: observation.blockNumber,
+        observedAt: observation.observedAt,
+        explorerUrl: observation.explorerUrl,
+      } : undefined;
       const benchmarkSlug = currentPinnedHire
         ? CURRENT_HIRE_SLUG_BY_SERVICE[service]
         : HISTORICAL_HIRE_SLUG_BY_SERVICE[service];
@@ -523,7 +528,8 @@ export default function App() {
                   idempotencyKey: logicalHire.idempotencyKey,
                   evidenceMode: "CURRENT_BLOCK_PINNED",
                   request,
-                  observation,
+                  observation: sourceObservation,
+                  observationBinding: observation?.binding,
                 }
               : currentPinnedHire
               ? {
@@ -533,7 +539,8 @@ export default function App() {
                   providerSlug: selectedProvider!.slug,
                   evidenceMode: "CURRENT_BLOCK_PINNED",
                   request,
-                  observation,
+                  observation: sourceObservation,
+                  observationBinding: observation?.binding,
                 }
               : {
                   schemaVersion: "positioncrew.fresh-marketplace-hire-request.v1",

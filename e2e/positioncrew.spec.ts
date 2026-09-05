@@ -5,6 +5,19 @@ import { readFileSync } from "node:fs";
 import { createLpLiveMatchAudition, executeLpLiveMatchProvider, selectLpLiveMatchProvider } from "../src/marketplace/lp-live-match.js";
 import type { LpLiveMatchAudition, LpLiveMatchProviderSelection } from "../src/marketplace/lp-live-match-schema.js";
 import { LpRebalanceRequestSchema } from "../src/contracts/lp-rebalance.js";
+import { issueServerObservationBinding, verifyServerObservationBinding } from "../src/commerce/server-observation-binding.js";
+
+// Deliberately public and test-only; production has a separate private key.
+const BROWSER_OBSERVATION_TEST_KEY = "positioncrew-browser-test-observation-secret-20260905";
+async function browserObservationBinding(request: Record<string, unknown>, blockNumber: string) {
+  const source = (request.sources as Array<{ observedAt: string }>)[0]!;
+  return issueServerObservationBinding(request, { blockNumber, observedAt: source.observedAt,
+    explorerUrl: `https://bscscan.com/block/${blockNumber}` }, BROWSER_OBSERVATION_TEST_KEY, new Date());
+}
+async function verifyBrowserHireObservation(body: Record<string, unknown>) {
+  const source = body.observation as { blockNumber: string; observedAt: string; explorerUrl: string };
+  await verifyServerObservationBinding(body.request, { ...source, binding: body.observationBinding }, BROWSER_OBSERVATION_TEST_KEY, new Date());
+}
 
 const TRANSIENT_REQUEST_ERROR = /socket hang up|ECONNRESET|ECONNREFUSED|fetch failed/i;
 
@@ -220,6 +233,7 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
           swapCount: 240,
         },
         lpRequest,
+        observationBinding: await browserObservationBinding(lpRequest, blockNumber),
         source: {
           blockNumber,
           blockTimestamp: String(
@@ -254,6 +268,7 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
           volatilitySampleCount: 4,
         },
         gridRequest,
+        observationBinding: await browserObservationBinding(gridRequest, blockNumber),
         source: {
           blockNumber,
           blockTimestamp: String(
@@ -282,6 +297,7 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
           { opportunityId: "venus-usdf", symbol: "USDF", vToken: "0x6666666666666666666666666666666666666666", underlying: "0x7777777777777777777777777777777777777777", baseSupplyApyBps: 250, availableLiquidityUsd: "7000000" },
         ],
         yieldRequest,
+        observationBinding: await browserObservationBinding(yieldRequest, blockNumber),
         source: {
           comptroller: "0xfD36E2c2a6789Db23113685031d7F16329158384",
           oracle: "0x8888888888888888888888888888888888888888",
@@ -474,6 +490,7 @@ async function installCurrentLendingHireRoutes(
     explorerUrl: `https://bscscan.com/block/${blockNumber}`,
   };
   const response = await runCurrentBlockPinnedProviderRequest(rescueRequest, now);
+  const observationBinding = await browserObservationBinding(rescueRequest, blockNumber);
   const responseHash = await sha256Commitment(response);
   const createBodies: Array<Record<string, unknown>> = [];
   let runCount = 0;
@@ -503,6 +520,7 @@ async function installCurrentLendingHireRoutes(
         evidenceClass: "CURRENT_BLOCK_PINNED",
         chainId: 56,
         source: observation,
+        observationBinding,
         freshnessAtCreation: "FRESH",
         evaluatedAt: now.toISOString(),
         maxDataAgeSeconds: rescueRequest.maxDataAgeSeconds,
@@ -604,6 +622,7 @@ async function installCurrentLendingHireRoutes(
           }],
         },
         rescueRequest,
+        observationBinding,
         source: {
           comptroller: "0xfD36E2c2a6789Db23113685031d7F16329158384",
           blockNumber,
@@ -649,6 +668,7 @@ async function installCurrentLendingHireRoutes(
     responseHash,
     rescueRequest,
     observation,
+    observationBinding,
     createBodies,
     get runCount() { return runCount; },
     get receiptLoadCount() { return receiptLoadCount; },
@@ -723,6 +743,7 @@ test("a cold buyer can discover, hire, and inspect the lending provider", async 
   expect(mockedHire.createBodies[0]).toMatchObject({
     schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
     observation: mockedHire.observation,
+    observationBinding: mockedHire.observationBinding,
   });
   expect(mockedHire.createBodies[0]).not.toHaveProperty("providerSlug");
   expect(mockedHire.createBodies[0].request).toEqual(mockedHire.rescueRequest);
@@ -1771,6 +1792,7 @@ async function installCurrentCategoryHireRoutes(
           evidenceClass: "CURRENT_BLOCK_PINNED",
           chainId: 56,
           source: observation,
+          observationBinding: body.observationBinding,
           freshnessAtCreation: "FRESH",
           evaluatedAt: now.toISOString(),
           maxDataAgeSeconds: request.maxDataAgeSeconds,
@@ -1905,6 +1927,7 @@ async function installCurrentCategoryHireRoutes(
       return;
     }
     createBodies.push(body);
+    await verifyBrowserHireObservation(body);
     providerResponse = await runCurrentBlockPinnedProviderRequest(body.request, now);
     providerResponseHash = await sha256Commitment(providerResponse);
     if (definition.liveMatch) {

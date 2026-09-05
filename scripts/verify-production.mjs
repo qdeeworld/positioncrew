@@ -824,6 +824,7 @@ function currentPersistedHireEnvelope(definition, probe) {
   assert(request?.service === definition.service, `${definition.service} probe request mismatch`);
   assert(probe.source?.blockNumber, `${definition.service} probe omitted its pinned block`);
   assert(probe.source?.explorerUrl, `${definition.service} probe omitted its explorer URL`);
+  assert(probe.observationBinding?.schemaVersion === "positioncrew.server-observation-binding.v1", `${definition.service} probe omitted its server observation binding`);
   assert(request.sources?.length === 1, `${definition.service} request does not have one source`);
   const blockNumber = String(probe.source.blockNumber);
   const source = request.sources[0];
@@ -851,6 +852,7 @@ function currentPersistedHireEnvelope(definition, probe) {
       observedAt,
       explorerUrl,
     },
+    observationBinding: probe.observationBinding,
     request,
   };
 }

@@ -256,8 +256,10 @@ function applyDraft(
     const constraints = objectValue(next.constraints);
     if (!lockObservations) market.currentTick = Number(draft.lpCurrentTick);
     constraints.minimumNetBenefitUsd = draft.lpMinimumBenefit;
-    constraints.estimatedGasUsd = draft.lpGas;
-    constraints.estimatedSwapCostUsd = draft.lpSwapCost;
+    if (!lockObservations) {
+      constraints.estimatedGasUsd = draft.lpGas;
+      constraints.estimatedSwapCostUsd = draft.lpSwapCost;
+    }
     constraints.evaluationHorizonHours = Number(draft.lpHorizon);
     next.maxGasUsd = draft.lpMaximumGas;
   } else if (next.service === "YIELD_OPTIMIZATION") {
@@ -265,7 +267,7 @@ function applyDraft(
     const opportunities = Array.isArray(next.opportunities) ? next.opportunities : [];
     const candidate = objectValue(opportunities[0]);
     next.capitalUsd = draft.yieldCapital;
-    for (const opportunity of opportunities) {
+    for (const opportunity of lockObservations ? [] : opportunities) {
       const market = objectValue(opportunity);
       const liquidityUsd = Number(market.liquidityUsd);
       const capitalUsd = Number(draft.yieldCapital);
@@ -1529,6 +1531,7 @@ function WalletRiskProbe({
           blockNumber: next.source.blockNumber,
           observedAt,
           explorerUrl: next.source.explorerUrl,
+          binding: next.observationBinding,
         });
       }
     } catch (probeError) {
@@ -1673,6 +1676,7 @@ function LpPositionProbe({
           blockNumber: next.source.blockNumber,
           observedAt: next.source.blockTimestamp,
           explorerUrl: next.source.explorerUrl,
+          binding: next.observationBinding,
         });
       }
       clearCapitalCheckSeed();
@@ -1764,6 +1768,7 @@ function LpPositionProbe({
             blockNumber: probe.source.blockNumber,
             observedAt: probe.source.blockTimestamp,
             explorerUrl: probe.source.explorerUrl,
+            binding: probe.observationBinding,
           })}>
             Use live position <ArrowRight size={14} aria-hidden="true" />
           </button>
@@ -1805,6 +1810,7 @@ function GridMarketProbe({
         blockNumber: next.source.blockNumber,
         observedAt: next.source.blockTimestamp,
         explorerUrl: next.source.explorerUrl,
+        binding: next.observationBinding,
       });
     } catch (probeError) {
       if (signal?.aborted) return;
@@ -1881,6 +1887,7 @@ function YieldMarketProbe({
         blockNumber: next.source.blockNumber,
         observedAt: next.source.blockTimestamp,
         explorerUrl: next.source.explorerUrl,
+        binding: next.observationBinding,
       });
     } catch (probeError) {
       if (signal?.aborted) return;
@@ -2088,7 +2095,8 @@ export function JobWorkspace({
     liveRequest &&
     liveObservation?.blockNumber.trim() &&
     liveObservation.observedAt.trim() &&
-    liveObservation.explorerUrl.trim(),
+    liveObservation.explorerUrl.trim() &&
+    liveObservation.binding,
   );
   const historicalHireReady = inputMode === "locked" && service !== "YIELD_OPTIMIZATION" && Boolean(fixture);
   const liveMarketPending = inputMode === "interactive" && !currentHireReady;
@@ -2124,7 +2132,10 @@ export function JobWorkspace({
     const evidence = marketplaceTrace.hire.evidence;
     const auditionHash = marketplaceTrace.hire.evidenceHash;
     if (evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED" || !evidence.lpLiveMatchAudition || !auditionHash) return;
-    await onRun(marketplaceTrace.hire.request, "CALLER_SUPPLIED_OBSERVATIONS", evidence.source, {
+    await onRun(marketplaceTrace.hire.request, "CALLER_SUPPLIED_OBSERVATIONS", {
+      ...evidence.source,
+      binding: evidence.observationBinding,
+    }, {
       schemaVersion: "positioncrew.lp-live-match-selection-request.v1",
       selectedProvider,
       auditionHash,
@@ -2251,8 +2262,8 @@ export function JobWorkspace({
               <div className="form-grid">
                 <NumberField label="Current tick" value={draft.lpCurrentTick} onChange={(value) => updateDraft("lpCurrentTick", value)} disabled={inputsDisabled || Boolean(liveRequest)} min="-887272" max="887272" step="1" />
                 <NumberField label="Minimum net benefit (USD)" value={draft.lpMinimumBenefit} onChange={(value) => updateDraft("lpMinimumBenefit", value)} disabled={inputsDisabled} min="0" max="100000" step="0.01" />
-                <NumberField label="Estimated gas (USD)" value={draft.lpGas} onChange={(value) => updateDraft("lpGas", value)} disabled={inputsDisabled} min="0" max="10000" step="0.01" />
-                <NumberField label="Estimated swap cost (USD)" value={draft.lpSwapCost} onChange={(value) => updateDraft("lpSwapCost", value)} disabled={inputsDisabled} min="0" max="10000" step="0.01" />
+                <NumberField label="Observed gas estimate (USD)" value={draft.lpGas} onChange={(value) => updateDraft("lpGas", value)} disabled={inputsDisabled || Boolean(liveRequest)} min="0" max="10000" step="0.01" />
+                <NumberField label="Observed swap cost (USD)" value={draft.lpSwapCost} onChange={(value) => updateDraft("lpSwapCost", value)} disabled={inputsDisabled || Boolean(liveRequest)} min="0" max="10000" step="0.01" />
                 <NumberField label="Evaluation horizon (hours)" value={draft.lpHorizon} onChange={(value) => updateDraft("lpHorizon", value)} disabled={inputsDisabled} min="1" max="720" step="1" />
                 <NumberField label="Maximum gas (USD)" value={draft.lpMaximumGas} onChange={(value) => updateDraft("lpMaximumGas", value)} disabled={inputsDisabled} min="0" max="10000" step="0.01" />
               </div>
@@ -2321,7 +2332,7 @@ export function JobWorkspace({
             service === "LP_REBALANCE" && inputMode === "interactive" && draftRequest && marketplaceTrace &&
             canonicalJson(draftRequest) === canonicalJson(marketplaceTrace.hire.request) &&
             marketplaceTrace.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" &&
-            canonicalJson(liveObservation) === canonicalJson(marketplaceTrace.hire.evidence.source)
+            canonicalJson(liveObservation && { blockNumber: liveObservation.blockNumber, observedAt: liveObservation.observedAt, explorerUrl: liveObservation.explorerUrl }) === canonicalJson(marketplaceTrace.hire.evidence.source)
           )} />
           <GridAndYieldExternalComparisonPanel trace={marketplaceTrace} />
           {marketplaceTrace && (
