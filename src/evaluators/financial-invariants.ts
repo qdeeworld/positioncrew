@@ -165,6 +165,10 @@ function yieldChecks(request: YieldOptimizationRequest, output: YieldOptimizatio
   const present = output.withdrawals !== undefined && output.idleCapitalUsedUsd !== undefined && output.finalProtocolAllocations !== undefined
     && output.remainingIdleCapitalUsd !== undefined && output.postMigrationCapitalUsd !== undefined;
   const result = [check("yield-funding-evidence", present, "Actionable yield requires explicit withdrawals, idle funding, post-cost capital, and final protocol allocations.")];
+  result.push(check("yield-opportunity-identities",
+    new Set(request.opportunities.map((item) => item.opportunityId)).size === request.opportunities.length &&
+      new Set(request.opportunities.map((item) => item.vaultOrMarket.toLowerCase())).size === request.opportunities.length,
+    "Opportunity IDs and destination addresses are unique; the selected identifier cannot hide conflicting protocol or economic terms."));
   if (!present) return result;
   const selected = request.opportunities.find((item) => item.opportunityId === output.selectedOpportunityId);
   result.push(check("yield-selected-opportunity", selected !== undefined, "Selected opportunity belongs to the frozen request."));

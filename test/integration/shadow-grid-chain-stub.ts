@@ -10,11 +10,11 @@ const poolAddress = "0x6666666666666666666666666666666666666666" as const;
 
 export async function inspectPancakeGridMarket(): Promise<PancakeGridProbe> {
   const observedAt = new Date().toISOString();
-  const sourceId = `synthetic-shadow-grid-block-${blockNumber}`;
+  const sourceId = `pancake-v3-mainnet-block-${blockNumber}`;
   const explorerUrl = `https://bscscan.com/block/${blockNumber}`;
   const gridRequest = BoundedGridRequestSchema.parse({
     ...structuredClone(fixture),
-    requestId: `pancake-grid-${blockNumber}-${Date.now()}`,
+    requestId: `pancake-grid-${blockNumber}`,
     protocol: "PancakeSwap V3 bounded grid policy",
     requestedAt: observedAt,
     deadline: new Date(Date.parse(observedAt) + 300_000).toISOString(),

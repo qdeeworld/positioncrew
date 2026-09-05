@@ -29,14 +29,14 @@ const lendingFixture = JSON.parse(
 
 const lpFixture = JSON.parse(
   readFileSync(
-    new URL("../fixtures/lp-rebalance/out-of-range-v3-position.v1.json", import.meta.url),
+    new URL("../fixtures/provider-conformance/lp-valid.v2.json", import.meta.url),
     "utf8",
   ),
 ) as Record<string, unknown>;
 
 const gridFixture = JSON.parse(
   readFileSync(
-    new URL("../fixtures/bounded-grid/bnb-usdt-grid.v1.json", import.meta.url),
+    new URL("../fixtures/provider-conformance/grid-valid.v2.json", import.meta.url),
     "utf8",
   ),
 ) as Record<string, unknown>;

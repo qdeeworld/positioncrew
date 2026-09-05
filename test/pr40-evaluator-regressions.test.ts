@@ -22,6 +22,43 @@ function rejected(request: PositionCrewRequest, output: PositionCrewDeliverable,
 }
 
 describe("PR40 independent evaluator regressions", () => {
+  it.each(["LENDING_RESCUE", "LP_REBALANCE", "YIELD_OPTIMIZATION", "BOUNDED_GRID"] as const)(
+    "requires usable expiry for a fresh non-action result in %s", (service) => {
+      const { request } = example(service);
+      request.maxActionUsd = "0.000000000000000001";
+      const output = executeProvider(request, FIXTURE_NOW);
+      expect(output.status).not.toBe("ACTIONABLE");
+      expect(evaluate(request, output).passed).toBe(true);
+      for (const expiresAt of ["2020-01-01T00:00:00.000Z", FIXTURE_NOW.toISOString()]) {
+        rejected(request, { ...output, expiresAt }, "bounded-expiry");
+      }
+    },
+  );
+
+  it.each(["sourceId", "uri", "observedAt", "label"] as const)("binds the Lending output source %s", (field) => {
+    const { request, deliverable } = example("LENDING_RESCUE");
+    if (deliverable.service !== "LENDING_RESCUE") throw new Error("Expected lending");
+    expect(evaluate(request, deliverable).passed).toBe(true);
+    const replacement = field === "uri" ? "https://unrelated.example/block/1"
+      : field === "observedAt" ? "2026-08-12T15:58:00.000Z" : "unrelated-source";
+    deliverable.sources = structuredClone(deliverable.sources);
+    deliverable.sources[0]![field] = replacement;
+    rejected(request, deliverable, "lending-source-binding");
+  });
+
+  it.each(["opportunityId", "vaultOrMarket"] as const)("rejects ambiguous Yield %s identities", (field) => {
+    const { request, deliverable } = example("YIELD_OPTIMIZATION");
+    if (request.service !== "YIELD_OPTIMIZATION" || deliverable.service !== "YIELD_OPTIMIZATION") throw new Error("Expected yield");
+    expect(deliverable.status).toBe("ACTIONABLE");
+    expect(evaluate(request, deliverable).passed).toBe(true);
+    const selected = request.opportunities.find((item) => item.opportunityId === deliverable.selectedOpportunityId)!;
+    request.opportunities.push({ ...structuredClone(selected),
+      opportunityId: field === "opportunityId" ? selected.opportunityId : "conflicting-other-id",
+      vaultOrMarket: field === "vaultOrMarket" ? selected.vaultOrMarket : "0x9999999999999999999999999999999999999999",
+      protocol: "Conflicting protocol", grossApyBps: selected.grossApyBps + 1 });
+    rejected(request, deliverable, "yield-opportunity-identities");
+  });
+
   it("accepts native orders denominated in a six-decimal quote asset", () => {
     const { request } = example("BOUNDED_GRID");
     if (request.service !== "BOUNDED_GRID") throw new Error("Expected grid");
