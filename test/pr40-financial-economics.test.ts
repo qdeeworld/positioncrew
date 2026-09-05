@@ -124,8 +124,8 @@ describe("inactive LP and Yield economics", () => {
   it("accepts an explicit unchanged HOLD projection only with its correct arithmetic", () => {
     const { request, output } = inactive("LP_REBALANCE", false);
     if (output.service !== "LP_REBALANCE") throw new Error("Expected LP");
-    output.feeProjection = { model: "POOL_SHARE_UPTIME_V1", currentUptimeBps: 5_000, proposedUptimeBps: 5_000 };
-    output.expectedGrossFeesUsd = "10";
+    output.feeProjection = { model: "POOL_SHARE_UPTIME_V1", currentUptimeBps: 9_000, proposedUptimeBps: 9_000 };
+    output.expectedGrossFeesUsd = "18";
     expect(evaluate(request, output).passed).toBe(true);
     output.feeProjection.proposedUptimeBps = 9_500;
     rejected(request, output, "lp-inactive-fees");

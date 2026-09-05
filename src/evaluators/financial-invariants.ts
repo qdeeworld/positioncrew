@@ -70,11 +70,10 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
     const edgeBps = inside ? Math.floor(Math.min(tick - request.position.lowerTick, request.position.upperTick - tick) * 10_000 / width) : 0;
     const defaultUptime = !inside ? 0 : edgeBps < request.constraints.edgeBufferBps ? 3_500
       : request.marketState.realizedVolatilityBps >= request.constraints.highVolatilityBps ? 5_500 : 9_000;
-    const uptime = output.feeProjection?.currentUptimeBps ?? defaultUptime;
     const share = parseFixed(request.position.positionValueUsd) * FIXED_SCALE / parseFixed(request.marketState.poolLiquidityUsd);
     const daily = parseFixed(request.marketState.fees24hUsd) * share / FIXED_SCALE;
     const horizon = BigInt(request.constraints.evaluationHorizonHours) * FIXED_SCALE / 24n;
-    const currentFees = ((daily * horizon / FIXED_SCALE) * BigInt(uptime)) / 10_000n;
+    const currentFees = ((daily * horizon / FIXED_SCALE) * BigInt(defaultUptime)) / 10_000n;
     const gross = parseFixed(output.expectedGrossFeesUsd);
     return [
     check("lp-inactive-payload", output.actionSteps.length === 0 && output.proposedRange === null
@@ -86,9 +85,10 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
       "No rebalance means zero incremental cost and benefit and no break-even time."),
     check("lp-inactive-fees", hold
       ? (gross === currentFees || gross === currentFees / 1_000_000_000_000n * 1_000_000_000_000n)
-        && (output.feeProjection === undefined || output.feeProjection.proposedUptimeBps === uptime)
+        && (output.feeProjection === undefined || output.feeProjection.currentUptimeBps === defaultUptime
+          && output.feeProjection.proposedUptimeBps === defaultUptime)
       : gross === 0n && output.feeProjection === undefined,
-      "HOLD fees use frozen pool share, horizon and current uptime, allowing exact six-decimal truncation. Refusals earn no projected fees; HOLD cannot claim improved uptime."),
+      "HOLD fees use frozen pool share, horizon and request-derived current uptime, allowing exact six-decimal truncation. Any supplied projection must match that uptime; refusals earn no projected fees."),
     ];
   }
   const result = [
@@ -355,23 +355,21 @@ function lendingChecks(request: LendingRescueRequest, output: LendingRescueDeliv
     && reported(output.position.currentHealthFactor, health, 8) && reported(output.position.stressedHealthFactor, stressedHealth, 8)
     && parseFixed(output.position.targetHealthFactor) === target,
     "Position USD values and current/stressed health factors are recomputed from balances and thresholds.")];
-  const actionValid = (action: LendingActionPlan): boolean => {
-    const asset = action.kind === "REPAY_DEBT" ? request.position.debt.find((item) => sameAddress(item.address, action.asset.address))
-      : request.position.collateral.find((item) => sameAddress(item.address, action.asset.address) && item.collateralEnabled);
-    const available = request.availableAssets.find((item) => sameAddress(item.address, action.asset.address));
-    if (!asset || !available || asset.decimals !== action.asset.decimals || available.decimals !== action.asset.decimals
-      || asset.symbol !== action.asset.symbol || available.symbol !== action.asset.symbol) return false;
-    const units = BigInt(action.amountBaseUnits), amount = units * FIXED_SCALE / (10n ** BigInt(asset.decimals));
-    const value = amount * parseFixed(asset.priceUsd) / FIXED_SCALE;
-    let projectedWeighted = weighted, projectedDebt = debt, minimumValue: bigint;
-    if (action.kind === "REPAY_DEBT") {
-      if (amount > parseFixed(asset.amount)) return false;
-      projectedDebt -= value;
+  // Request-only feasibility also validates submitted actions, so a provider cannot
+  // escape the same limits by returning a false constraint refusal instead.
+  const minimumRescue = (kind: LendingActionPlan["kind"], address: string) => {
+    if (debt <= 0n || health === null || health >= target || !request.allowedActions.includes(kind)
+      || parseFixed(request.estimatedGasUsd) > parseFixed(request.maxGasUsd)) return null;
+    const asset = kind === "REPAY_DEBT" ? request.position.debt.find((item) => sameAddress(item.address, address))
+      : request.position.collateral.find((item) => sameAddress(item.address, address) && item.collateralEnabled);
+    const available = request.availableAssets.find((item) => sameAddress(item.address, address));
+    if (!asset || !available || available.decimals !== asset.decimals || available.symbol !== asset.symbol) return null;
+    let minimumValue: bigint, threshold = 0n;
+    if (kind === "REPAY_DEBT") {
       minimumValue = positivePart(debt - weighted * FIXED_SCALE / target);
     } else {
-      if (!("liquidationThresholdBps" in asset)) return false;
-      const threshold = BigInt(asset.liquidationThresholdBps as number);
-      projectedWeighted += value * threshold / 10_000n;
+      if (!("liquidationThresholdBps" in asset)) return null;
+      threshold = BigInt(asset.liquidationThresholdBps as number);
       const missingWeighted = positivePart(ceilDivide(target * debt, FIXED_SCALE) - weighted);
       minimumValue = ceilDivide(missingWeighted * 10_000n, threshold);
     }
@@ -379,24 +377,40 @@ function lendingChecks(request: LendingRescueRequest, output: LendingRescueDeliv
     // find sufficient fixed-point token quantity, then executable base units.
     // This is minimal for this action/asset, not a forced choice between assets.
     const minimumAmount = ceilDivide(minimumValue * FIXED_SCALE, parseFixed(asset.priceUsd));
-    const minimumUnits = ceilDivide(minimumAmount * (10n ** BigInt(asset.decimals)), FIXED_SCALE);
+    const units = ceilDivide(minimumAmount * (10n ** BigInt(asset.decimals)), FIXED_SCALE);
+    const amount = units * FIXED_SCALE / (10n ** BigInt(asset.decimals));
+    const value = amount * parseFixed(asset.priceUsd) / FIXED_SCALE;
+    if (units <= 0n || amount <= 0n || value <= 0n || amount > parseFixed(available.availableAmount)
+      || value > parseFixed(request.maxActionUsd)
+      || kind === "REPAY_DEBT" && amount > parseFixed(asset.amount)) return null;
+    const projectedWeighted = kind === "ADD_COLLATERAL" ? weighted + value * threshold / 10_000n : weighted;
+    const projectedDebt = kind === "REPAY_DEBT" ? debt - value : debt;
     const projected = projectedDebt > 0n ? projectedWeighted * FIXED_SCALE / projectedDebt : null;
-    return units > 0n && units === minimumUnits && amount === parseFixed(action.amount) && amount <= parseFixed(available.availableAmount)
-      && value <= parseFixed(request.maxActionUsd) && reported(action.amountUsd, value)
+    if (projected === null || projected < target) return null;
+    return { asset, units, amount, value, projected };
+  };
+  const actionValid = (action: LendingActionPlan): boolean => {
+    const minimum = minimumRescue(action.kind, action.asset.address);
+    if (minimum === null || action.asset.symbol !== minimum.asset.symbol || action.asset.decimals !== minimum.asset.decimals) return false;
+    return BigInt(action.amountBaseUnits) === minimum.units && parseFixed(action.amount) === minimum.amount
+      && reported(action.amountUsd, minimum.value)
       && parseFixed(action.estimatedGasUsd) >= parseFixed(request.estimatedGasUsd) && parseFixed(action.estimatedGasUsd) <= parseFixed(request.maxGasUsd)
-      && projected !== null && projected >= target && reported(action.projectedHealthFactor, projected, 8)
+      && reported(action.projectedHealthFactor, minimum.projected, 8)
       && request.allowedActions.includes(action.kind) && action.chainId === request.chainId && action.protocol === request.protocol
       && sameAddress(action.market, request.market) && sameAddress(action.account, request.account) && action.maxSlippageBps <= request.maxSlippageBps
       && Date.parse(action.executeBefore) <= Date.parse(output.expiresAt) && Date.parse(action.executeBefore) > Date.parse(output.generatedAt);
   };
+  const hasFeasibleRescue = () => request.allowedActions.some((kind) =>
+    (kind === "REPAY_DEBT" ? request.position.debt : request.position.collateral)
+      .some((asset) => minimumRescue(kind, asset.address) !== null));
   const incomplete = request.position.collateral.length === 0 || request.position.debt.length === 0;
   result.push(check("decision", output.status === "ACTIONABLE"
     ? !incomplete && health !== null && health < target && output.recommendation !== null && output.decision === output.recommendation.kind
       && actionValid(output.recommendation) && output.alternatives.every(actionValid)
     : output.recommendation === null && output.alternatives.length === 0 && output.decision === "NONE"
       && (output.status !== "NO_ACTION" || !incomplete && (health === null || health >= target))
-      && (output.status !== "REFUSED_CONSTRAINTS" || incomplete || health !== null && health < target),
-    "Submitted lending actions must be funded, permitted, denominated and bound correctly, and reach the target with the minimum executable amount for each selected action and asset; no native action choice is required."));
+      && (output.status !== "REFUSED_CONSTRAINTS" || incomplete || health !== null && health < target && !hasFeasibleRescue()),
+    "Lending actions must satisfy funding, identity, limits and minimum executable sizing. A constraint refusal requires incomplete input or no feasible permitted single-asset rescue; no native action choice is required."));
   return result;
 }
 
