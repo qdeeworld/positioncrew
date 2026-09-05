@@ -713,12 +713,12 @@ for (const earlyActionDeadline of ["recommendation", "alternative"] as const) {
     await expect(state).toHaveText("ACTIONABLE");
     await expect(summary.locator(".lending-threshold-plan")).toBeVisible();
     await expect(summary.locator(".alternative-action")).toBeVisible();
-    await expect(summary.locator(".expires-label")).toHaveText(/^Expires /);
+    await expect(summary.locator(".expires-label")).toHaveText(/^\s*Expires /);
 
     await page.clock.setFixedTime(actionDeadline);
     await expect(state).toHaveText("EXPIRED");
     await expect(summary.getByRole("heading", { name: "Refresh evidence before acting" })).toBeVisible();
-    await expect(summary.locator(".expires-label")).toHaveText(/^Expired /);
+    await expect(summary.locator(".expires-label")).toHaveText(/^\s*Expired /);
     await expect(summary.locator(".result-meaning")).toContainText("This result has expired.");
     await expect(summary.locator(".lending-threshold-plan")).toHaveCount(0);
     await expect(summary.locator(".alternative-action")).toHaveCount(0);

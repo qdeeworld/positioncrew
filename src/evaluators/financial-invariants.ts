@@ -206,6 +206,8 @@ function gridChecks(request: BoundedGridRequest, output: BoundedGridDeliverable)
   const modeledGrossBound = positivePart(matchedValue(sells, false) - matchedValue(buys, true)) * cycles;
   const gross = parseFixed(output.grossSpreadCaptureUsd);
   return [
+    check("grid-risk-model", output.riskModel === "FINITE_GRID_ZERO_PRICE_STRESS_V1",
+      "Current actionable grids must identify the finite-grid zero-price stress model used to validate their economics."),
     check("grid-order-semantics", output.decision === "BUILD_GRID" && buys.length > 0 && sells.length > 0
       && output.orders.length <= request.constraints.levelCount && output.orders.every((order) => {
         const price = parseFixed(order.price), amount = parseFixed(order.baseAmount), quote = parseFixed(order.maximumQuoteAmount);
@@ -355,7 +357,8 @@ function lendingChecks(request: LendingRescueRequest, output: LendingRescueDeliv
     const asset = action.kind === "REPAY_DEBT" ? request.position.debt.find((item) => sameAddress(item.address, action.asset.address))
       : request.position.collateral.find((item) => sameAddress(item.address, action.asset.address) && item.collateralEnabled);
     const available = request.availableAssets.find((item) => sameAddress(item.address, action.asset.address));
-    if (!asset || !available || asset.decimals !== action.asset.decimals || available.decimals !== action.asset.decimals) return false;
+    if (!asset || !available || asset.decimals !== action.asset.decimals || available.decimals !== action.asset.decimals
+      || asset.symbol !== action.asset.symbol || available.symbol !== action.asset.symbol) return false;
     const units = BigInt(action.amountBaseUnits), amount = units * FIXED_SCALE / (10n ** BigInt(asset.decimals));
     const value = amount * parseFixed(asset.priceUsd) / FIXED_SCALE;
     let projectedWeighted = weighted, projectedDebt = debt, minimumValue: bigint;
