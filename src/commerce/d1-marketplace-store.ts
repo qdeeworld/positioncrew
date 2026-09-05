@@ -369,6 +369,22 @@ const JOINED_SELECT = [
 export class FreshMarketplaceStore {
   constructor(private readonly db: D1Database) {}
 
+  async getPersistedHireCreationReplay(
+    input: Pick<CreateFreshMarketplaceHire,
+      "request" | "providerId" | "requestHash" | "providerHash" | "evidenceMode" | "service"
+    >,
+  ): Promise<FreshMarketplaceChain | null> {
+    const existing = await this.getAdmissionByIdempotencyKey(input.request.idempotencyKey);
+    if (!existing) return null;
+    this.matchAdmissionRow(existing, input);
+    // An unfinished admission may need fresh provider work. Never take over its
+    // lease through the read-only recovery path or bypass observation checks.
+    if (existing.evidence_json === null) return null;
+    const chain = await this.getByIdempotencyKey(input.request.idempotencyKey);
+    if (!chain) throw new Error("Completed D1 hire admission could not be read back");
+    return chain;
+  }
+
   async admitHireCreation(
     input: Pick<CreateFreshMarketplaceHire,
       "request" | "providerId" | "hireId" | "jobId" | "createdAt" | "requestJson" | "requestHash" | "providerHash" | "evidenceMode" | "service" | "rateLimitKey"

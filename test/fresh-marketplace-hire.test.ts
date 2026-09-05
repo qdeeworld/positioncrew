@@ -982,7 +982,7 @@ describe("fresh marketplace hire contract", () => {
   });
 
   it.each(["MISSING_BINDING", "CHANGED_AMOUNT", "WRONG_KEY", "MISSING_KEY", "STALE"] as const)(
-    "rejects %s current observations before storage or provider calls on both hire routes",
+    "rejects %s current observations before storage writes or provider calls on both hire routes",
     async (failure) => {
       const { httpRequest } = await currentLendingHireRequest(failure === "STALE" ? "STALE" : "ACTIONABLE");
       const payload = await httpRequest.json();
@@ -1001,18 +1001,157 @@ describe("fresh marketplace hire contract", () => {
             observationBinding: payload.observationBinding,
             request: payload.request,
           } : payload;
+          const database = new FakeD1();
+          const writes = vi.spyOn(database, "batch");
           const response = await positionCrewWorker.fetch(new Request(`https://positioncrew.example${path}`, {
             method: "POST",
             headers: { "Content-Type": "application/json", Origin: "https://positioncrew.example" },
             body: JSON.stringify(body),
-          }), { DB: new FakeD1(true), ASSETS: TEST_ASSETS, ...(key ? { SOURCE_OBSERVATION_HMAC_KEY: key } : {}) }, TEST_CONTEXT);
+          }), { DB: database, ASSETS: TEST_ASSETS, ...(key ? { SOURCE_OBSERVATION_HMAC_KEY: key } : {}) }, TEST_CONTEXT);
           expect(response.status, await response.clone().text()).toBe(409);
           await expect(response.json()).resolves.toMatchObject({ error: "REFRESH_REQUIRED" });
+          expect(writes).not.toHaveBeenCalled();
         }
         expect(outbound).not.toHaveBeenCalled();
       } finally {
         outbound.mockRestore();
       }
+    },
+  );
+
+  describe.each(["/api/benchmark-hires", "/api/provider-auditions/lending/hires"])(
+    "current hire retry admission at %s",
+    (path) => {
+      function postCurrentHire(body: unknown): Request {
+        return new Request(`https://positioncrew.example${path}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "https://positioncrew.example",
+            "CF-Connecting-IP": "203.0.113.10",
+          },
+          body: JSON.stringify(body),
+        });
+      }
+
+      async function signedCurrentBody() {
+        const { httpRequest } = await currentLendingHireRequest();
+        const payload = await httpRequest.json();
+        return path === "/api/provider-auditions/lending/hires" ? {
+          schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
+          idempotencyKey: payload.idempotencyKey,
+          evidenceMode: payload.evidenceMode,
+          observation: payload.observation,
+          observationBinding: payload.observationBinding,
+          request: payload.request,
+        } : payload;
+      }
+
+      it.each(["EXPIRED", "ROTATED_KEY"] as const)(
+        "recovers the original chain after %s without admitting changed commitments",
+        async (retryCondition) => {
+          vi.useFakeTimers();
+          vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
+          const database = new FakeD1();
+          const writes = vi.spyOn(database, "run");
+          const outbound = vi.spyOn(globalThis, "fetch");
+          try {
+            const environment = {
+              DB: database,
+              ASSETS: TEST_ASSETS,
+              SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY,
+            };
+            const body = await signedCurrentBody();
+            const firstResponse = await positionCrewWorker.fetch(postCurrentHire(body), environment, TEST_CONTEXT);
+            expect(firstResponse.status, await firstResponse.clone().text()).toBe(201);
+            const original = FreshMarketplaceChainSchema.parse(await firstResponse.json());
+
+            if (retryCondition === "EXPIRED") {
+              vi.setSystemTime(new Date(Date.parse(body.observationBinding.expiresAt) + 1));
+            }
+            const retryEnvironment = {
+              ...environment,
+              SOURCE_OBSERVATION_HMAC_KEY: retryCondition === "ROTATED_KEY"
+                ? "positioncrew-rotated-source-observation-test-key"
+                : TEST_OBSERVATION_KEY,
+            };
+            writes.mockClear();
+            outbound.mockClear();
+            outbound.mockRejectedValue(new Error("An idempotent retry must not call a provider"));
+            const context = capturingContext();
+
+            const replayResponse = await positionCrewWorker.fetch(postCurrentHire(body), retryEnvironment, context);
+            expect(replayResponse.status, await replayResponse.clone().text()).toBe(200);
+            expect(FreshMarketplaceChainSchema.parse(await replayResponse.json())).toEqual(original);
+
+            const changed = structuredClone(body);
+            changed.request.maxActionUsd = changed.request.maxActionUsd === "1" ? "2" : "1";
+            const conflict = await positionCrewWorker.fetch(postCurrentHire(changed), retryEnvironment, context);
+            expect(conflict.status, await conflict.clone().text()).toBe(409);
+            await expect(conflict.json()).resolves.toMatchObject({ error: "IDEMPOTENCY_CONFLICT" });
+
+            const persisted = await positionCrewWorker.fetch(
+              new Request(`https://positioncrew.example/api/benchmark-hires/${original.hire.hireId}`),
+              retryEnvironment,
+              TEST_CONTEXT,
+            );
+            expect(persisted.status).toBe(200);
+            expect(FreshMarketplaceChainSchema.parse(await persisted.json())).toEqual(original);
+            expect(writes).not.toHaveBeenCalled();
+            expect(outbound).not.toHaveBeenCalled();
+            expect(context.tasks).toHaveLength(0);
+          } finally {
+            writes.mockRestore();
+            outbound.mockRestore();
+            vi.useRealTimers();
+          }
+        },
+      );
+
+      it("does not admit an expired binding under a new idempotency key", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
+        const database = new FakeD1();
+        const writes = vi.spyOn(database, "run");
+        const outbound = vi.spyOn(globalThis, "fetch");
+        try {
+          const environment = {
+            DB: database,
+            ASSETS: TEST_ASSETS,
+            SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY,
+          };
+          const body = await signedCurrentBody();
+          const firstResponse = await positionCrewWorker.fetch(postCurrentHire(body), environment, TEST_CONTEXT);
+          expect(firstResponse.status, await firstResponse.clone().text()).toBe(201);
+          const original = FreshMarketplaceChainSchema.parse(await firstResponse.json());
+          vi.setSystemTime(new Date(Date.parse(body.observationBinding.expiresAt) + 1));
+          writes.mockClear();
+          outbound.mockClear();
+          outbound.mockRejectedValue(new Error("An expired new hire must not call a provider"));
+          const context = capturingContext();
+          const response = await positionCrewWorker.fetch(postCurrentHire({
+            ...body,
+            idempotencyKey: "55555555-5555-4555-8555-555555555555",
+          }), environment, context);
+          expect(response.status, await response.clone().text()).toBe(409);
+          await expect(response.json()).resolves.toMatchObject({ error: "REFRESH_REQUIRED" });
+
+          const persisted = await positionCrewWorker.fetch(
+            new Request(`https://positioncrew.example/api/benchmark-hires/${original.hire.hireId}`),
+            environment,
+            TEST_CONTEXT,
+          );
+          expect(persisted.status).toBe(200);
+          expect(FreshMarketplaceChainSchema.parse(await persisted.json())).toEqual(original);
+          expect(writes).not.toHaveBeenCalled();
+          expect(outbound).not.toHaveBeenCalled();
+          expect(context.tasks).toHaveLength(0);
+        } finally {
+          writes.mockRestore();
+          outbound.mockRestore();
+          vi.useRealTimers();
+        }
+      });
     },
   );
 

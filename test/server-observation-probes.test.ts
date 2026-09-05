@@ -63,7 +63,17 @@ function inspectedProbe(definition: typeof CASES[number]) {
 const environment = {
   ASSETS: { async fetch() { return new Response("unused"); } },
   DB: {
-    prepare() { throw new Error("No storage or provider call is allowed at this boundary"); },
+    prepare(sql: string) {
+      if (
+        !sql.startsWith("SELECT h.hire_id, h.idempotency_key,") ||
+        !sql.endsWith("WHERE h.idempotency_key = ?")
+      ) throw new Error("Only an idempotent recovery lookup is allowed at this boundary");
+      return {
+        bind(..._values: unknown[]) { return this; },
+        async first<T>(): Promise<T | null> { return null; },
+        async run(): Promise<never> { throw new Error("No storage mutation is allowed at this boundary"); },
+      };
+    },
     async batch() { throw new Error("No storage mutation is allowed at this boundary"); },
   },
   SOURCE_OBSERVATION_HMAC_KEY: KEY,
@@ -99,7 +109,7 @@ describe("server-issued current observation probes", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "REFRESH_REQUIRED" });
   });
 
-  it.each(CASES)("rejects a changed observed $service request before storage or auditions", async (definition) => {
+  it.each(CASES)("rejects a changed observed $service request before storage writes or auditions", async (definition) => {
     const probe = inspectedProbe(definition);
     inspections[definition.inspect].mockResolvedValue(probe);
     const response = await worker.fetch(new Request(`https://positioncrew.example${definition.path}`), environment, context);

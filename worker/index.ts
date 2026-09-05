@@ -1372,9 +1372,6 @@ async function createFreshMarketplaceHire(
   }
   const createdAt = new Date().toISOString();
   const currentBlockPinned = parsed.schemaVersion === "positioncrew.fresh-marketplace-hire-request.v2";
-  const observationBinding = currentBlockPinned
-    ? await verifyServerObservationBinding(parsed.request, { ...parsed.observation, binding: parsed.observationBinding }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date(createdAt))
-    : undefined;
   const persistedRequest = currentBlockPinned
     ? parsed.request
     : {
@@ -1397,8 +1394,22 @@ async function createFreshMarketplaceHire(
   const requestJson = canonicalJson(persistedRequest);
   const requestHash = await sha256Commitment(persistedRequest);
   const providerHash = await sha256Commitment(providerBinding);
-  const rateLimitKey = await freshMarketplaceRateLimitKey(request);
   const store = freshStore(env);
+  if (currentBlockPinned) {
+    const replay = await store.getPersistedHireCreationReplay({
+      request: parsed,
+      providerId: provider.providerId,
+      requestHash,
+      providerHash,
+      evidenceMode,
+      service: task.service,
+    });
+    if (replay) return json(replay, 200);
+  }
+  const observationBinding = currentBlockPinned
+    ? await verifyServerObservationBinding(parsed.request, { ...parsed.observation, binding: parsed.observationBinding }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date(createdAt))
+    : undefined;
+  const rateLimitKey = await freshMarketplaceRateLimitKey(request);
   const proposedHireId = crypto.randomUUID();
   const proposedJobId = crypto.randomUUID();
   const admission = await store.admitHireCreation({
