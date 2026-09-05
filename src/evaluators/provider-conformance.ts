@@ -52,6 +52,17 @@ export function evaluateProviderConformance(
   const request = PositionCrewRequestSchema.parse(requestInput);
   const deliverable = PositionCrewDeliverableSchema.parse(deliverableInput);
   const financialChecks = evaluateFinancialInvariants(request, deliverable);
+  if (deliverable.service === "LENDING_RESCUE" && deliverable.status === "ACTIONABLE") {
+    // Structural invariants bind deadlines to generation and receipt expiry;
+    // admission additionally checks the evaluator's clock, not a claimed timestamp.
+    financialChecks.push({
+      id: "lending-action-window",
+      passed: deliverable.recommendation !== null
+        && [deliverable.recommendation, ...deliverable.alternatives]
+          .every((action) => Date.parse(action.executeBefore) > now.getTime()),
+      detail: "Every Lending recommendation and alternative must remain executable strictly after evaluation time; an unexpired receipt cannot extend an action deadline.",
+    });
+  }
   const sourceExpiry = Math.min(Date.parse(request.deadline), ...request.sources.map((source) => Date.parse(source.observedAt) + request.maxDataAgeSeconds * 1_000));
   const observations = request.service === "LENDING_RESCUE" ? [...request.position.collateral, ...request.position.debt]
     : request.service === "YIELD_OPTIMIZATION" ? [...request.currentPositions, ...request.opportunities] : [request.marketState];
