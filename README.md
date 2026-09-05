@@ -223,3 +223,11 @@ Send the following body to `POST /api/benchmark-hires/{hireId}/jobs` for a new c
 `POSITIONCREW` is the other supported choice. Only candidates marked `COMPATIBLE` and `selectable: true` in `hire.evidence.lpLiveMatchAudition` can be chosen. Repeating the same choice resumes the existing job; changing an accepted choice returns HTTP 409. The job preserves `providerSelection` and its commitment, and the completed response includes `liveMatchExecution` with invocation and result provenance. Existing historical LP jobs and other categories retain their prior run contract.
 
 These are free assessments with no wallet, payment, settlement, or liquidity transaction. Apply migration `0006_lp_live_match_selection.sql` (or the equivalent managed Sites migration `0005_lp_live_match_selection.sql`) before activating this release. Compatible external delivery in tests is not a claim that every live position admits HeyAnon.
+
+## Historical benchmark quality reassessment
+
+The original founder comparisons remain unchanged as disclosed synthetic-case evidence.
+A [dated, separate arithmetic reassessment](web/public/evidence/benchmark-quality-review-2026-09-05.md)
+explains which calculations reproduce and which original LP/Grid safety claims are not established.
+Canonical output parity is equality, not independent financial correctness. Later production receipts
+are listed separately; they are not replacement manual pairs, paid activity, or external demand.
