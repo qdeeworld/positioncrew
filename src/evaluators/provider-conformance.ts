@@ -55,10 +55,15 @@ export function evaluateProviderConformance(
   const sourceExpiry = Math.min(Date.parse(request.deadline), ...request.sources.map((source) => Date.parse(source.observedAt) + request.maxDataAgeSeconds * 1_000));
   const observations = request.service === "LENDING_RESCUE" ? [...request.position.collateral, ...request.position.debt]
     : request.service === "YIELD_OPTIMIZATION" ? [...request.currentPositions, ...request.opportunities] : [request.marketState];
-  const evidenceConsistent = observations.every((observation) => request.sources.some((source) => source.sourceId === observation.sourceId
-    && source.observedAt === observation.observedAt) && Date.parse(observation.observedAt) <= now.getTime());
+  const sourcesById = new Map(request.sources.map((source) => [source.sourceId, source]));
+  const evidenceConsistent = request.sources.every((source) => Date.parse(source.observedAt) <= now.getTime())
+    && observations.every((observation) => sourcesById.get(observation.sourceId)?.observedAt === observation.observedAt
+      && Date.parse(observation.observedAt) <= now.getTime());
   const evidenceFresh = request.sources.every((source) => Date.parse(source.observedAt) <= now.getTime()
     && now.getTime() - Date.parse(source.observedAt) <= request.maxDataAgeSeconds * 1_000);
+  const requiredEvidenceRefusal = now.getTime() >= Date.parse(request.deadline) ? "REFUSED_EXPIRED"
+    : !evidenceConsistent ? "REFUSED_INCONSISTENT_DATA" : !evidenceFresh ? "REFUSED_STALE_DATA" : null;
+  const evidenceRefusals = ["REFUSED_EXPIRED", "REFUSED_INCONSISTENT_DATA", "REFUSED_STALE_DATA"];
   const requestHash = requestHashOverride ?? canonicalHash(request);
   const deliverableHash = canonicalHash(deliverable);
   const checks: EvaluationCheck[] = [
@@ -89,7 +94,7 @@ export function evaluateProviderConformance(
     check(
       "useful-payload",
       "Actionable results contain the category-specific machine payload",
-      15,
+      10,
       true,
       usefulPayload(deliverable),
       `status=${deliverable.status}`,
@@ -102,13 +107,16 @@ export function evaluateProviderConformance(
       Date.parse(deliverable.expiresAt) <= Date.parse(request.deadline),
       `expiresAt=${deliverable.expiresAt}`,
     ),
+    check("evidence-decision", "Evidence refusals match the actual deadline, consistency, and freshness state", 5, true,
+      requiredEvidenceRefusal === null ? !evidenceRefusals.includes(deliverable.status) : deliverable.status === requiredEvidenceRefusal,
+      `required=${requiredEvidenceRefusal ?? "NO_EVIDENCE_REFUSAL"}; reported=${deliverable.status}; precedence=expired,inconsistent,stale`),
     check("evidence-window", "Actionable output uses current evidence and bounded generation/expiry times", 0, true,
       deliverable.status === "ACTIONABLE"
         ? evidenceConsistent && evidenceFresh && Date.parse(deliverable.generatedAt) >= Date.parse(request.requestedAt)
           && Date.parse(deliverable.generatedAt) <= now.getTime() && Date.parse(deliverable.expiresAt) > now.getTime()
           && Date.parse(deliverable.expiresAt) <= sourceExpiry
-        : (now.getTime() < Date.parse(request.deadline) || deliverable.status === "REFUSED_EXPIRED")
-          && (deliverable.status !== "NO_ACTION" || evidenceConsistent && evidenceFresh),
+        : Date.parse(deliverable.generatedAt) >= Date.parse(request.requestedAt)
+          && Date.parse(deliverable.generatedAt) <= now.getTime() && Date.parse(deliverable.expiresAt) <= sourceExpiry,
       `sourceExpiry=${new Date(sourceExpiry).toISOString()}; status=${deliverable.status}`),
     ...financialChecks.map((item) => check(item.id, "Independent submitted-output invariant", 0, true, item.passed, item.detail)),
   ];

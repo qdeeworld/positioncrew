@@ -168,6 +168,47 @@ function candidatePlan(
   }
 }
 
+function* fundingSourceSets(
+  request: YieldOptimizationRequest,
+  opportunity: Position,
+  sources: Position[],
+): Generator<Position[]> {
+  yield [];
+  const entryCost = parseFixed(opportunity.estimatedEntryCostUsd);
+  const costLimit = minimum(parseFixed(request.maxActionUsd), parseFixed(request.maxGasUsd));
+  const byApy = (left: Position, right: Position): number =>
+    left.grossApyBps - right.grossApyBps || left.opportunityId.localeCompare(right.opportunityId);
+  const affordable = sources.map((source) => ({
+    source,
+    exitCost: parseFixed(source.estimatedExitCostUsd),
+    available: availableWithdrawal(source),
+  })).filter((item) => entryCost + item.exitCost <= costLimit);
+  const compare = (left: bigint, right: bigint): number => left < right ? -1 : left > right ? 1 : 0;
+  // Compare fee per available dollar without losing fixed-point precision.
+  const byFundingCost = (left: typeof affordable[number], right: typeof affordable[number]): number =>
+    compare(left.exitCost * right.available, right.exitCost * left.available) ||
+    byApy(left.source, right.source);
+  const orderings = [
+    affordable,
+    [...affordable].sort((left, right) => compare(left.exitCost, right.exitCost) || byFundingCost(left, right)),
+    [...affordable].sort(byFundingCost),
+  ];
+  for (const item of affordable) yield [item.source];
+  // At most 4n+1 plans, streamed with O(n) search memory, not a power set.
+  // These complementary greedy orders are a bounded search, not an optimizer
+  // over every combination. Every result still passes candidatePlan's gates.
+  for (const ordering of orderings) {
+    let cost = entryCost;
+    const selected: Position[] = [];
+    for (const item of ordering) {
+      if (cost + item.exitCost > costLimit) continue;
+      cost += item.exitCost;
+      selected.push(item.source);
+      if (selected.length > 1) yield [...selected].sort(byApy);
+    }
+  }
+}
+
 export function createYieldOptimizationDeliverable(
   input: YieldOptimizationRequest,
   now: Date,
@@ -236,14 +277,12 @@ export function createYieldOptimizationDeliverable(
       position.vaultOrMarket.toLowerCase() !== opportunity.vaultOrMarket.toLowerCase(),
     ).sort((left, right) => left.grossApyBps - right.grossApyBps ||
       left.opportunityId.localeCompare(right.opportunityId));
-    // Prefixes permit progressively larger moves. Individual routes also let a
-    // cheap withdrawal win when a lower-APY position has an expensive exit.
-    const sourceSets = [[], ...sources.map((source) => [source]),
-      ...sources.slice(1).map((_, index) => sources.slice(0, index + 2))];
-    return sourceSets.flatMap((sourceSet) => {
+    let best: ReturnType<typeof candidatePlan> = null;
+    for (const sourceSet of fundingSourceSets(request, opportunity, sources)) {
       const candidate = candidatePlan(request, opportunity, sourceSet, heldByProtocol, idleCapital);
-      return candidate === null ? [] : [candidate];
-    });
+      if (candidate !== null && (best === null || candidate.netBenefit > best.netBenefit)) best = candidate;
+    }
+    return best === null ? [] : [best];
   }).sort((left, right) =>
     left.netBenefit === right.netBenefit
       ? left.opportunity.opportunityId.localeCompare(right.opportunity.opportunityId)
@@ -257,11 +296,12 @@ export function createYieldOptimizationDeliverable(
       ...empty,
       status: "NO_ACTION",
       decision: "HOLD",
-      summary: "No funded yield move clears final portfolio concentration, liquidity, risk, gas, cost, and net-benefit limits.",
+      summary: "No evaluated funded yield move clears final portfolio concentration, liquidity, risk, gas, cost, and net-benefit limits.",
       risks: [
         "Yield can change before the next evaluation.",
         "Entry and selected exit quotes lack a gas breakdown; their full sum must fit both maxGasUsd and the maxActionUsd cost budget.",
         "A HOLD result does not certify that existing holdings satisfy the requested concentration cap.",
+        "The bounded funding search does not examine every withdrawal combination; HOLD does not prove that no feasible migration exists.",
       ],
     });
   }
@@ -296,6 +336,7 @@ export function createYieldOptimizationDeliverable(
       `Liquidity snapshot is ${selected.opportunity.liquidityUsd} USD.`,
       "Entry and selected exit quotes lack a gas breakdown; their full sum is bounded by maxGasUsd and the maxActionUsd cost budget.",
       "The withdrawal plan uses same-asset unlocked positions; it does not quote swaps or borrowing-market collateral checks.",
+      "The bounded funding search compares APY and withdrawal-cost orderings; the selected plan is not guaranteed globally optimal.",
     ],
   });
 }

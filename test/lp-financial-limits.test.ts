@@ -60,6 +60,7 @@ describe("LP final financial limits", () => {
     expect(result.inventoryExposure.token0Bps).toBeLessThanOrEqual(7000);
     expect(result.inventoryExposure.token1Bps).toBeLessThanOrEqual(7000);
     expect(result.summary).toContain("assuming");
+    expect(result.feeProjection).toEqual({ model: "POOL_SHARE_UPTIME_V1", currentUptimeBps: 0, proposedUptimeBps: 9500 });
   });
   it("does not invent a widening or fee improvement when aligned bounds preserve the existing range", () => {
     const request = input();
@@ -81,5 +82,12 @@ describe("LP final financial limits", () => {
     expect(result.status).toBe("ACTIONABLE");
     expect(result.breakEvenHours).toBe("0");
     expect(result.expectedGrossFeesUsd).not.toBe("0");
+  });
+  it("does not disguise negative fee economics as zero benefit when the buyer minimum is zero", () => {
+    const request = input();
+    request.marketState.token1PriceUsd = String(1 / 1.0001 ** request.marketState.currentTick);
+    request.marketState.fees24hUsd = "0.0001";
+    request.constraints.minimumNetBenefitUsd = "0";
+    expect(createLpRebalanceDeliverable(request, now).status).toBe("NO_ACTION");
   });
 });

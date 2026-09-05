@@ -50,6 +50,8 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
       "Net benefit cannot exceed gross fees less costs and must clear the requested minimum."),
   ];
   if (output.decision === "EXIT") {
+    result.push(check("lp-fee-projection", false,
+      "The pool-share uptime model cannot establish positive incremental fee income for an exit; a separate exit-benefit model is required."));
     result.push(check("lp-exit-payload", output.proposedRange === null, "An exit must not introduce a new liquidity range."));
     result.push(check("lp-exit-exposure", exposure.token0Bps === request.position.token0ShareBps && exposure.token1Bps === request.position.token1ShareBps
       && exposure.token0Bps <= request.constraints.maximumToken0ShareBps && exposure.token1Bps <= request.constraints.maximumToken1ShareBps,
@@ -68,6 +70,29 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
   result.push(check("lp-current-tick-contained", range.lowerTick <= request.marketState.currentTick && request.marketState.currentTick < range.upperTick,
     "Current tick is inside the final half-open range."));
   const oldWidth = request.position.upperTick - request.position.lowerTick;
+  const projection = output.feeProjection;
+  result.push(check("lp-fee-projection", projection !== undefined,
+    "Actionable range economics require an explicit POOL_SHARE_UPTIME_V1 projection; uptime is a model assumption, not observed future income."));
+  if (projection !== undefined) {
+    // Derive the declared model independently from frozen pool data and final ticks.
+    // Fixed-point ratios truncate at each operation, as specified by the model.
+    const share = parseFixed(request.position.positionValueUsd) * FIXED_SCALE / parseFixed(request.marketState.poolLiquidityUsd);
+    const dailyFees = parseFixed(request.marketState.fees24hUsd) * share / FIXED_SCALE;
+    const horizonRatio = BigInt(request.constraints.evaluationHorizonHours) * FIXED_SCALE / 24n;
+    const feeBase = dailyFees * horizonRatio / FIXED_SCALE;
+    const density = BigInt(oldWidth) * FIXED_SCALE / BigInt(width);
+    const currentFees = feeBase * BigInt(projection.currentUptimeBps) / 10_000n;
+    const proposedFees = (feeBase * density / FIXED_SCALE) * BigInt(projection.proposedUptimeBps) / 10_000n;
+    const incrementalFees = proposedFees - currentFees;
+    const cost = parseFixed(output.estimatedRebalanceCostUsd);
+    result.push(check("lp-fee-arithmetic", parseFixed(output.expectedGrossFeesUsd) === proposedFees
+      && incrementalFees > 0n && incrementalFees >= cost
+      && parseFixed(output.expectedNetBenefitUsd) === incrementalFees - cost,
+      "Gross and incremental fees derive from frozen pool-share, final range density, and disclosed uptime assumptions; net benefit subtracts costs without clamping a loss."));
+    result.push(check("lp-break-even", incrementalFees > 0n && output.breakEvenHours !== null
+      && parseFixed(output.breakEvenHours) === cost * BigInt(request.constraints.evaluationHorizonHours) * FIXED_SCALE / incrementalFees,
+      "Break-even hours equal cost times the evaluation horizon divided by incremental fees, truncated only at fixed-point precision; free actions can report zero."));
+  }
   result.push(check("lp-range-decision", (range.lowerTick !== request.position.lowerTick || range.upperTick !== request.position.upperTick)
     && (output.decision !== "WIDEN" || width > oldWidth) && (output.decision !== "NARROW" || width < oldWidth),
     "Widen and narrow labels agree with the emitted range width."));
@@ -104,10 +129,11 @@ function gridChecks(request: BoundedGridRequest, output: BoundedGridDeliverable)
   return [
     check("grid-order-semantics", output.decision === "BUILD_GRID" && buys.length > 0 && sells.length > 0
       && output.orders.length <= request.constraints.levelCount && output.orders.every((order) => {
-        const price = parseFixed(order.price), amount = parseFixed(order.baseAmount);
+        const price = parseFixed(order.price), amount = parseFixed(order.baseAmount), quote = parseFixed(order.maximumQuoteAmount);
         return price >= lower && price <= upper && (order.side === "BUY" ? price <= mid : price >= mid)
           && amount % (10n ** BigInt(18 - request.baseAsset.decimals)) === 0n
-          && ceilDivide(price * amount, FIXED_SCALE) <= parseFixed(order.maximumQuoteAmount);
+          && quote % (10n ** BigInt(18 - request.quoteAsset.decimals)) === 0n
+          && ceilDivide(price * amount, FIXED_SCALE) <= quote;
       }), "A finite two-sided grid uses precision-valid orders with sufficient quote reservations inside the supplied price range."),
     check("grid-market-policy", lower < mid && mid < upper
       && parseFixed(request.marketState.liquidityUsd) >= parseFixed(request.constraints.minimumLiquidityUsd)

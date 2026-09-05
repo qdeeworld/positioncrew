@@ -183,6 +183,7 @@ export function createLpRebalanceDeliverable(
   const netBenefit = clampNonNegative(incrementalFees - totalCostUsd);
   const economicsPass =
     incrementalFees > 0n &&
+    incrementalFees >= totalCostUsd &&
     netBenefit >= parseFixed(request.constraints.minimumNetBenefitUsd) &&
     gasUsd <= parseFixed(request.maxGasUsd) &&
     totalCostUsd <= parseFixed(request.maxActionUsd);
@@ -230,6 +231,7 @@ export function createLpRebalanceDeliverable(
     expectedGrossFeesUsd: formatFixed(expectedGrossFees, 18),
     expectedNetBenefitUsd: formatFixed(netBenefit, 18),
     breakEvenHours: formatFixed(breakEvenHours, 18),
+    feeProjection: { model: "POOL_SHARE_UPTIME_V1", currentUptimeBps, proposedUptimeBps },
     inventoryExposure: { token0Bps: inventory.token0Bps, token1Bps: inventory.token1Bps },
     summary: `${proposedDecision} the LP range to ${proposedRange.lowerTick}..${proposedRange.upperTick}; modeled net benefit is ${formatFixed(netBenefit, 2)} USD after costs, assuming ${currentUptimeBps / 100}% current and ${proposedUptimeBps / 100}% proposed fee uptime.`,
     actionSteps: [

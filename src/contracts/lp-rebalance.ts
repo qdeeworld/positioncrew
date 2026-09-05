@@ -92,6 +92,13 @@ export const LpRebalanceDeliverableSchema = z
     expectedGrossFeesUsd: UnsignedDecimalSchema,
     expectedNetBenefitUsd: UnsignedDecimalSchema,
     breakEvenHours: UnsignedDecimalSchema.nullable(),
+    // Optional only for immutable legacy receipts. New actionable results must
+    // expose the assumptions used by the independent financial checker.
+    feeProjection: z.object({
+      model: z.literal("POOL_SHARE_UPTIME_V1"),
+      currentUptimeBps: z.number().int().min(0).max(10_000),
+      proposedUptimeBps: z.number().int().min(0).max(10_000),
+    }).strict().optional(),
     inventoryExposure: z
       .object({ token0Bps: z.number().int().min(0).max(10_000), token1Bps: z.number().int().min(0).max(10_000) })
       .strict(),
