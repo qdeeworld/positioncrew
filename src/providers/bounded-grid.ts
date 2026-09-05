@@ -15,6 +15,7 @@ import {
 } from "../core/fixed.js";
 import { clampNonNegative, validateEvidence } from "./provider-utils.js";
 import { calculateBoundedGridRisk } from "./bounded-grid-risk.js";
+import { calculateGridCycleEconomics } from "../core/grid-cycle-economics.js";
 
 type GridOrder = z.infer<typeof GridOrderSchema>;
 
@@ -137,10 +138,14 @@ export function createBoundedGridDeliverable(
       })),
     ];
     const risk = calculateBoundedGridRisk(orders, mid, upper);
-    const turnover = risk.deployedNotional * BigInt(request.constraints.expectedCompletedCycles);
-    const grossSpreadCapture = (turnover * step) / (2n * mid);
-    const fees = ceilDivide(turnover * 2n * BigInt(request.marketState.venueFeeBps), 10_000n);
-    const slippage = ceilDivide(turnover * 2n * BigInt(request.maxSlippageBps), 10_000n);
+    const cycle = calculateGridCycleEconomics(orders, request.quoteAsset.decimals, request.marketState.venueFeeBps, request.maxSlippageBps);
+    const cycles = BigInt(request.constraints.expectedCompletedCycles);
+    const nominalForecast = (cycle.chargeNotional * cycles * step) / (2n * mid);
+    const executableCeiling = cycle.gross * cycles;
+    // Do not raise the old forecast; cap it by matched emitted quantities and prices.
+    const grossSpreadCapture = nominalForecast < executableCeiling ? nominalForecast : executableCeiling;
+    const fees = cycle.feeBuffer * cycles;
+    const slippage = cycle.slippageBuffer * cycles;
     const netProfit = clampNonNegative(grossSpreadCapture - fees - slippage - gas);
     return {
       orders,
@@ -222,6 +227,8 @@ export function createBoundedGridDeliverable(
     ],
     limitations: [
       `The profit model assumes ${request.constraints.expectedCompletedCycles} completed cycles; fills are not guaranteed.`,
+      "Each hypothetical cycle pairs nearest-mid BUY and SELL quantities once; unmatched inventory earns no spread credit. BUY quote debits round up and SELL credits round down per emitted order.",
+      "Fees and slippage use executable price-times-quantity notionals, rounded up per fill, with an explicit 2x conservative cost buffer. Quote reservations are not turnover or revenue.",
       "Inventory includes initial SELL base plus every BUY fill, valued at upperPrice, with no SELL fills assumed. Marks above upperPrice can exceed this USD bound.",
       "worstCaseLossUsd is a zero-price stress scenario: initial SELL base valued at midPrice, every BUY reservation, and estimated fees, slippage, and gas.",
       "No hard loss guarantee: gaps, cancellation failures, and costs above estimates are not execution-enforced. A lowerPrice cancellation is not a stop-loss guarantee.",

@@ -62,12 +62,35 @@ function lpShare0(request: LpRebalanceRequest, lower: number, upper: number, tic
 
 function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): FinancialInvariantCheck[] {
   const exposure = output.inventoryExposure;
-  if (output.status !== "ACTIONABLE") return [
+  if (output.status !== "ACTIONABLE") {
+    const hold = output.status === "NO_ACTION" && output.decision === "HOLD";
+    const width = request.position.upperTick - request.position.lowerTick;
+    const tick = request.marketState.currentTick;
+    const inside = tick >= request.position.lowerTick && tick < request.position.upperTick;
+    const edgeBps = inside ? Math.floor(Math.min(tick - request.position.lowerTick, request.position.upperTick - tick) * 10_000 / width) : 0;
+    const defaultUptime = !inside ? 0 : edgeBps < request.constraints.edgeBufferBps ? 3_500
+      : request.marketState.realizedVolatilityBps >= request.constraints.highVolatilityBps ? 5_500 : 9_000;
+    const uptime = output.feeProjection?.currentUptimeBps ?? defaultUptime;
+    const share = parseFixed(request.position.positionValueUsd) * FIXED_SCALE / parseFixed(request.marketState.poolLiquidityUsd);
+    const daily = parseFixed(request.marketState.fees24hUsd) * share / FIXED_SCALE;
+    const horizon = BigInt(request.constraints.evaluationHorizonHours) * FIXED_SCALE / 24n;
+    const currentFees = ((daily * horizon / FIXED_SCALE) * BigInt(uptime)) / 10_000n;
+    const gross = parseFixed(output.expectedGrossFeesUsd);
+    return [
     check("lp-inactive-payload", output.actionSteps.length === 0 && output.proposedRange === null
-      && (output.decision === "HOLD" || output.decision === "NONE"), "A hold or refusal cannot introduce a range or executable steps."),
+      && (hold || (output.status !== "NO_ACTION" && output.decision === "NONE")), "A hold or refusal cannot introduce a range or executable steps."),
     check("lp-current-exposure", exposure.token0Bps === request.position.token0ShareBps && exposure.token1Bps === request.position.token1ShareBps,
       "Inactive output reports the supplied inventory; existing policy violations are not certified safe."),
-  ];
+    check("lp-inactive-economics", parseFixed(output.estimatedRebalanceCostUsd) === 0n
+      && parseFixed(output.expectedNetBenefitUsd) === 0n && output.breakEvenHours === null,
+      "No rebalance means zero incremental cost and benefit and no break-even time."),
+    check("lp-inactive-fees", hold
+      ? (gross === currentFees || gross === currentFees / 1_000_000_000_000n * 1_000_000_000_000n)
+        && (output.feeProjection === undefined || output.feeProjection.proposedUptimeBps === uptime)
+      : gross === 0n && output.feeProjection === undefined,
+      "HOLD fees use frozen pool share, horizon and current uptime, allowing exact six-decimal truncation. Refusals earn no projected fees; HOLD cannot claim improved uptime."),
+    ];
+  }
   const result = [
     check("lp-action-decision", ["SHIFT", "WIDEN", "NARROW", "EXIT"].includes(output.decision), "An actionable LP result changes or exits the position."),
     check("lp-cost-limits", parseFixed(request.constraints.estimatedGasUsd) <= parseFixed(request.maxGasUsd)
@@ -154,18 +177,38 @@ function gridChecks(request: BoundedGridRequest, output: BoundedGridDeliverable)
   const buyReservations = sum(buys.map((order) => parseFixed(order.maximumQuoteAmount)));
   const initialBaseCost = ceilDivide(initialBase * mid, FIXED_SCALE);
   const inventoryBound = ceilDivide(accumulatedBase * upper, FIXED_SCALE);
-  const turnover = sum(output.orders.map((order) => parseFixed(order.maximumQuoteAmount))) * BigInt(request.constraints.expectedCompletedCycles);
-  const minimumFees = ceilDivide(2n * turnover * BigInt(request.marketState.venueFeeBps), 10_000n);
-  const minimumSlippage = ceilDivide(2n * turnover * BigInt(request.maxSlippageBps), 10_000n);
+  const quoteUnit = 10n ** BigInt(18 - request.quoteAsset.decimals);
+  const cycles = BigInt(request.constraints.expectedCompletedCycles);
+  const notionals = output.orders.map((order) => ceilDivide(parseFixed(order.price) * parseFixed(order.baseAmount), FIXED_SCALE * quoteUnit) * quoteUnit);
+  const minimumFees = sum(notionals.map((notional) => ceilDivide(notional * BigInt(request.marketState.venueFeeBps), 10_000n * quoteUnit) * quoteUnit)) * 2n * cycles;
+  const minimumSlippage = sum(notionals.map((notional) => ceilDivide(notional * BigInt(request.maxSlippageBps), 10_000n * quoteUnit) * quoteUnit)) * 2n * cycles;
   const fees = parseFixed(output.estimatedFeesUsd), slippage = parseFixed(output.estimatedSlippageUsd), gas = parseFixed(output.estimatedGasUsd);
   const lossBound = initialBaseCost + buyReservations + fees + slippage + gas;
-  const step = (upper - lower) / BigInt(request.constraints.levelCount - 1);
-  const modeledGrossBound = turnover * step / (2n * mid);
+  // Independent derivation: consume the common side capacity from each nearest-mid
+  // prefix, then value matched amounts per original order. No generator/helper call.
+  const buyBase = sum(buys.map((order) => parseFixed(order.baseAmount)));
+  const pairedBase = buyBase < initialBase ? buyBase : initialBase;
+  const matchedValue = (orders: typeof buys, debit: boolean): bigint => {
+    let remaining = pairedBase, value = 0n;
+    const sorted = orders.map((order) => ({ price: parseFixed(order.price), amount: parseFixed(order.baseAmount) }))
+      .sort((a, b) => a.price === b.price ? (a.amount < b.amount ? -1 : a.amount > b.amount ? 1 : 0)
+        : (debit ? a.price > b.price : a.price < b.price) ? -1 : 1);
+    for (const order of sorted) {
+      const amount = order.amount < remaining ? order.amount : remaining;
+      const numerator = amount * order.price;
+      value += (debit ? ceilDivide(numerator, FIXED_SCALE * quoteUnit) : numerator / (FIXED_SCALE * quoteUnit)) * quoteUnit;
+      remaining -= amount;
+      if (remaining === 0n) break;
+    }
+    return value;
+  };
+  const modeledGrossBound = positivePart(matchedValue(sells, false) - matchedValue(buys, true)) * cycles;
+  const gross = parseFixed(output.grossSpreadCaptureUsd);
   return [
     check("grid-order-semantics", output.decision === "BUILD_GRID" && buys.length > 0 && sells.length > 0
       && output.orders.length <= request.constraints.levelCount && output.orders.every((order) => {
         const price = parseFixed(order.price), amount = parseFixed(order.baseAmount), quote = parseFixed(order.maximumQuoteAmount);
-        return price >= lower && price <= upper && (order.side === "BUY" ? price <= mid : price >= mid)
+        return price >= lower && price <= upper && (order.side === "BUY" ? price < mid : price > mid)
           && amount % (10n ** BigInt(18 - request.baseAsset.decimals)) === 0n
           && quote % (10n ** BigInt(18 - request.quoteAsset.decimals)) === 0n
           && ceilDivide(price * amount, FIXED_SCALE) <= quote;
@@ -184,19 +227,41 @@ function gridChecks(request: BoundedGridRequest, output: BoundedGridDeliverable)
     check("grid-zero-price-loss", lossBound <= parseFixed(output.worstCaseLossUsd)
       && parseFixed(output.worstCaseLossUsd) <= parseFixed(request.constraints.maximumLossUsd),
       "Zero base price after all buys and no sells loses initial base cost, buy reservations, and modeled costs; cancellation is not a guaranteed stop."),
-    check("grid-profit-arithmetic", parseFixed(output.grossSpreadCaptureUsd) <= positivePart(modeledGrossBound)
-      && parseFixed(output.expectedNetProfitUsd) <= positivePart(parseFixed(output.grossSpreadCaptureUsd) - fees - slippage - gas)
+    check("grid-profit-arithmetic", gross <= modeledGrossBound && gross > fees + slippage + gas
+      && parseFixed(output.expectedNetProfitUsd) === gross - fees - slippage - gas
       && parseFixed(output.expectedNetProfitUsd) >= parseFixed(request.constraints.minimumExpectedNetProfitUsd),
-      "The requested completed-cycle model bounds gross spread and net profit after costs; fills are not proven."),
+      "Matched emitted prices and quantities bound hypothetical nearest-mid cycle capture, without quantity reuse or credit for unmatched inventory. Net is exactly gross less costs and positive; fills are not proven."),
     check("grid-order-expiry", Date.parse(output.expiresAt) - Date.parse(output.generatedAt) <= request.constraints.orderExpirySeconds * 1_000,
       "The grid expires within the requested order lifetime."),
   ];
 }
 
 function yieldChecks(request: YieldOptimizationRequest, output: YieldOptimizationDeliverable): FinancialInvariantCheck[] {
-  if (output.status !== "ACTIONABLE") return [check("yield-inactive-payload", output.selectedOpportunityId === null
+  if (output.status !== "ACTIONABLE") {
+    const held = sum(request.currentPositions.map((item) => parseFixed(item.amountUsd)));
+    const weighted = sum(request.currentPositions.map((item) => parseFixed(item.amountUsd) * BigInt(item.grossApyBps)));
+    const capital = parseFixed(request.capitalUsd);
+    const unchanged = new Map<string, bigint>();
+    for (const item of request.currentPositions) unchanged.set(protocolKey(item.protocol),
+      (unchanged.get(protocolKey(item.protocol)) ?? 0n) + parseFixed(item.amountUsd));
+    const supplied = output.finalProtocolAllocations === undefined ? null
+      : new Map(output.finalProtocolAllocations.map((item) => [protocolKey(item.protocol), parseFixed(item.amountUsd)]));
+    return [check("yield-inactive-payload", output.selectedOpportunityId === null
     && parseFixed(output.allocationUsd) === 0n && output.actionSteps.length === 0 && (output.withdrawals?.length ?? 0) === 0
-    && (output.decision === "HOLD" || output.decision === "NONE"), "An inactive yield result cannot allocate or withdraw; retained concentrations are not certified safe.")];
+    && (output.decision === "HOLD" || output.decision === "NONE"), "An inactive yield result cannot allocate or withdraw; retained concentrations are not certified safe."),
+    check("yield-inactive-economics", BigInt(output.currentWeightedApyBps) === (held > 0n ? weighted / held : 0n)
+      && output.grossApyBps === null && parseFixed(output.annualYieldUpliftUsd) === 0n
+      && parseFixed(output.netBenefitUsd) === 0n && parseFixed(output.migrationCostUsd) === 0n && output.breakEvenDays === null,
+      "Current APY is independently principal-weighted; no selected destination means no destination APY, uplift, benefit, migration cost, or break-even."),
+    check("yield-inactive-funding", (output.idleCapitalUsedUsd === undefined || parseFixed(output.idleCapitalUsedUsd) === 0n)
+      && (output.postMigrationCapitalUsd === undefined || parseFixed(output.postMigrationCapitalUsd) === capital)
+      && (output.remainingIdleCapitalUsd === undefined || (capital >= held && parseFixed(output.remainingIdleCapitalUsd) === capital - held))
+      && (supplied === null || (supplied.size === output.finalProtocolAllocations!.length
+        && [...unchanged].every(([key, amount]) => amount === 0n || supplied.get(key) === amount)
+        && [...supplied].every(([key, amount]) => amount === (unchanged.get(key) ?? 0n)))),
+      "Optional inactive portfolio fields must describe unchanged holdings and idle capital, never an unperformed migration."),
+    ];
+  }
   const present = output.withdrawals !== undefined && output.idleCapitalUsedUsd !== undefined && output.finalProtocolAllocations !== undefined
     && output.remainingIdleCapitalUsd !== undefined && output.postMigrationCapitalUsd !== undefined;
   const result = [check("yield-funding-evidence", present, "Actionable yield requires explicit withdrawals, idle funding, post-cost capital, and final protocol allocations.")];
