@@ -1345,12 +1345,24 @@ async function freshMarketplaceRateLimitKey(request: Request): Promise<string> {
   });
 }
 
+async function boundedHireJson(request: Request): Promise<unknown> {
+  const body = await boundedJson(request);
+  if (
+    body !== null && typeof body === "object" &&
+    "evidenceMode" in body && body.evidenceMode === "CURRENT_BLOCK_PINNED" &&
+    (!("observationBinding" in body) || body.observationBinding === undefined)
+  ) {
+    throw new SourceObservationBindingError();
+  }
+  return body;
+}
+
 async function createFreshMarketplaceHire(
   request: Request,
   env: Env,
 ): Promise<Response> {
   if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
-  const parsed = FreshMarketplaceHireRequestSchema.parse(await boundedJson(request));
+  const parsed = FreshMarketplaceHireRequestSchema.parse(await boundedHireJson(request));
   const task = FRESH_MARKETPLACE_TASKS[parsed.benchmarkSlug];
   const provider = getProviderBySlug(parsed.providerSlug);
   if (!provider || provider.service !== task.service || provider.requestSchema !== task.requestSchema) {
@@ -1615,7 +1627,7 @@ async function createLendingProviderAuditionHire(
   env: Env,
 ): Promise<Response> {
   if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
-  const parsed = LendingProviderAuditionHireRequestSchema.parse(await boundedJson(request));
+  const parsed = LendingProviderAuditionHireRequestSchema.parse(await boundedHireJson(request));
   const delegatedHeaders = new Headers(request.headers);
   delegatedHeaders.delete("Content-Length");
   const delegatedRequest = new Request(request.url, {

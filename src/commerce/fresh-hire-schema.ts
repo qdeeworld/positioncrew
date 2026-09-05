@@ -303,7 +303,7 @@ export const CurrentLendingMarketplaceHireRequestSchema = z.object({
   providerSlug: z.literal("lending-rescue"),
   evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
   observation: CurrentBlockPinnedObservationSchema,
-  observationBinding: ServerObservationBindingSchema.optional(),
+  observationBinding: ServerObservationBindingSchema,
   request: LendingRescueRequestSchema,
 }).strict().superRefine((value, context) => {
   validateCurrentBlockBinding(value, context, {
@@ -322,7 +322,7 @@ export const LendingProviderAuditionHireRequestSchema = z.object({
   idempotencyKey: IdempotencyKeySchema,
   evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
   observation: CurrentBlockPinnedObservationSchema,
-  observationBinding: ServerObservationBindingSchema.optional(),
+  observationBinding: ServerObservationBindingSchema,
   request: LendingRescueRequestSchema,
 }).strict().superRefine((value, context) => {
   validateCurrentBlockBinding(value, context, {
@@ -345,7 +345,7 @@ export const CurrentLpMarketplaceHireRequestSchema = z.object({
   providerSlug: z.literal("lp-rebalance"),
   evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
   observation: CurrentBlockPinnedObservationSchema,
-  observationBinding: ServerObservationBindingSchema.optional(),
+  observationBinding: ServerObservationBindingSchema,
   request: LpRebalanceRequestSchema,
 }).strict().superRefine((value, context) => {
   validateCurrentBlockBinding(value, context, {
@@ -368,7 +368,7 @@ export const CurrentYieldMarketplaceHireRequestSchema = z.object({
   providerSlug: z.literal("yield-optimization"),
   evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
   observation: CurrentBlockPinnedObservationSchema,
-  observationBinding: ServerObservationBindingSchema.optional(),
+  observationBinding: ServerObservationBindingSchema,
   request: YieldOptimizationRequestSchema,
 }).strict().superRefine((value, context) => {
   validateCurrentBlockBinding(value, context, {
@@ -391,7 +391,7 @@ export const CurrentGridMarketplaceHireRequestSchema = z.object({
   providerSlug: z.literal("bounded-grid"),
   evidenceMode: z.literal("CURRENT_BLOCK_PINNED"),
   observation: CurrentBlockPinnedObservationSchema,
-  observationBinding: ServerObservationBindingSchema.optional(),
+  observationBinding: ServerObservationBindingSchema,
   request: BoundedGridRequestSchema,
 }).strict().superRefine((value, context) => {
   validateCurrentBlockBinding(value, context, {

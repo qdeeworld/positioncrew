@@ -1631,9 +1631,18 @@ function fourCategoryCurrentBody(
 describe("four-category current persisted-hire schema", () => {
   it.each(FOUR_CATEGORY_CURRENT_CASES)(
     "accepts only the exact current $service source and provider/task binding",
-    (definition) => {
+    async (definition) => {
       const ordinal = FOUR_CATEGORY_CURRENT_CASES.indexOf(definition);
-      const body = fourCategoryCurrentBody(definition, ordinal);
+      const unsigned = fourCategoryCurrentBody(definition, ordinal);
+      const body = {
+        ...unsigned,
+        observationBinding: await issueServerObservationBinding(
+          unsigned.request as Parameters<typeof issueServerObservationBinding>[0],
+          unsigned.observation,
+          TEST_OBSERVATION_KEY,
+          new Date(unsigned.request.requestedAt as string),
+        ),
+      };
       const parsed = FreshMarketplaceHireRequestSchema.parse(body) as {
         evidenceMode: string;
         benchmarkSlug: string;
