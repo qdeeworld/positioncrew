@@ -174,6 +174,68 @@ describe("yield portfolio financial constraints", () => {
     expect(result.annualYieldUpliftUsd).toBe("44.8");
   });
 
+  it("combines B and C when expensive A invalidates every APY prefix and neither singleton clears benefit", () => {
+    const r = request();
+    r.capitalUsd = "900";
+    r.currentPositions = [
+      position(1, { opportunityId: "A", protocol: "Venus", amountUsd: "300", grossApyBps: 100, estimatedExitCostUsd: "100" }),
+      position(3, { opportunityId: "B", protocol: "Venus", amountUsd: "300", grossApyBps: 300 }),
+      position(4, { opportunityId: "C", protocol: "Venus", amountUsd: "300", grossApyBps: 400 }),
+    ];
+    r.opportunities[0]!.grossApyBps = 2000;
+    r.constraints.minimumNetBenefitUsd = "70";
+    // Preserve the other holdings but lock them to prove each singleton fails.
+    for (const unlocked of ["B", "C"]) {
+      const alone = structuredClone(r);
+      for (const p of alone.currentPositions) if (p.opportunityId !== unlocked) p.lockupSeconds = 3600;
+      expect(assertPortfolio(alone).status).toBe("NO_ACTION");
+    }
+    const result = assertPortfolio(r);
+    expect(result.status).toBe("ACTIONABLE");
+    expect(result.withdrawals).toEqual([{ opportunityId: "B", amountUsd: "300" }, { opportunityId: "C", amountUsd: "300" }]);
+    expect(result.allocationUsd).toBe("597");
+    expect(result.migrationCostUsd).toBe("3");
+    expect(result.netBenefitUsd).toBe("95.4");
+  });
+
+  it("finds the funded cheap combination even when expensive A fits the budget individually", () => {
+    const r = request();
+    r.capitalUsd = "900";
+    r.maxGasUsd = "4";
+    r.currentPositions = [
+      position(1, { opportunityId: "A", protocol: "Venus", amountUsd: "100", grossApyBps: 100, estimatedExitCostUsd: "3" }),
+      position(3, { opportunityId: "B", protocol: "Venus", amountUsd: "400", grossApyBps: 200 }),
+      position(4, { opportunityId: "C", protocol: "Venus", amountUsd: "400", grossApyBps: 300 }),
+    ];
+    r.opportunities[0]!.grossApyBps = 2000;
+    r.constraints.minimumNetBenefitUsd = "100";
+    const result = assertPortfolio(r);
+    expect(result.status).toBe("ACTIONABLE");
+    expect(result.withdrawals).toEqual([{ opportunityId: "B", amountUsd: "400" }, { opportunityId: "C", amountUsd: "400" }]);
+    expect(result.allocationUsd).toBe("797");
+    expect(result.migrationCostUsd).toBe("3");
+    expect(result.netBenefitUsd).toBe("136.4");
+    r.currentPositions.reverse();
+    expect(assertPortfolio(r)).toEqual(result);
+  });
+
+  it("uses a bounded search for a large portfolio requiring joint funding", () => {
+    const r = request();
+    r.capitalUsd = "1280";
+    r.maxGasUsd = "3";
+    r.currentPositions = Array.from({ length: 128 }, (_, index) => position(index + 10, {
+      protocol: "Venus", amountUsd: "10", grossApyBps: 100, estimatedExitCostUsd: "0.01",
+    }));
+    r.opportunities = [position(1000, { amountUsd: "1280", grossApyBps: 2000 })];
+    r.constraints.minimumNetBenefitUsd = "200";
+    const result = assertPortfolio(r);
+    expect(result.status).toBe("ACTIONABLE");
+    expect(result.withdrawals).toHaveLength(128);
+    expect(result.allocationUsd).toBe("1277.72");
+    expect(result.migrationCostUsd).toBe("2.28");
+    expect(result.netBenefitUsd).toBe("240.464");
+  });
+
   it("uses idle funds without inventing a migration or exiting existing capital", () => {
     const r = request();
     r.currentPositions = [position(1, { amountUsd: "500", grossApyBps: 5000, lockupSeconds: 3600 })];

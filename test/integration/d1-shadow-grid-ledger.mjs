@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { build } from "esbuild";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,12 +10,16 @@ import { fileURLToPath } from "node:url";
 import { signSyntheticCurrentHire, SOURCE_OBSERVATION_TEST_KEY } from "./source-observation-test-signing.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const config = resolve(root, "dist/server/wrangler.local.json");
+const builtConfig = resolve(root, "dist/server/wrangler.local.json");
 const wrangler = resolve(root, "node_modules/.bin/wrangler");
 const boundedGridFixture = JSON.parse(
   await readFile(resolve(root, "fixtures/bounded-grid/bnb-usdt-grid.v1.json"), "utf8"),
 );
 const persistence = await mkdtemp(join(tmpdir(), "positioncrew-shadow-grid-d1-"));
+// Wrangler watches its entrypoint directory. Database writes must live elsewhere
+// or every D1 operation can trigger a dev-server reload during the test.
+const runtimeDirectory = await mkdtemp(join(tmpdir(), "positioncrew-shadow-runtime-"));
+const config = join(runtimeDirectory, "wrangler.shadow-test.json");
 const token = "positioncrew-shadow-grid-integration-token";
 const testNow = new Date();
 testNow.setUTCMinutes(32, 0, 0);
@@ -118,18 +123,24 @@ async function availablePort() {
   return address.port;
 }
 
-async function waitForWorker(baseUrl) {
+async function waitForWorker(baseUrl, child, startupLog) {
   const expiresAt = Date.now() + 20_000;
   while (Date.now() < expiresAt) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      assert.fail(`Local Worker exited during startup: ${startupLog()}`);
+    }
     try {
-      const response = await fetch(`${baseUrl}/api/status`);
-      if (response.ok) return;
+      // Readiness must not depend on external telemetry or an unbounded fetch.
+      const response = await fetch(`${baseUrl}/api/benchmark-hires/00000000-0000-4000-8000-000000000001`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (response.status === 200 || response.status === 404) return;
     } catch {
       // Wrangler is still starting.
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   }
-  assert.fail("Local Worker did not become ready");
+  assert.fail(`Local Worker did not become ready: ${startupLog()}`);
 }
 
 async function startWorker(port, entryNow = testNow, checkpointNow = null) {
@@ -158,9 +169,19 @@ async function startWorker(port, entryNow = testNow, checkpointNow = null) {
   const child = spawn(
     wrangler,
     args,
-    { cwd: root, stdio: "ignore" },
+    { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
   );
-  await waitForWorker(`http://127.0.0.1:${port}`);
+  let startupLog = "";
+  const capture = (chunk) => { startupLog = (startupLog + String(chunk)).slice(-16_000); };
+  child.stdout.on("data", capture);
+  child.stderr.on("data", capture);
+  child.on("error", capture);
+  try {
+    await waitForWorker(`http://127.0.0.1:${port}`, child, () => startupLog);
+  } catch (error) {
+    await stopWorker(child);
+    throw error;
+  }
   return child;
 }
 
@@ -258,6 +279,34 @@ function queryD1SetupRows(sql) {
 
 let worker;
 try {
+  // Test the real Worker, D1 and scheduler against a deterministic chain seam.
+  // A live market legitimately refusing a grid must not disable the unrelated
+  // persistence, missed-sample and abandoned-epoch regression coverage.
+  // This bundle exists only in the temporary test directory, never in dist.
+  const originalConfig = JSON.parse(await readFile(builtConfig, "utf8"));
+  await build({
+    entryPoints: [resolve(root, "worker/index.ts")],
+    outfile: join(runtimeDirectory, "shadow-test-worker.js"),
+    bundle: true, format: "esm", platform: "neutral", target: "es2022",
+    conditions: ["workerd", "browser", "import", "default"],
+    external: ["node:buffer", "node:crypto"], logLevel: "silent",
+    plugins: [{ name: "synthetic-shadow-chain-only", setup(builder) {
+      builder.onResolve({ filter: /\/src\/telemetry\/bsc\.js$/ }, () => ({ path: "shadow-chain", namespace: "shadow-test" }));
+      builder.onLoad({ filter: /.*/, namespace: "shadow-test" }, () => ({
+        contents: `export * from ${JSON.stringify(resolve(root, "src/telemetry/bsc.ts"))};
+export { inspectPancakeGridMarket, inspectPancakeGridPriceSample, verifyPancakeGridPriceSample } from ${JSON.stringify(resolve(root, "test/integration/shadow-grid-chain-stub.ts"))};`,
+        loader: "ts", resolveDir: root,
+      }));
+    } }],
+  });
+  await writeFile(config, JSON.stringify({
+    ...originalConfig,
+    main: join(runtimeDirectory, "shadow-test-worker.js"),
+    assets: { ...originalConfig.assets, directory: resolve(root, "dist/client") },
+    d1_databases: originalConfig.d1_databases.map((binding) => ({
+      ...binding, migrations_dir: resolve(root, "dist/.openai/drizzle"),
+    })),
+  }));
   execFileSync(
     wrangler,
     [
@@ -1523,4 +1572,5 @@ try {
 } finally {
   if (worker) await stopWorker(worker);
   await rm(persistence, { recursive: true, force: true });
+  await rm(runtimeDirectory, { recursive: true, force: true });
 }

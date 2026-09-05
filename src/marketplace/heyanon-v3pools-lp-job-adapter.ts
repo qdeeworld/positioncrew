@@ -269,6 +269,7 @@ function normalizeExternalRange(
   const incrementalFees = proposedGrossFees - currentGrossFees;
   const netBenefit = clampNonNegative(incrementalFees - totalCostUsd);
   const economicsPass = incrementalFees > 0n &&
+    incrementalFees >= totalCostUsd &&
     netBenefit >= parseFixed(request.constraints.minimumNetBenefitUsd) &&
     parseFixed(request.constraints.estimatedGasUsd) <= parseFixed(request.maxGasUsd) &&
     totalCostUsd <= parseFixed(request.maxActionUsd);
@@ -312,6 +313,7 @@ function normalizeExternalRange(
     expectedGrossFeesUsd: formatFixed(proposedGrossFees, 18),
     expectedNetBenefitUsd: formatFixed(netBenefit, 18),
     breakEvenHours: formatFixed(divideFixed(totalCostUsd * BigInt(request.constraints.evaluationHorizonHours), incrementalFees), 18),
+    feeProjection: { model: "POOL_SHARE_UPTIME_V1", currentUptimeBps, proposedUptimeBps: 9_500 },
     inventoryExposure: { token0Bps: proposedInventory.token0Bps, token1Bps: proposedInventory.token1Bps },
     summary: `The external range clears the screening model: ${formatFixed(netBenefit, 2)} USD net benefit assuming ${currentUptimeBps / 100}% current and 95% proposed fee uptime, not a fee forecast.`,
     actionSteps: [
@@ -520,6 +522,7 @@ export async function auditionHeyAnonV3LpJob(
         expectedGrossFeesUsd: normalizedDeliverable.expectedGrossFeesUsd,
         expectedNetBenefitUsd: normalizedDeliverable.expectedNetBenefitUsd,
         breakEvenHours: normalizedDeliverable.breakEvenHours,
+        ...(normalizedDeliverable.feeProjection ? { feeProjection: normalizedDeliverable.feeProjection } : {}),
         actionSteps: normalizedDeliverable.actionSteps,
         expiresAt: normalizedDeliverable.expiresAt,
         invalidationConditions: normalizedDeliverable.invalidationConditions,
