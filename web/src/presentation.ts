@@ -1,5 +1,23 @@
 import type { CurrentBlockPinnedMarketplaceEvidence, FixtureJobResponse, ProviderDeliverable, ServiceId } from "./types.js";
 
+export function effectiveResultExpiry(deliverable: ProviderDeliverable): string | null {
+  let deadline = deliverable.expiresAt;
+  let expiry = Date.parse(deadline);
+  if (!Number.isFinite(expiry)) return null;
+  if (deliverable.service !== "LENDING_RESCUE" || deliverable.status !== "ACTIONABLE") return deadline;
+  if (!deliverable.recommendation) return null;
+  for (const action of [deliverable.recommendation, ...(deliverable.alternatives ?? [])]) {
+    const value = action?.executeBefore;
+    const actionExpiry = typeof value === "string" ? Date.parse(value) : Number.NaN;
+    if (!Number.isFinite(actionExpiry)) return null;
+    if (actionExpiry < expiry) {
+      expiry = actionExpiry;
+      deadline = value;
+    }
+  }
+  return deadline;
+}
+
 export function isResultExpired(expiresAt: string, now = Date.now()): boolean {
   const expiry = Date.parse(expiresAt);
   return !Number.isFinite(expiry) || expiry <= now;

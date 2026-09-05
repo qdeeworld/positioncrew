@@ -26,6 +26,7 @@ import {
   actionDetails,
   capitalDecisionPlan,
   conditionsFor,
+  effectiveResultExpiry,
   formatTimestamp,
   gridRiskCopy,
   isResultExpired,
@@ -1228,15 +1229,18 @@ function SummaryResult({
   founderAdvantagePublicationLoadState: PublicationLoadState;
 }) {
   const deliverable = response.result.deliverable;
+  const resultExpiry = effectiveResultExpiry(deliverable);
   const [resultClock, setResultClock] = useState(Date.now);
   useEffect(() => {
     setResultClock(Date.now());
-    const remaining = Date.parse(deliverable.expiresAt) - Date.now();
+    if (resultExpiry === null) return;
+    const remaining = Date.parse(resultExpiry) - Date.now();
     if (!Number.isFinite(remaining) || remaining <= 0) return;
     const timer = window.setTimeout(() => setResultClock(Date.now()), Math.min(remaining + 1, 2_147_483_647));
     return () => window.clearTimeout(timer);
-  }, [deliverable.expiresAt]);
-  const expired = response.evidenceMode !== "FROZEN_BSC_TEST_FIXTURE" && isResultExpired(deliverable.expiresAt, resultClock);
+  }, [resultExpiry]);
+  const expired = response.evidenceMode !== "FROZEN_BSC_TEST_FIXTURE"
+    && (resultExpiry === null || isResultExpired(resultExpiry, Math.max(resultClock, Date.now())));
   const meaning = expired ? {
     tone: "hold" as const,
     title: "This result has expired.",
@@ -1280,7 +1284,7 @@ function SummaryResult({
           <h2>{expired ? "Refresh evidence before acting" : resultHeadline(deliverable)}</h2>
           <p>{deliverable.summary}</p>
         </div>
-        <span className="expires-label"><Clock3 size={13} /> {expired ? "Expired" : "Expires"} {formatTimestamp(deliverable.expiresAt)} UTC</span>
+        <span className="expires-label"><Clock3 size={13} /> {resultExpiry === null ? "Deadline unavailable" : `${expired ? "Expired" : "Expires"} ${formatTimestamp(resultExpiry)} UTC`}</span>
       </div>
       <section className={`result-meaning ${meaning.tone}`} aria-label="What this result means">
         <MeaningIcon size={18} aria-hidden="true" />
@@ -1381,7 +1385,7 @@ function SummaryResult({
           </ul>
         </section>
       </div>
-      {deliverable.service === "LENDING_RESCUE" && deliverable.alternatives?.[0] && (
+      {!expired && deliverable.service === "LENDING_RESCUE" && deliverable.alternatives?.[0] && (
         <div className="alternative-action">
           <span><strong>Alternative</strong>Add {deliverable.alternatives[0].amount} {deliverable.alternatives[0].asset.symbol} (${deliverable.alternatives[0].amountUsd})</span>
           <span>Projected HF <strong>{deliverable.alternatives[0].projectedHealthFactor}</strong></span>
