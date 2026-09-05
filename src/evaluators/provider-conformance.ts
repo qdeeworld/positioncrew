@@ -10,7 +10,7 @@ import {
   type EvaluationCheck,
   type EvaluationReceipt,
 } from "../commerce/types.js";
-import { evaluateFinancialInvariants } from "./financial-invariants.js";
+import { evaluateFinancialInvariants, yieldPortfolioInputConsistent } from "./financial-invariants.js";
 
 function check(
   id: string,
@@ -62,7 +62,8 @@ export function evaluateProviderConformance(
   const evidenceFresh = request.sources.every((source) => Date.parse(source.observedAt) <= now.getTime()
     && now.getTime() - Date.parse(source.observedAt) <= request.maxDataAgeSeconds * 1_000);
   const requiredEvidenceRefusal = now.getTime() >= Date.parse(request.deadline) ? "REFUSED_EXPIRED"
-    : !evidenceConsistent ? "REFUSED_INCONSISTENT_DATA" : !evidenceFresh ? "REFUSED_STALE_DATA" : null;
+    : !evidenceConsistent ? "REFUSED_INCONSISTENT_DATA" : !evidenceFresh ? "REFUSED_STALE_DATA"
+      : request.service === "YIELD_OPTIMIZATION" && !yieldPortfolioInputConsistent(request) ? "REFUSED_INCONSISTENT_DATA" : null;
   const evidenceRefusals = ["REFUSED_EXPIRED", "REFUSED_INCONSISTENT_DATA", "REFUSED_STALE_DATA"];
   const usableExpiry = requiredEvidenceRefusal !== null || Date.parse(deliverable.expiresAt) > now.getTime();
   const sourcesBound = request.service !== "LENDING_RESCUE" ||
@@ -110,9 +111,9 @@ export function evaluateProviderConformance(
       Date.parse(deliverable.expiresAt) <= Date.parse(request.deadline) && usableExpiry,
       `expiresAt=${deliverable.expiresAt}`,
     ),
-    check("evidence-decision", "Evidence refusals match the actual deadline, consistency, and freshness state", 5, true,
+    check("evidence-decision", "Refusals match deadline, observation validity, freshness, and portfolio consistency", 5, true,
       requiredEvidenceRefusal === null ? !evidenceRefusals.includes(deliverable.status) : deliverable.status === requiredEvidenceRefusal,
-      `required=${requiredEvidenceRefusal ?? "NO_EVIDENCE_REFUSAL"}; reported=${deliverable.status}; precedence=expired,inconsistent,stale`),
+      `required=${requiredEvidenceRefusal ?? "NO_EVIDENCE_REFUSAL"}; reported=${deliverable.status}; precedence=expired,observation-inconsistent,stale,portfolio-inconsistent`),
     check("evidence-window", "Actionable output uses current evidence and bounded generation/expiry times", 0, true,
       deliverable.status === "ACTIONABLE"
         ? evidenceConsistent && evidenceFresh && Date.parse(deliverable.generatedAt) >= Date.parse(request.requestedAt)
