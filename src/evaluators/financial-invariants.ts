@@ -11,6 +11,35 @@ const check = (id: string, passed: boolean, detail: string): FinancialInvariantC
 const sameAddress = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
 const protocolKey = (protocol: string): string => protocol.trim().toLowerCase();
 const positivePart = (value: bigint): bigint => value > 0n ? value : 0n;
+
+function yieldIdentitiesConsistent(request: YieldOptimizationRequest): boolean {
+  const markets = new Map<string, string>();
+  const identifiers = new Map<string, string>();
+  const heldMarkets = new Set<string>();
+  for (const [index, entries] of [request.currentPositions, request.opportunities].entries()) {
+    const localIdentifiers = new Set<string>();
+    for (const entry of entries) {
+      const market = entry.vaultOrMarket.toLowerCase();
+      const assetIdentity = JSON.stringify([protocolKey(entry.protocol), entry.asset.address.toLowerCase(), entry.asset.decimals]);
+      const identity = JSON.stringify([market, assetIdentity]);
+      if (localIdentifiers.has(entry.opportunityId)
+        || (markets.has(market) && markets.get(market) !== assetIdentity)
+        || (identifiers.has(entry.opportunityId) && identifiers.get(entry.opportunityId) !== identity)
+        || (index === 0 && heldMarkets.has(market))) return false;
+      localIdentifiers.add(entry.opportunityId);
+      markets.set(market, assetIdentity);
+      identifiers.set(entry.opportunityId, identity);
+      if (index === 0) heldMarkets.add(market);
+    }
+  }
+  return true;
+}
+
+// Request-only validation: no strategy execution or deliverable claims participate.
+export function yieldPortfolioInputConsistent(request: YieldOptimizationRequest): boolean {
+  return sum(request.currentPositions.map((entry) => parseFixed(entry.amountUsd))) <= parseFixed(request.capitalUsd)
+    && yieldIdentitiesConsistent(request);
+}
 // Legacy lending reports round USD to six decimals and HF to eight. Policy checks never use this tolerance.
 function reported(actual: string | null, expected: bigint | null, decimals = 6): boolean {
   if (actual === null || expected === null) return actual === null && expected === null;
@@ -110,8 +139,14 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
 }
 
 function gridChecks(request: BoundedGridRequest, output: BoundedGridDeliverable): FinancialInvariantCheck[] {
-  if (output.status !== "ACTIONABLE") return [check("grid-inactive-payload", output.orders.length === 0
-    && (output.decision === "NO_GRID" || output.decision === "NONE"), "Inactive grids cannot contain orders.")];
+  if (output.status !== "ACTIONABLE") return [
+    check("grid-inactive-payload", output.orders.length === 0
+      && (output.decision === "NO_GRID" || output.decision === "NONE"), "Inactive grids cannot contain orders."),
+    check("grid-inactive-economics", [output.grossSpreadCaptureUsd, output.estimatedFeesUsd, output.estimatedSlippageUsd,
+      output.estimatedGasUsd, output.expectedNetProfitUsd, output.maximumInventoryUsd, output.worstCaseLossUsd]
+      .every((value) => parseFixed(value) === 0n),
+      "Without a grid, spread capture, costs, profit, inventory, and modeled loss are all zero; no financial projection is certified."),
+  ];
   const lower = parseFixed(request.constraints.lowerPrice), upper = parseFixed(request.constraints.upperPrice), mid = parseFixed(request.marketState.midPrice);
   const buys = output.orders.filter((order) => order.side === "BUY"), sells = output.orders.filter((order) => order.side === "SELL");
   const initialBase = sum(sells.map((order) => parseFixed(order.baseAmount)));
@@ -165,10 +200,8 @@ function yieldChecks(request: YieldOptimizationRequest, output: YieldOptimizatio
   const present = output.withdrawals !== undefined && output.idleCapitalUsedUsd !== undefined && output.finalProtocolAllocations !== undefined
     && output.remainingIdleCapitalUsd !== undefined && output.postMigrationCapitalUsd !== undefined;
   const result = [check("yield-funding-evidence", present, "Actionable yield requires explicit withdrawals, idle funding, post-cost capital, and final protocol allocations.")];
-  result.push(check("yield-opportunity-identities",
-    new Set(request.opportunities.map((item) => item.opportunityId)).size === request.opportunities.length &&
-      new Set(request.opportunities.map((item) => item.vaultOrMarket.toLowerCase())).size === request.opportunities.length,
-    "Opportunity IDs and destination addresses are unique; the selected identifier cannot hide conflicting protocol or economic terms."));
+  result.push(check("yield-opportunity-identities", yieldIdentitiesConsistent(request),
+    "Each list has unique IDs, held balances have unique markets, and both lists bind every ID and market to one canonical protocol and asset identity."));
   if (!present) return result;
   const selected = request.opportunities.find((item) => item.opportunityId === output.selectedOpportunityId);
   result.push(check("yield-selected-opportunity", selected !== undefined, "Selected opportunity belongs to the frozen request."));
