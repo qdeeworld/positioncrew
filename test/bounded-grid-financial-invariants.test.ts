@@ -26,11 +26,13 @@ function independentBounds(input: BoundedGridRequest, output: BoundedGridDeliver
   const initialBase = sells.reduce((sum, order) => sum + decimal(order.baseAmount), 0n);
   const boughtBase = buys.reduce((sum, order) => sum + decimal(order.baseAmount), 0n);
   const buyCost = buys.reduce((sum, order) => sum + decimal(order.maximumQuoteAmount), 0n);
-  const notional = output.orders.reduce((sum, order) => sum + decimal(order.maximumQuoteAmount), 0n);
-  const turnover = notional * BigInt(input.constraints.expectedCompletedCycles) * 2n;
-  const costs = ceiling(turnover * BigInt(input.marketState.venueFeeBps), 10_000n)
-    + ceiling(turnover * BigInt(input.maxSlippageBps), 10_000n)
-    + decimal(input.constraints.estimatedGasUsd);
+  const quantum = 10n ** BigInt(18 - input.quoteAsset.decimals);
+  const costPerCycle = output.orders.reduce((total, order) => {
+    const notional = ceiling(decimal(order.price) * decimal(order.baseAmount), unit * quantum) * quantum;
+    return total + ceiling(notional * BigInt(input.marketState.venueFeeBps), 10_000n * quantum) * quantum
+      + ceiling(notional * BigInt(input.maxSlippageBps), 10_000n * quantum) * quantum;
+  }, 0n);
+  const costs = costPerCycle * BigInt(input.constraints.expectedCompletedCycles) * 2n + decimal(input.constraints.estimatedGasUsd);
   return {
     initialBase,
     inventory: ceiling((initialBase + boughtBase) * decimal(input.constraints.upperPrice), unit),
