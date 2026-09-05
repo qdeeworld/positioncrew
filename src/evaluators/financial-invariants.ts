@@ -165,7 +165,8 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
 function gridChecks(request: BoundedGridRequest, output: BoundedGridDeliverable): FinancialInvariantCheck[] {
   if (output.status !== "ACTIONABLE") return [
     check("grid-inactive-payload", output.orders.length === 0
-      && (output.decision === "NO_GRID" || output.decision === "NONE"), "Inactive grids cannot contain orders."),
+      && output.decision === (output.status === "NO_ACTION" ? "NO_GRID" : "NONE"),
+      "Inactive grids cannot contain orders; NO_ACTION requires NO_GRID and every refusal requires NONE."),
     check("grid-inactive-economics", [output.grossSpreadCaptureUsd, output.estimatedFeesUsd, output.estimatedSlippageUsd,
       output.estimatedGasUsd, output.expectedNetProfitUsd, output.maximumInventoryUsd, output.worstCaseLossUsd]
       .every((value) => parseFixed(value) === 0n),
@@ -251,7 +252,8 @@ function yieldChecks(request: YieldOptimizationRequest, output: YieldOptimizatio
       : new Map(output.finalProtocolAllocations.map((item) => [protocolKey(item.protocol), parseFixed(item.amountUsd)]));
     return [check("yield-inactive-payload", output.selectedOpportunityId === null
     && parseFixed(output.allocationUsd) === 0n && output.actionSteps.length === 0 && (output.withdrawals?.length ?? 0) === 0
-    && (output.decision === "HOLD" || output.decision === "NONE"), "An inactive yield result cannot allocate or withdraw; retained concentrations are not certified safe."),
+    && output.decision === (output.status === "NO_ACTION" ? "HOLD" : "NONE"),
+    "An inactive yield result cannot allocate or withdraw; NO_ACTION requires HOLD and every refusal requires NONE. Retained concentrations are not certified safe."),
     check("yield-inactive-economics", BigInt(output.currentWeightedApyBps) === (held > 0n ? weighted / held : 0n)
       && output.grossApyBps === null && parseFixed(output.annualYieldUpliftUsd) === 0n
       && parseFixed(output.netBenefitUsd) === 0n && parseFixed(output.migrationCostUsd) === 0n && output.breakEvenDays === null,

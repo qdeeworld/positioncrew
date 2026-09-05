@@ -123,7 +123,7 @@ describe("PR40 independent evaluator regressions", () => {
       expect(parseFixed(output[field])).toBe(0n);
       expect(evaluate(request, output).passed).toBe(true);
       for (const status of ["REFUSED_CONSTRAINTS", "NO_ACTION"] as const) {
-        const inactive = { ...output, status, decision: "NO_GRID" as const };
+        const inactive = { ...output, status, decision: status === "NO_ACTION" ? "NO_GRID" as const : "NONE" as const };
         expect(evaluate(request, inactive).passed).toBe(true);
         rejected(request, { ...inactive, [field]: "999999" }, "grid-inactive-economics");
       }
