@@ -77,6 +77,18 @@ export function evaluateProviderConformance(
       : request.service === "YIELD_OPTIMIZATION" && !yieldPortfolioInputConsistent(request) ? "REFUSED_INCONSISTENT_DATA" : null;
   const evidenceRefusals = ["REFUSED_EXPIRED", "REFUSED_INCONSISTENT_DATA", "REFUSED_STALE_DATA"];
   const usableExpiry = requiredEvidenceRefusal !== null || Date.parse(deliverable.expiresAt) > now.getTime();
+  // All supplied non-future timestamps constrain chronology, including mismatched
+  // references. An invalid binding must not conceal a later observation time.
+  // Future input can be rejected now, but cannot support a financial decision.
+  let evidenceGenerationFloor = Date.parse(request.requestedAt);
+  let hasFutureEvidence = false;
+  for (const reference of [...request.sources, ...observations]) {
+    const observedAt = Date.parse(reference.observedAt);
+    if (observedAt > now.getTime()) hasFutureEvidence = true;
+    else evidenceGenerationFloor = Math.max(evidenceGenerationFloor, observedAt);
+  }
+  const generatedAt = Date.parse(deliverable.generatedAt);
+  const rejectsRequiredEvidence = requiredEvidenceRefusal !== null && deliverable.status === requiredEvidenceRefusal;
   const sourcesBound = request.service !== "LENDING_RESCUE" ||
     (deliverable.service === "LENDING_RESCUE" && canonicalHash(deliverable.sources) === canonicalHash(request.sources));
   const requestHash = requestHashOverride ?? canonicalHash(request);
@@ -125,6 +137,10 @@ export function evaluateProviderConformance(
     check("evidence-decision", "Refusals match deadline, observation validity, freshness, and portfolio consistency", 5, true,
       requiredEvidenceRefusal === null ? !evidenceRefusals.includes(deliverable.status) : deliverable.status === requiredEvidenceRefusal,
       `required=${requiredEvidenceRefusal ?? "NO_EVIDENCE_REFUSAL"}; reported=${deliverable.status}; precedence=expired,observation-inconsistent,stale,portfolio-inconsistent`),
+    check("evidence-generation-chronology", "Result generation follows the request and available evidence", 0, true,
+      generatedAt >= evidenceGenerationFloor && generatedAt <= now.getTime()
+        && (!hasFutureEvidence || rejectsRequiredEvidence),
+      `generationFloor=${new Date(evidenceGenerationFloor).toISOString()}; generatedAt=${deliverable.generatedAt}; futureEvidence=${hasFutureEvidence}; requiredEvidenceRefusal=${requiredEvidenceRefusal ?? "NONE"}. Future input may be rejected, never treated as observed decision evidence.`),
     check("evidence-window", "Actionable output uses current evidence and bounded generation/expiry times", 0, true,
       deliverable.status === "ACTIONABLE"
         ? evidenceConsistent && evidenceFresh && Date.parse(deliverable.generatedAt) >= Date.parse(request.requestedAt)
