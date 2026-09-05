@@ -19,7 +19,7 @@ export interface LendingAction {
   amountBaseUnits: string;
   amountUsd: string;
   asset: AssetIdentity;
-  projectedHealthFactor: string;
+  projectedHealthFactor: string | null;
   estimatedGasUsd: string;
   executeBefore: string;
   maxSlippageBps: number;

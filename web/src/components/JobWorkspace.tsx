@@ -1389,8 +1389,8 @@ function SummaryResult({
       </div>
       {!expired && deliverable.service === "LENDING_RESCUE" && deliverable.alternatives?.[0] && (
         <div className="alternative-action">
-          <span><strong>Alternative</strong>Add {deliverable.alternatives[0].amount} {deliverable.alternatives[0].asset.symbol} (${deliverable.alternatives[0].amountUsd})</span>
-          <span>Projected HF <strong>{deliverable.alternatives[0].projectedHealthFactor}</strong></span>
+          <span><strong>Alternative</strong>{deliverable.alternatives[0].kind === "REPAY_DEBT" ? "Repay" : "Add"} {deliverable.alternatives[0].amount} {deliverable.alternatives[0].asset.symbol} (${deliverable.alternatives[0].amountUsd})</span>
+          <span>Projected HF <strong>{deliverable.alternatives[0].projectedHealthFactor ?? (deliverable.alternatives[0].kind === "REPAY_DEBT" ? "No debt" : "-")}</strong></span>
         </div>
       )}
       <ResultAdvantageBand
