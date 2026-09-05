@@ -146,8 +146,9 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
       "Break-even hours equal cost times the evaluation horizon divided by incremental fees, truncated only at fixed-point precision; free actions can report zero."));
   }
   result.push(check("lp-range-decision", (range.lowerTick !== request.position.lowerTick || range.upperTick !== request.position.upperTick)
-    && (output.decision !== "WIDEN" || width > oldWidth) && (output.decision !== "NARROW" || width < oldWidth),
-    "Widen and narrow labels agree with the emitted range width."));
+    && (output.decision !== "WIDEN" || width > oldWidth) && (output.decision !== "NARROW" || width < oldWidth)
+    && (output.decision !== "SHIFT" || width === oldWidth),
+    "Widen increases width, narrow decreases width, and shift preserves width while moving the range."));
   const nominal = lpShare0(request, range.lowerTick, range.upperTick, request.marketState.currentTick);
   const next = lpShare0(request, range.lowerTick, range.upperTick, Math.min(request.marketState.currentTick + 1, 887_272));
   const upperBps = (value: number): number => value === 0 ? 0 : Math.min(10_000, Math.ceil(value) + 1);
@@ -357,11 +358,25 @@ function lendingChecks(request: LendingRescueRequest, output: LendingRescueDeliv
     if (!asset || !available || asset.decimals !== action.asset.decimals || available.decimals !== action.asset.decimals) return false;
     const units = BigInt(action.amountBaseUnits), amount = units * FIXED_SCALE / (10n ** BigInt(asset.decimals));
     const value = amount * parseFixed(asset.priceUsd) / FIXED_SCALE;
-    let projectedWeighted = weighted, projectedDebt = debt;
-    if (action.kind === "REPAY_DEBT") { if (amount > parseFixed(asset.amount)) return false; projectedDebt -= value; }
-    else { if (!("liquidationThresholdBps" in asset)) return false; projectedWeighted += value * BigInt(asset.liquidationThresholdBps as number) / 10_000n; }
+    let projectedWeighted = weighted, projectedDebt = debt, minimumValue: bigint;
+    if (action.kind === "REPAY_DEBT") {
+      if (amount > parseFixed(asset.amount)) return false;
+      projectedDebt -= value;
+      minimumValue = positivePart(debt - weighted * FIXED_SCALE / target);
+    } else {
+      if (!("liquidationThresholdBps" in asset)) return false;
+      const threshold = BigInt(asset.liquidationThresholdBps as number);
+      projectedWeighted += value * threshold / 10_000n;
+      const missingWeighted = positivePart(ceilDivide(target * debt, FIXED_SCALE) - weighted);
+      minimumValue = ceilDivide(missingWeighted * 10_000n, threshold);
+    }
+    // Invert the valuation floors independently of the strategy generator: first
+    // find sufficient fixed-point token quantity, then executable base units.
+    // This is minimal for this action/asset, not a forced choice between assets.
+    const minimumAmount = ceilDivide(minimumValue * FIXED_SCALE, parseFixed(asset.priceUsd));
+    const minimumUnits = ceilDivide(minimumAmount * (10n ** BigInt(asset.decimals)), FIXED_SCALE);
     const projected = projectedDebt > 0n ? projectedWeighted * FIXED_SCALE / projectedDebt : null;
-    return units > 0n && amount === parseFixed(action.amount) && amount <= parseFixed(available.availableAmount)
+    return units > 0n && units === minimumUnits && amount === parseFixed(action.amount) && amount <= parseFixed(available.availableAmount)
       && value <= parseFixed(request.maxActionUsd) && reported(action.amountUsd, value)
       && parseFixed(action.estimatedGasUsd) >= parseFixed(request.estimatedGasUsd) && parseFixed(action.estimatedGasUsd) <= parseFixed(request.maxGasUsd)
       && projected !== null && projected >= target && reported(action.projectedHealthFactor, projected, 8)
@@ -376,7 +391,7 @@ function lendingChecks(request: LendingRescueRequest, output: LendingRescueDeliv
     : output.recommendation === null && output.alternatives.length === 0 && output.decision === "NONE"
       && (output.status !== "NO_ACTION" || !incomplete && (health === null || health >= target))
       && (output.status !== "REFUSED_CONSTRAINTS" || incomplete || health !== null && health < target),
-    "Submitted lending actions must be funded, permitted, denominated and bound correctly, and independently reach the target; no native action match is required."));
+    "Submitted lending actions must be funded, permitted, denominated and bound correctly, and reach the target with the minimum executable amount for each selected action and asset; no native action choice is required."));
   return result;
 }
 
