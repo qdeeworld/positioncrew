@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { signSyntheticCurrentHire, SOURCE_OBSERVATION_TEST_KEY } from "./source-observation-test-signing.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -131,6 +132,8 @@ function startWorker(port, stateDirectory) {
       String(port),
       "--log-level",
       "error",
+      "--var",
+      `SOURCE_OBSERVATION_HMAC_KEY:${SOURCE_OBSERVATION_TEST_KEY}`,
     ],
     {
       cwd: root,
@@ -185,11 +188,48 @@ async function requestJson(baseUrl, path, init) {
   return { response, body };
 }
 
+async function assertSourceBindingBoundary(baseUrl, payload) {
+  const mutations = [
+    ["unbound", (candidate) => { delete candidate.observationBinding; }],
+    ["changed observed account", (candidate) => { candidate.request.account = "0x2222222222222222222222222222222222222222"; }],
+    ["changed source signature", (candidate) => { candidate.observationBinding.signature = "0".repeat(64); }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const candidate = structuredClone(payload);
+    mutate(candidate);
+    const denied = await requestJson(baseUrl, "/api/benchmark-hires", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: baseUrl },
+      body: JSON.stringify(candidate),
+    });
+    assert.equal(denied.response.status, 409, `${payload.request.service} ${label}: ${JSON.stringify(denied.body)}`);
+    assert.equal(denied.body.error, "REFRESH_REQUIRED");
+    if (payload.request.service === "LENDING_RESCUE") {
+      const alias = await requestJson(baseUrl, "/api/provider-auditions/lending/hires", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: baseUrl },
+        body: JSON.stringify({
+          schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
+          idempotencyKey: candidate.idempotencyKey,
+          evidenceMode: candidate.evidenceMode,
+          observation: candidate.observation,
+          observationBinding: candidate.observationBinding,
+          request: candidate.request,
+        }),
+      });
+      assert.equal(alias.response.status, 409, `Lending alias bypassed ${label}`);
+      assert.equal(alias.body.error, "REFRESH_REQUIRED");
+    }
+  }
+}
+
 async function runLifecycle(baseUrl) {
+  const payload = await signSyntheticCurrentHire(currentRefusalHire());
+  await assertSourceBindingBoundary(baseUrl, payload);
   const created = await requestJson(baseUrl, "/api/benchmark-hires", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(currentRefusalHire()),
+    body: JSON.stringify(payload),
   });
   assert.equal(
     created.response.status,
@@ -359,7 +399,7 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
   assert.equal(source.uri, explorerUrl);
   assert.equal(source.observedAt, observedAt);
 
-  const payload = {
+  const payload = await signSyntheticCurrentHire({
     schemaVersion: "positioncrew.fresh-marketplace-hire-request.v2",
     idempotencyKey: definition.idempotencyKey,
     benchmarkSlug: definition.benchmarkSlug,
@@ -367,7 +407,8 @@ async function runAdditionalCurrentLifecycle(baseUrl, definition, ordinal) {
     evidenceMode: "CURRENT_BLOCK_PINNED",
     observation: { blockNumber, observedAt, explorerUrl },
     request,
-  };
+  });
+  await assertSourceBindingBoundary(baseUrl, payload);
   const created = await requestJson(baseUrl, "/api/benchmark-hires", {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: baseUrl },

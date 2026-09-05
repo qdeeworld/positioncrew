@@ -1,4 +1,5 @@
 import type { LpLiveMatchAudition, LpLiveMatchExecution, LpLiveMatchProviderSelection } from "../../src/marketplace/lp-live-match-schema.js";
+import type { ServerObservationBinding } from "../../src/commerce/server-observation-binding.js";
 
 export type ServiceId =
   | "LENDING_RESCUE"
@@ -87,6 +88,7 @@ export interface CurrentMarketplaceObservation {
   blockNumber: string;
   observedAt: string;
   explorerUrl: string;
+  binding?: ServerObservationBinding;
 }
 
 export type CurrentLendingObservation = CurrentMarketplaceObservation;
@@ -608,6 +610,7 @@ export interface LendingProviderAudition {
 }
 
 export interface CurrentBlockPinnedMarketplaceEvidence {
+  observationBinding?: ServerObservationBinding;
   lpLiveMatchAudition?: LpLiveMatchAudition;
   schemaVersion: "positioncrew.current-block-pinned-evidence.v1";
   evidenceClass: "CURRENT_BLOCK_PINNED";
@@ -890,6 +893,7 @@ export interface ProductionTrackRecord {
 }
 
 export interface VenusAccountProbe {
+  observationBinding?: ServerObservationBinding;
   schemaVersion: "positioncrew.venus-account-probe.v1";
   generatedAt: string;
   chainId: 56;
@@ -929,6 +933,7 @@ export interface VenusAccountProbe {
 }
 
 export interface PancakeGridProbe {
+  observationBinding?: ServerObservationBinding;
   schemaVersion: "positioncrew.pancake-grid-probe.v1";
   generatedAt: string;
   chainId: 56;
@@ -1025,6 +1030,7 @@ export interface BoundedGridForwardShadowLedger {
 }
 
 export interface PancakePositionProbe {
+  observationBinding?: ServerObservationBinding;
   schemaVersion: "positioncrew.pancake-position-probe.v1";
   generatedAt: string;
   chainId: 56;
@@ -1067,6 +1073,7 @@ export interface PancakePositionProbe {
 }
 
 export interface VenusYieldProbe {
+  observationBinding?: ServerObservationBinding;
   schemaVersion: "positioncrew.venus-yield-probe.v1";
   generatedAt: string;
   chainId: 56;

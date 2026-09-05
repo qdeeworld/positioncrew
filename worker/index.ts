@@ -69,6 +69,11 @@ import {
   BoundedGridRequestSchema,
 } from "../src/contracts/bounded-grid.js";
 import { canonicalHash } from "../src/core/canonical.js";
+import {
+  issueServerObservationBinding,
+  verifyServerObservationBinding,
+  SourceObservationBindingError,
+} from "../src/commerce/server-observation-binding.js";
 import { PROVIDER_CATALOG } from "../src/marketplace/catalog.js";
 import {
   EXTERNAL_COMPARISON_SNAPSHOT,
@@ -161,6 +166,7 @@ interface Env {
   SHADOW_GRID_TEST_CHECKPOINT_NOW?: string;
   ALTANA_VENUS_SESSION?: string;
   BSC_LOG_RPC_URL?: string;
+  SOURCE_OBSERVATION_HMAC_KEY?: string;
 }
 
 interface WorkerExecutionContext {
@@ -509,6 +515,12 @@ async function createCurrentGridHireForShadowRun(
 
   if (!chain) {
     const probe = await retryShadowGridSource(() => inspectPancakeGridMarket());
+    const observation = {
+      blockNumber: probe.source.blockNumber,
+      observedAt: probe.source.blockTimestamp,
+      explorerUrl: probe.source.explorerUrl,
+    };
+    const observationBinding = await issueServerObservationBinding(probe.gridRequest, observation, env.SOURCE_OBSERVATION_HMAC_KEY, new Date());
     const internalRequest = new Request(`${CANONICAL_PRODUCT_ORIGIN}/api/benchmark-hires`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: CANONICAL_PRODUCT_ORIGIN },
@@ -518,11 +530,8 @@ async function createCurrentGridHireForShadowRun(
         benchmarkSlug: "bounded-grid",
         providerSlug: "bounded-grid",
         evidenceMode: "CURRENT_BLOCK_PINNED",
-        observation: {
-          blockNumber: probe.source.blockNumber,
-          observedAt: probe.source.blockTimestamp,
-          explorerUrl: probe.source.explorerUrl,
-        },
+        observation,
+        observationBinding,
         request: probe.gridRequest,
       }),
     });
@@ -1336,12 +1345,24 @@ async function freshMarketplaceRateLimitKey(request: Request): Promise<string> {
   });
 }
 
+async function boundedHireJson(request: Request): Promise<unknown> {
+  const body = await boundedJson(request);
+  if (
+    body !== null && typeof body === "object" &&
+    "evidenceMode" in body && body.evidenceMode === "CURRENT_BLOCK_PINNED" &&
+    (!("observationBinding" in body) || body.observationBinding === undefined)
+  ) {
+    throw new SourceObservationBindingError();
+  }
+  return body;
+}
+
 async function createFreshMarketplaceHire(
   request: Request,
   env: Env,
 ): Promise<Response> {
   if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
-  const parsed = FreshMarketplaceHireRequestSchema.parse(await boundedJson(request));
+  const parsed = FreshMarketplaceHireRequestSchema.parse(await boundedHireJson(request));
   const task = FRESH_MARKETPLACE_TASKS[parsed.benchmarkSlug];
   const provider = getProviderBySlug(parsed.providerSlug);
   if (!provider || provider.service !== task.service || provider.requestSchema !== task.requestSchema) {
@@ -1373,8 +1394,22 @@ async function createFreshMarketplaceHire(
   const requestJson = canonicalJson(persistedRequest);
   const requestHash = await sha256Commitment(persistedRequest);
   const providerHash = await sha256Commitment(providerBinding);
-  const rateLimitKey = await freshMarketplaceRateLimitKey(request);
   const store = freshStore(env);
+  if (currentBlockPinned) {
+    const replay = await store.getPersistedHireCreationReplay({
+      request: parsed,
+      providerId: provider.providerId,
+      requestHash,
+      providerHash,
+      evidenceMode,
+      service: task.service,
+    });
+    if (replay) return json(replay, 200);
+  }
+  const observationBinding = currentBlockPinned
+    ? await verifyServerObservationBinding(parsed.request, { ...parsed.observation, binding: parsed.observationBinding }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date(createdAt))
+    : undefined;
+  const rateLimitKey = await freshMarketplaceRateLimitKey(request);
   const proposedHireId = crypto.randomUUID();
   const proposedJobId = crypto.randomUUID();
   const admission = await store.admitHireCreation({
@@ -1552,6 +1587,7 @@ async function createFreshMarketplaceHire(
             : "FRESH",
         evaluatedAt: createdAt,
         maxDataAgeSeconds: parsed.request.maxDataAgeSeconds,
+        observationBinding,
         ...(providerAudition
           ? { providerAudition }
           : {}),
@@ -1602,7 +1638,7 @@ async function createLendingProviderAuditionHire(
   env: Env,
 ): Promise<Response> {
   if (request.method !== "POST") return apiError(405, "METHOD_NOT_ALLOWED", ["Use POST."]);
-  const parsed = LendingProviderAuditionHireRequestSchema.parse(await boundedJson(request));
+  const parsed = LendingProviderAuditionHireRequestSchema.parse(await boundedHireJson(request));
   const delegatedHeaders = new Headers(request.headers);
   delegatedHeaders.delete("Content-Length");
   const delegatedRequest = new Request(request.url, {
@@ -1615,6 +1651,7 @@ async function createLendingProviderAuditionHire(
       providerSlug: "lending-rescue",
       evidenceMode: "CURRENT_BLOCK_PINNED",
       observation: parsed.observation,
+      observationBinding: parsed.observationBinding,
       request: parsed.request,
     }),
   });
@@ -1633,6 +1670,10 @@ async function finishFreshMarketplaceJob(
 ): Promise<void> {
   const store = freshStore(env);
   try {
+    if (hire.evidenceMode === "CURRENT_BLOCK_PINNED") {
+      if (hire.evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED") throw new SourceObservationBindingError();
+      await verifyServerObservationBinding(hire.request, { ...hire.evidence.source, binding: hire.evidence.observationBinding }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date());
+    }
     const task = FRESH_MARKETPLACE_TASKS[hire.benchmarkSlug];
     const persistedEvidence = hire.evidence;
     const lpLiveMatchAudition = persistedEvidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
@@ -1705,7 +1746,7 @@ async function finishFreshMarketplaceJob(
       claimToken,
       new Date().toISOString(),
       Math.max(1, Math.round(performance.now() - startedAtPerformance)),
-      "PROVIDER_EXECUTION_FAILED",
+      error instanceof SourceObservationBindingError ? error.code : "PROVIDER_EXECUTION_FAILED",
       error instanceof Error ? error.message.slice(0, 500) : "Unknown provider failure",
     );
   }
@@ -1722,13 +1763,38 @@ async function runFreshMarketplaceHire(
   const store = freshStore(env);
   const existing = await store.getHire(hireId);
   if (!existing) return apiError(404, "HIRE_NOT_FOUND", ["Unknown persisted hire ID."]);
+  // Completed receipts retain their original bytes and remain readable after expiry.
+  const terminal = existing.job.state === "COMPLETED" || existing.job.state === "FAILED";
   const evidence = existing.hire.evidence;
+  if (!terminal && existing.hire.evidenceMode === "CURRENT_BLOCK_PINNED") {
+    const verificationTime = new Date();
+    try {
+      if (evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED") throw new SourceObservationBindingError();
+      await verifyServerObservationBinding(existing.hire.request, { ...evidence.source, binding: evidence.observationBinding }, env.SOURCE_OBSERVATION_HMAC_KEY, verificationTime);
+    } catch (error) {
+      if (!(error instanceof SourceObservationBindingError) || error.reason !== "EXPIRED" ||
+          existing.job.state !== "RUNNING" || existing.job.startedAt === null) throw error;
+      const current = await store.failExpiredRunningJob(
+        hireId, existing.job.jobId, existing.job.startedAt, verificationTime.toISOString(),
+        Math.max(1, Math.round(performance.now() - startedAtPerformance)), error.code, error.message,
+      );
+      if (!current) return apiError(404, "HIRE_NOT_FOUND", ["Unknown persisted hire ID."]);
+      // A competing completion or newer/active lease can win the CAS. Return its
+      // actual persisted state, never claim that cleanup necessarily succeeded.
+      return json(current, current.job.state === "RUNNING" ? 202 : 200);
+    }
+  }
   const lpLiveMatchAudition = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED"
     ? evidence.lpLiveMatchAudition
     : undefined;
   let providerSelection = existing.job.providerSelection;
   let providerSelectionHash = existing.job.providerSelectionHash;
   if (lpLiveMatchAudition) {
+    if (terminal && !providerSelection) {
+      return apiError(409, "LP_PROVIDER_SELECTION_CONFLICT", [
+        "A completed job cannot accept a new provider selection. Its original receipt remains readable.",
+      ]);
+    }
     const selectionRequest = LpLiveMatchRunRequestSchema.parse(await boundedJson(request));
     if (providerSelection) {
       if (
@@ -1756,6 +1822,7 @@ async function runFreshMarketplaceHire(
       providerSelectionHash = await sha256Commitment(providerSelection);
     }
   }
+  if (terminal) return json(existing);
   const claimed = await store.claimJob(
     hireId,
     new Date().toISOString(),
@@ -2595,42 +2662,49 @@ async function api(
     const venusAccountRoute = url.pathname.match(/^\/api\/wallets\/(0x[0-9a-fA-F]{40})\/venus$/);
     if (venusAccountRoute) {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
-      return json(
-        await inspectVenusAccount(venusAccountRoute[1]!),
-        200,
-        "public, max-age=0, s-maxage=10, stale-while-revalidate=20",
-      );
+      const probe = await inspectVenusAccount(venusAccountRoute[1]!);
+      const observationBinding = await issueServerObservationBinding(probe.rescueRequest, {
+        blockNumber: probe.source.blockNumber,
+        observedAt: probe.rescueRequest.sources[0]!.observedAt,
+        explorerUrl: probe.source.explorerUrl,
+      }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date());
+      return json({ ...probe, observationBinding });
     }
 
     const pancakePositionRoute = url.pathname.match(/^\/api\/positions\/pancake\/(\d+)$/);
     if (pancakePositionRoute) {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
-      return json(
-        await inspectPancakePosition(
-          pancakePositionRoute[1]!,
-          env.BSC_LOG_RPC_URL ? { logRpcUrl: env.BSC_LOG_RPC_URL } : {},
-        ),
-        200,
-        "public, max-age=0, s-maxage=10, stale-while-revalidate=20",
-      );
+      let probe;
+      try {
+        probe = await inspectPancakePosition(pancakePositionRoute[1]!, env.BSC_LOG_RPC_URL ? { logRpcUrl: env.BSC_LOG_RPC_URL } : {});
+      } catch (error) {
+        if (error instanceof Error && error.message === "The PancakeSwap position has no active liquidity") {
+          return apiError(422, "NO_ACTIVE_LIQUIDITY", ["This LP position has no active liquidity. Choose an active position to inspect."]);
+        }
+        throw error;
+      }
+      const observationBinding = await issueServerObservationBinding(probe.lpRequest, {
+        blockNumber: probe.source.blockNumber, observedAt: probe.source.blockTimestamp, explorerUrl: probe.source.explorerUrl,
+      }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date());
+      return json({ ...probe, observationBinding });
     }
 
     if (url.pathname === "/api/markets/pancake/wbnb-usdt/grid") {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
-      return json(
-        await inspectPancakeGridMarket(),
-        200,
-        "public, max-age=0, s-maxage=10, stale-while-revalidate=20",
-      );
+      const probe = await inspectPancakeGridMarket();
+      const observationBinding = await issueServerObservationBinding(probe.gridRequest, {
+        blockNumber: probe.source.blockNumber, observedAt: probe.source.blockTimestamp, explorerUrl: probe.source.explorerUrl,
+      }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date());
+      return json({ ...probe, observationBinding });
     }
 
     if (url.pathname === "/api/markets/venus/stable-yields") {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
-      return json(
-        await inspectVenusStableYields(),
-        200,
-        "public, max-age=0, s-maxage=10, stale-while-revalidate=20",
-      );
+      const probe = await inspectVenusStableYields();
+      const observationBinding = await issueServerObservationBinding(probe.yieldRequest, {
+        blockNumber: probe.source.blockNumber, observedAt: probe.source.blockTimestamp, explorerUrl: probe.source.explorerUrl,
+      }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date());
+      return json({ ...probe, observationBinding });
     }
 
     if (url.pathname === "/api/matrix") {
@@ -2649,6 +2723,7 @@ async function api(
     if (url.pathname === "/api/rescue") return rescue(request);
     return apiError(404, "NOT_FOUND", ["Unknown PositionCrew API route."]);
   } catch (error) {
+    if (error instanceof SourceObservationBindingError) return apiError(409, error.code, [error.message]);
     if (isNoEligibleLendingProviderError(error)) {
       return apiError(409, "NO_ELIGIBLE_PROVIDER", [error.message]);
     }

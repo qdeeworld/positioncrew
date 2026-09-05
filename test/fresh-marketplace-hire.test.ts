@@ -25,6 +25,7 @@ import {
   type D1PreparedStatement,
   type D1Result,
 } from "../src/commerce/d1-marketplace-store.js";
+import { issueServerObservationBinding } from "../src/commerce/server-observation-binding.js";
 import positionCrewWorker from "../worker/index.js";
 import { lendingFixture } from "./helpers.js";
 
@@ -38,6 +39,8 @@ const HASH_A = "sha256:" + "a".repeat(64);
 const HASH_B = "sha256:" + "b".repeat(64);
 const HASH_C = "sha256:" + "c".repeat(64);
 const NOW = "2026-08-20T12:00:00.000Z";
+// Explicit test-only key. Production has no fallback key.
+const TEST_OBSERVATION_KEY = "positioncrew-unit-source-observation-test-key";
 const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function semanticSqlStatements(sql: string): string[] {
@@ -85,6 +88,14 @@ class FakeD1 implements D1Database {
     }
     const evidence = JSON.parse(this.hire.evidence_json) as Record<string, unknown>;
     delete evidence.providerAudition;
+    this.hire.evidence_json = canonicalJson(evidence);
+    this.hire.evidence_hash = await sha256Commitment(evidence);
+  }
+
+  async removeStoredObservationBinding(): Promise<void> {
+    if (!this.hire || typeof this.hire.evidence_json !== "string") throw new Error("No stored hire");
+    const evidence = JSON.parse(this.hire.evidence_json) as Record<string, unknown>;
+    delete evidence.observationBinding;
     this.hire.evidence_json = canonicalJson(evidence);
     this.hire.evidence_hash = await sha256Commitment(evidence);
   }
@@ -623,9 +634,9 @@ function marketplaceHireRequest(
   });
 }
 
-function currentLendingHireRequest(
+async function currentLendingHireRequest(
   mode: "ACTIONABLE" | "STALE" | "EMPTY" | "UNSAFE" = "ACTIONABLE",
-): { httpRequest: Request; providerRequest: ReturnType<typeof lendingFixture> } {
+): Promise<{ httpRequest: Request; providerRequest: ReturnType<typeof lendingFixture> }> {
   const providerRequest = lendingFixture();
   const blockNumber = mode === "ACTIONABLE"
     ? "70000001"
@@ -671,6 +682,12 @@ function currentLendingHireRequest(
     providerSlug: "lending-rescue",
     evidenceMode: "CURRENT_BLOCK_PINNED",
     observation: { blockNumber, observedAt, explorerUrl },
+    observationBinding: await issueServerObservationBinding(
+      providerRequest,
+      { blockNumber, observedAt, explorerUrl },
+      TEST_OBSERVATION_KEY,
+      new Date(mode === "STALE" ? providerRequest.requestedAt : now),
+    ),
     request: providerRequest,
   };
   return {
@@ -724,8 +741,8 @@ describe("fresh marketplace hire contract", () => {
 
   it("replays a pre-audition current Lending hire without weakening immutable bindings", async () => {
     const database = new FakeD1();
-    const environment = { DB: database, ASSETS: TEST_ASSETS };
-    const { httpRequest } = currentLendingHireRequest();
+    const environment = { DB: database, ASSETS: TEST_ASSETS, SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY };
+    const { httpRequest } = await currentLendingHireRequest();
     const retryBody = await httpRequest.clone().text();
     const retryHeaders = new Headers(httpRequest.headers);
 
@@ -792,8 +809,8 @@ describe("fresh marketplace hire contract", () => {
 
   it("persists, runs, polls, and reloads one exact current block-pinned receipt", async () => {
     const database = new FakeD1();
-    const environment = { DB: database, ASSETS: TEST_ASSETS };
-    const { httpRequest, providerRequest } = currentLendingHireRequest();
+    const environment = { DB: database, ASSETS: TEST_ASSETS, SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY };
+    const { httpRequest, providerRequest } = await currentLendingHireRequest();
     const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
     expect(createdResponse.status, await createdResponse.clone().text()).toBe(201);
     const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
@@ -834,6 +851,19 @@ describe("fresh marketplace hire contract", () => {
     );
     const reloaded = FreshMarketplaceChainSchema.parse(await receiptResponse.json());
     expect(reloaded).toEqual(completed);
+
+    // Historical completed records predate binding. Reading or replaying them
+    // must not regenerate their provider output or require the current key.
+    await database.removeStoredObservationBinding();
+    const legacyReplay = await positionCrewWorker.fetch(
+      new Request(`https://positioncrew.example/api/benchmark-hires/${completed.hire.hireId}/jobs`, {
+        method: "POST", headers: { Origin: "https://positioncrew.example" },
+      }), { DB: database, ASSETS: TEST_ASSETS }, TEST_CONTEXT,
+    );
+    expect(legacyReplay.status).toBe(200);
+    const legacy = FreshMarketplaceChainSchema.parse(await legacyReplay.json());
+    expect(legacy.job.state).toBe("COMPLETED");
+    expect(legacy.receipt).toEqual(completed.receipt);
   });
 
   it("refuses a current hire that expires before its delayed job claim", async () => {
@@ -842,8 +872,8 @@ describe("fresh marketplace hire contract", () => {
       const createdAt = new Date("2026-08-24T12:00:00.000Z");
       vi.setSystemTime(createdAt);
       const database = new FakeD1();
-      const environment = { DB: database, ASSETS: TEST_ASSETS };
-      const { httpRequest, providerRequest } = currentLendingHireRequest();
+      const environment = { DB: database, ASSETS: TEST_ASSETS, SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY };
+      const { httpRequest } = await currentLendingHireRequest();
       const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
       const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
       const committedRequestHash = created.hire.requestHash;
@@ -860,46 +890,73 @@ describe("fresh marketplace hire contract", () => {
         environment,
         context,
       );
-      expect(runResponse.status).toBe(202);
-      const running = FreshMarketplaceChainSchema.parse(await runResponse.json());
-      expect(running.job.state).toBe("RUNNING");
-      expect(running.receipt).toBeNull();
-      await Promise.all(context.tasks);
-
-      const completedResponse = await positionCrewWorker.fetch(
-        new Request(`https://positioncrew.example/api/benchmark-hires/${created.hire.hireId}`),
-        environment,
-        TEST_CONTEXT,
-      );
-      const completed = FreshMarketplaceChainSchema.parse(await completedResponse.json());
-      expect({ state: completed.job.state, error: completed.job.error }).toEqual({
-        state: "COMPLETED",
-        error: null,
-      });
-      expect(completed.job.startedAt).toBe(claimedAt.toISOString());
-      if (!completed.receipt) {
-        throw new Error(`Completed delayed hire did not persist a receipt: ${JSON.stringify(completed.job)}`);
-      }
-      const providerResponse = FixtureJobResponseSchema.parse(completed.receipt.response);
-      expect(providerResponse.result.deliverable.status).toBe("REFUSED_EXPIRED");
-      expect(providerResponse.result.request).toEqual(providerRequest);
-      expect(providerResponse.result.evaluation.requestHash).toBe(committedRequestHash);
-      expect(completed.hire.requestHash).toBe(committedRequestHash);
-      expect(completed.hire.evidenceHash).toBe(committedEvidenceHash);
+      expect(runResponse.status).toBe(409);
+      await expect(runResponse.json()).resolves.toMatchObject({ error: "REFRESH_REQUIRED" });
+      expect(context.tasks).toHaveLength(0);
+      const persisted = FreshMarketplaceChainSchema.parse(await (
+        await positionCrewWorker.fetch(
+          new Request(`https://positioncrew.example/api/benchmark-hires/${created.hire.hireId}`),
+          environment,
+          TEST_CONTEXT,
+        )
+      ).json());
+      expect(persisted.job.state).toBe("CREATED");
+      expect(persisted.job.startedAt).toBeNull();
+      expect(persisted.receipt).toBeNull();
+      expect(persisted.hire.requestHash).toBe(committedRequestHash);
+      expect(persisted.hire.evidenceHash).toBe(committedEvidenceHash);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("persists stale, empty, and inconsistent positions as completed provider refusals", async () => {
+  it("rechecks expiry at execution even when the source was valid before the job claim", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-05T12:00:00.000Z"));
+    const database = new FakeD1();
+    const environment = { DB: database, ASSETS: TEST_ASSETS, SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY };
+    let restoreVerification: (() => void) | undefined;
+    try {
+      const { httpRequest } = await currentLendingHireRequest();
+      const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
+      const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
+      const evidence = created.hire.evidence;
+      if (evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED" || !evidence.observationBinding) {
+        throw new Error("Expected a bound current hire");
+      }
+      const verify = crypto.subtle.verify.bind(crypto.subtle);
+      const verification = vi.spyOn(crypto.subtle, "verify").mockImplementationOnce(async (...args) => {
+        const valid = await verify(...args);
+        vi.setSystemTime(new Date(evidence.observationBinding!.expiresAt));
+        return valid;
+      });
+      restoreVerification = () => verification.mockRestore();
+      const context = capturingContext();
+      const run = await positionCrewWorker.fetch(
+        new Request(`https://positioncrew.example/api/benchmark-hires/${created.hire.hireId}/jobs`, {
+          method: "POST", headers: { Origin: "https://positioncrew.example" },
+        }), environment, context,
+      );
+      expect(run.status).toBe(202);
+      await Promise.all(context.tasks);
+      const persisted = await new FreshMarketplaceStore(database).getHire(created.hire.hireId);
+      expect(persisted?.job.state).toBe("FAILED");
+      expect(persisted?.job.error?.code).toBe("REFRESH_REQUIRED");
+      expect(persisted?.receipt).toBeNull();
+    } finally {
+      restoreVerification?.();
+      vi.useRealTimers();
+    }
+  });
+
+  it("persists authenticated empty and inconsistent positions as completed provider refusals", async () => {
     for (const [mode, status] of [
-      ["STALE", "REFUSED_STALE_DATA"],
       ["EMPTY", "REFUSED_CONSTRAINTS"],
       ["UNSAFE", "REFUSED_INCONSISTENT_DATA"],
     ] as const) {
       const database = new FakeD1();
-      const environment = { DB: database, ASSETS: TEST_ASSETS };
-      const { httpRequest } = currentLendingHireRequest(mode);
+      const environment = { DB: database, ASSETS: TEST_ASSETS, SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY };
+      const { httpRequest } = await currentLendingHireRequest(mode);
       const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
       const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
       const context = capturingContext();
@@ -921,6 +978,205 @@ describe("fresh marketplace hire contract", () => {
       const providerResponse = FixtureJobResponseSchema.parse(completed.receipt?.response);
       expect(completed.job.state).toBe("COMPLETED");
       expect(providerResponse.result.deliverable.status).toBe(status);
+    }
+  });
+
+  it.each(["MISSING_BINDING", "CHANGED_AMOUNT", "WRONG_KEY", "MISSING_KEY", "STALE"] as const)(
+    "rejects %s current observations before storage writes or provider calls on both hire routes",
+    async (failure) => {
+      const { httpRequest } = await currentLendingHireRequest(failure === "STALE" ? "STALE" : "ACTIONABLE");
+      const payload = await httpRequest.json();
+      if (failure === "MISSING_BINDING") delete payload.observationBinding;
+      if (failure === "CHANGED_AMOUNT") payload.request.position.collateral[0].amount = "999999";
+      const key = failure === "MISSING_KEY" ? undefined
+        : failure === "WRONG_KEY" ? "a-different-explicit-unit-test-signing-key" : TEST_OBSERVATION_KEY;
+      const outbound = vi.spyOn(globalThis, "fetch");
+      try {
+        for (const path of ["/api/benchmark-hires", "/api/provider-auditions/lending/hires"]) {
+          const body = path.includes("provider-auditions") ? {
+            schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
+            idempotencyKey: payload.idempotencyKey,
+            evidenceMode: payload.evidenceMode,
+            observation: payload.observation,
+            observationBinding: payload.observationBinding,
+            request: payload.request,
+          } : payload;
+          const database = new FakeD1();
+          const writes = vi.spyOn(database, "batch");
+          const response = await positionCrewWorker.fetch(new Request(`https://positioncrew.example${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: "https://positioncrew.example" },
+            body: JSON.stringify(body),
+          }), { DB: database, ASSETS: TEST_ASSETS, ...(key ? { SOURCE_OBSERVATION_HMAC_KEY: key } : {}) }, TEST_CONTEXT);
+          expect(response.status, await response.clone().text()).toBe(409);
+          await expect(response.json()).resolves.toMatchObject({ error: "REFRESH_REQUIRED" });
+          expect(writes).not.toHaveBeenCalled();
+        }
+        expect(outbound).not.toHaveBeenCalled();
+      } finally {
+        outbound.mockRestore();
+      }
+    },
+  );
+
+  describe.each(["/api/benchmark-hires", "/api/provider-auditions/lending/hires"])(
+    "current hire retry admission at %s",
+    (path) => {
+      function postCurrentHire(body: unknown): Request {
+        return new Request(`https://positioncrew.example${path}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "https://positioncrew.example",
+            "CF-Connecting-IP": "203.0.113.10",
+          },
+          body: JSON.stringify(body),
+        });
+      }
+
+      async function signedCurrentBody() {
+        const { httpRequest } = await currentLendingHireRequest();
+        const payload = await httpRequest.json();
+        return path === "/api/provider-auditions/lending/hires" ? {
+          schemaVersion: "positioncrew.lending-provider-audition-hire-request.v1",
+          idempotencyKey: payload.idempotencyKey,
+          evidenceMode: payload.evidenceMode,
+          observation: payload.observation,
+          observationBinding: payload.observationBinding,
+          request: payload.request,
+        } : payload;
+      }
+
+      it.each(["EXPIRED", "ROTATED_KEY"] as const)(
+        "recovers the original chain after %s without admitting changed commitments",
+        async (retryCondition) => {
+          vi.useFakeTimers();
+          vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
+          const database = new FakeD1();
+          const writes = vi.spyOn(database, "run");
+          const outbound = vi.spyOn(globalThis, "fetch");
+          try {
+            const environment = {
+              DB: database,
+              ASSETS: TEST_ASSETS,
+              SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY,
+            };
+            const body = await signedCurrentBody();
+            const firstResponse = await positionCrewWorker.fetch(postCurrentHire(body), environment, TEST_CONTEXT);
+            expect(firstResponse.status, await firstResponse.clone().text()).toBe(201);
+            const original = FreshMarketplaceChainSchema.parse(await firstResponse.json());
+
+            if (retryCondition === "EXPIRED") {
+              vi.setSystemTime(new Date(Date.parse(body.observationBinding.expiresAt) + 1));
+            }
+            const retryEnvironment = {
+              ...environment,
+              SOURCE_OBSERVATION_HMAC_KEY: retryCondition === "ROTATED_KEY"
+                ? "positioncrew-rotated-source-observation-test-key"
+                : TEST_OBSERVATION_KEY,
+            };
+            writes.mockClear();
+            outbound.mockClear();
+            outbound.mockRejectedValue(new Error("An idempotent retry must not call a provider"));
+            const context = capturingContext();
+
+            const replayResponse = await positionCrewWorker.fetch(postCurrentHire(body), retryEnvironment, context);
+            expect(replayResponse.status, await replayResponse.clone().text()).toBe(200);
+            expect(FreshMarketplaceChainSchema.parse(await replayResponse.json())).toEqual(original);
+
+            const changed = structuredClone(body);
+            changed.request.maxActionUsd = changed.request.maxActionUsd === "1" ? "2" : "1";
+            const conflict = await positionCrewWorker.fetch(postCurrentHire(changed), retryEnvironment, context);
+            expect(conflict.status, await conflict.clone().text()).toBe(409);
+            await expect(conflict.json()).resolves.toMatchObject({ error: "IDEMPOTENCY_CONFLICT" });
+
+            const persisted = await positionCrewWorker.fetch(
+              new Request(`https://positioncrew.example/api/benchmark-hires/${original.hire.hireId}`),
+              retryEnvironment,
+              TEST_CONTEXT,
+            );
+            expect(persisted.status).toBe(200);
+            expect(FreshMarketplaceChainSchema.parse(await persisted.json())).toEqual(original);
+            expect(writes).not.toHaveBeenCalled();
+            expect(outbound).not.toHaveBeenCalled();
+            expect(context.tasks).toHaveLength(0);
+          } finally {
+            writes.mockRestore();
+            outbound.mockRestore();
+            vi.useRealTimers();
+          }
+        },
+      );
+
+      it("does not admit an expired binding under a new idempotency key", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
+        const database = new FakeD1();
+        const writes = vi.spyOn(database, "run");
+        const outbound = vi.spyOn(globalThis, "fetch");
+        try {
+          const environment = {
+            DB: database,
+            ASSETS: TEST_ASSETS,
+            SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY,
+          };
+          const body = await signedCurrentBody();
+          const firstResponse = await positionCrewWorker.fetch(postCurrentHire(body), environment, TEST_CONTEXT);
+          expect(firstResponse.status, await firstResponse.clone().text()).toBe(201);
+          const original = FreshMarketplaceChainSchema.parse(await firstResponse.json());
+          vi.setSystemTime(new Date(Date.parse(body.observationBinding.expiresAt) + 1));
+          writes.mockClear();
+          outbound.mockClear();
+          outbound.mockRejectedValue(new Error("An expired new hire must not call a provider"));
+          const context = capturingContext();
+          const response = await positionCrewWorker.fetch(postCurrentHire({
+            ...body,
+            idempotencyKey: "55555555-5555-4555-8555-555555555555",
+          }), environment, context);
+          expect(response.status, await response.clone().text()).toBe(409);
+          await expect(response.json()).resolves.toMatchObject({ error: "REFRESH_REQUIRED" });
+
+          const persisted = await positionCrewWorker.fetch(
+            new Request(`https://positioncrew.example/api/benchmark-hires/${original.hire.hireId}`),
+            environment,
+            TEST_CONTEXT,
+          );
+          expect(persisted.status).toBe(200);
+          expect(FreshMarketplaceChainSchema.parse(await persisted.json())).toEqual(original);
+          expect(writes).not.toHaveBeenCalled();
+          expect(outbound).not.toHaveBeenCalled();
+          expect(context.tasks).toHaveLength(0);
+        } finally {
+          writes.mockRestore();
+          outbound.mockRestore();
+          vi.useRealTimers();
+        }
+      });
+    },
+  );
+
+  it("refuses an unbound legacy CREATED current hire before its job is claimed", async () => {
+    const database = new FakeD1();
+    const environment = { DB: database, ASSETS: TEST_ASSETS, SOURCE_OBSERVATION_HMAC_KEY: TEST_OBSERVATION_KEY };
+    const { httpRequest } = await currentLendingHireRequest();
+    const createdResponse = await positionCrewWorker.fetch(httpRequest, environment, TEST_CONTEXT);
+    const created = FreshMarketplaceChainSchema.parse(await createdResponse.json());
+    await database.removeStoredObservationBinding();
+    const context = capturingContext();
+    const outbound = vi.spyOn(globalThis, "fetch");
+    try {
+      const response = await positionCrewWorker.fetch(
+        new Request(`https://positioncrew.example/api/benchmark-hires/${created.hire.hireId}/jobs`, {
+          method: "POST", headers: { Origin: "https://positioncrew.example" },
+        }), environment, context,
+      );
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({ error: "REFRESH_REQUIRED" });
+      expect(context.tasks).toHaveLength(0);
+      expect(database.jobState).toBe("CREATED");
+      expect(outbound).not.toHaveBeenCalled();
+    } finally {
+      outbound.mockRestore();
     }
   });
 
@@ -1514,9 +1770,18 @@ function fourCategoryCurrentBody(
 describe("four-category current persisted-hire schema", () => {
   it.each(FOUR_CATEGORY_CURRENT_CASES)(
     "accepts only the exact current $service source and provider/task binding",
-    (definition) => {
+    async (definition) => {
       const ordinal = FOUR_CATEGORY_CURRENT_CASES.indexOf(definition);
-      const body = fourCategoryCurrentBody(definition, ordinal);
+      const unsigned = fourCategoryCurrentBody(definition, ordinal);
+      const body = {
+        ...unsigned,
+        observationBinding: await issueServerObservationBinding(
+          unsigned.request as Parameters<typeof issueServerObservationBinding>[0],
+          unsigned.observation,
+          TEST_OBSERVATION_KEY,
+          new Date(unsigned.request.requestedAt as string),
+        ),
+      };
       const parsed = FreshMarketplaceHireRequestSchema.parse(body) as {
         evidenceMode: string;
         benchmarkSlug: string;

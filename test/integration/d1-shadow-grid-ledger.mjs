@@ -7,6 +7,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { signSyntheticCurrentHire, SOURCE_OBSERVATION_TEST_KEY } from "./source-observation-test-signing.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const builtConfig = resolve(root, "dist/server/wrangler.local.json");
@@ -154,6 +155,8 @@ async function startWorker(port, entryNow = testNow, checkpointNow = null) {
     persistence,
     "--var",
     `SHADOW_GRID_TICK_TOKEN:${token}`,
+    "--var",
+    `SOURCE_OBSERVATION_HMAC_KEY:${SOURCE_OBSERVATION_TEST_KEY}`,
     "--var",
     `SHADOW_GRID_TEST_NOW:${entryNow.toISOString()}`,
   ];
@@ -393,7 +396,7 @@ export { inspectPancakeGridMarket, inspectPancakeGridPriceSample, verifyPancakeG
   const adversarial = await requestJson(baseUrl, "/api/benchmark-hires", {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: baseUrl },
-    body: JSON.stringify(adversarialGridHire(legacyPublicKey)),
+    body: JSON.stringify(await signSyntheticCurrentHire(adversarialGridHire(legacyPublicKey))),
   });
   assert.equal(
     adversarial.response.status,

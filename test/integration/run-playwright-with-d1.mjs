@@ -47,6 +47,8 @@ function startWorker(port, stateDirectory) {
       "127.0.0.1",
       "--port",
       String(port),
+      "--var",
+      "SOURCE_OBSERVATION_HMAC_KEY:positioncrew-browser-test-observation-secret-20260905",
       "--log-level",
       "error",
     ],
