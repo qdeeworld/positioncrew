@@ -26,7 +26,7 @@ describe("immutable historical provider receipt lookup", () => {
     archived.result.deliverable.summary = "Caller mutation";
     expect(getHistoricalFixtureReceipt(hash)!.result.deliverable.summary).not.toBe("Caller mutation");
     const current = await runFrozenFixture("LP_REBALANCE");
-    expect(current.result.deliverable.status).toBe("REFUSED_CONSTRAINTS");
+    expect(current.result.deliverable).toMatchObject({ status: "NO_ACTION", decision: "HOLD" });
     expect(current.result.evaluation.evaluationHash).not.toBe(hash);
     expect(getHistoricalFixtureReceipt(current.result.evaluation.evaluationHash)).toBeNull();
   });

@@ -26,7 +26,7 @@ describe("LP final financial limits", () => {
     const result = createLpRebalanceDeliverable(request, now);
     if (result.status === "ACTIONABLE") {
       expect(result.proposedRange!.upperTick - result.proposedRange!.lowerTick).toBeLessThanOrEqual(180);
-    } else expect(result.status).toBe("REFUSED_CONSTRAINTS");
+    } else expect(result).toMatchObject({ status: "NO_ACTION", decision: "HOLD" });
   });
   it("refuses when no aligned width exists", () => {
     const request = input();
@@ -49,7 +49,7 @@ describe("LP final financial limits", () => {
     const shares = lpInventoryExposure(request, range)!;
     expect(shares.token1Bps).toBeGreaterThan(9900);
     expect(shares.token0Bps + shares.token1Bps).toBe(10000);
-    expect(createLpRebalanceDeliverable(request, now).status).toBe("REFUSED_CONSTRAINTS");
+    expect(createLpRebalanceDeliverable(request, now)).toMatchObject({ status: "NO_ACTION", decision: "HOLD" });
   });
   it("still permits a useful action with coherent token values and affordable costs", () => {
     const request = input();

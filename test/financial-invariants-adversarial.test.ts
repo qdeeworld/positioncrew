@@ -30,14 +30,15 @@ function lp() {
   request.marketState.token0PriceUsd = "1";
   request.marketState.token1PriceUsd = "1";
   request.marketState.fees24hUsd = "4000";
-  request.position.lowerTick = -60;
-  request.position.upperTick = 60;
+  request.marketState.realizedVolatilityBps = 0;
+  request.position.lowerTick = -600;
+  request.position.upperTick = 600;
   const output = LpRebalanceDeliverableSchema.parse({
     schemaVersion: "positioncrew.lp-rebalance.deliverable.v1", service: "LP_REBALANCE", requestId: request.requestId,
-    generatedAt: FIXTURE_NOW.toISOString(), expiresAt: "2026-08-12T16:04:00.000Z", status: "ACTIONABLE", decision: "WIDEN",
-    proposedRange: { lowerTick: -120, upperTick: 120 }, estimatedRebalanceCostUsd: "1", expectedGrossFeesUsd: "20",
-    expectedNetBenefitUsd: "19", breakEvenHours: "1.2", inventoryExposure: { token0Bps: 5000, token1Bps: 5000 },
-    feeProjection: { model: "POOL_SHARE_UPTIME_V1", currentUptimeBps: 0, proposedUptimeBps: 10000 },
+    generatedAt: FIXTURE_NOW.toISOString(), expiresAt: "2026-08-12T16:04:00.000Z", status: "ACTIONABLE", decision: "NARROW",
+    proposedRange: { lowerTick: -120, upperTick: 120 }, estimatedRebalanceCostUsd: "1", expectedGrossFeesUsd: "200",
+    expectedNetBenefitUsd: "163", breakEvenHours: "0.146341463414634146", inventoryExposure: { token0Bps: 5000, token1Bps: 5000 },
+    feeProjection: { model: "POOL_SHARE_UPTIME_V1", currentUptimeBps: 9000, proposedUptimeBps: 10000 },
     summary: "An independently supplied range with bounded cost and exposure.",
     actionSteps: ["Withdraw the previous liquidity.", "Rebalance within the supplied cost ceiling.", "Supply the proposed range."],
     invalidationConditions: ["Any frozen input changes."], limitations: ["Projected economics are estimates, not execution or performance guarantees."],
