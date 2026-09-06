@@ -1,0 +1,39 @@
+{
+  "alternatives": [],
+  "decision": "NONE",
+  "expiresAt": "2026-09-06T08:46:38.000Z",
+  "generatedAt": "2026-09-06T08:41:44.929Z",
+  "invalidationConditions": [
+    "Any collateral or debt balance changes after 2026-09-06T08:41:42.284Z",
+    "Any source price moves more than 100 bps",
+    "Current time passes 2026-09-06T08:46:38.000Z"
+  ],
+  "limitations": [
+    "This result is a bounded action plan, not custody or guaranteed execution.",
+    "Projected health factor depends on the supplied protocol thresholds and fresh prices.",
+    "Version 1 returns one single-asset rescue action; it does not split repayment across assets."
+  ],
+  "position": {
+    "collateralValueUsd": "1403.256925",
+    "currentHealthFactor": "3.56594482",
+    "debtValueUsd": "284.099923",
+    "liquidationWeightedCollateralUsd": "1013.084653",
+    "stressedHealthFactor": "3.20935034",
+    "targetHealthFactor": "1.25"
+  },
+  "recommendation": null,
+  "refusalReasons": [],
+  "requestId": "venus-live-e0270268-1788684102284",
+  "schemaVersion": "positioncrew.lending-rescue.deliverable.v1",
+  "service": "LENDING_RESCUE",
+  "sources": [
+    {
+      "label": "Venus Classic account and oracle snapshot at BSC block 120272302",
+      "observedAt": "2026-09-06T08:41:38.000Z",
+      "sourceId": "venus-mainnet-block-120272302",
+      "uri": "https://bscscan.com/block/120272302"
+    }
+  ],
+  "status": "NO_ACTION",
+  "summary": "Health factor 3.5659 already meets the 1.25 target."
+}

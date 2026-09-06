@@ -1,0 +1,208 @@
+{
+  "schemaVersion": "positioncrew.prospective-real-task-study-protocol.v1",
+  "studyId": "positioncrew-prospective-marketplace-pairs-release130-20260906",
+  "status": "PRECOMMITTED_AGENT_ARM_NOT_YET_RUN_MANUAL_ARMS_PENDING",
+  "templateOnly": false,
+  "precommittedAt": "2026-09-06T08:41:29.027Z",
+  "purpose": "Three fixed real-source tasks for a genuine public-marketplace versus without-agent comparison. Agent delivery measurement is not a controlled full human-journey speedup. Manual answers and study quality judgments remain pending.",
+  "activation": {
+    "finalDeployment": {
+      "sourceCommit": "35626ba2f35102dc42e442e223044d782169fa07",
+      "sitesVersion": 130,
+      "deploymentId": "appgdep_6a9d1e5192a481919ba28811bdf5c74a",
+      "deployedAt": "2026-09-06T08:04:25.880289+00:00"
+    },
+    "requiredBeforeExecution": [
+      "Root supplies the actual final deployed source SHA, Sites version, deployment ID and deployment time after release verification.",
+      "Root copies the finalized protocol to a distinct new study directory, supplies precommittedAt, sets templateOnly to false and changes status to PRECOMMITTED_AGENT_ARM_NOT_YET_RUN_MANUAL_ARMS_PENDING.",
+      "The new protocol bytes are committed by SHA-256 before consuming task inputs or producing comparison outputs; record the commitment outside this JSON to avoid a self-referential hash.",
+      "Only the copied existing capture harness is bound to this new study identity, final protocol hash and output directory. The old study and its exclusive capture-started marker remain untouched.",
+      "Root provides the protocol-ready signal before any automatic job. Elapsed waiting is not that signal."
+    ],
+    "automaticJobsRequireProtocolReadySignal": true,
+    "newRunsRecordedByThisTemplate": 0,
+    "protocolReadySignal": "Root sets POSITIONCREW_STUDY_PROTOCOL_READY to the exact protocol commitment on the single --execute invocation."
+  },
+  "tasks": [
+    {
+      "id": "lending",
+      "service": "LENDING_RESCUE",
+      "chainId": 56,
+      "source": "Current server-issued Venus Classic account snapshot",
+      "sourceEndpoint": "https://positioncrew.dolepee.com/api/wallets/0xe02702687b1653a782af57fbcc56d59b7e99a935/venus",
+      "account": "0xe02702687b1653a782af57fbcc56d59b7e99a935",
+      "policy": "Use the deployed current-hire builder's unchanged defaults. Preserve exact health, stress, asset availability, action, gas, slippage, freshness and deadline limits.",
+      "humanQuestion": "Does this position need a rescue under the supplied current/stressed health and target policy? Return no action, a bounded action, or a named refusal, with the health arithmetic and reasons.",
+      "ownershipBoundary": "A public account observation does not establish requester ownership, permission or execution funding."
+    },
+    {
+      "id": "lp",
+      "service": "LP_REBALANCE",
+      "chainId": 56,
+      "source": "Current server-issued PancakeSwap V3 position snapshot",
+      "sourceEndpoint": "https://positioncrew.dolepee.com/api/positions/pancake/1456267",
+      "positionTokenId": "1456267",
+      "policy": "Use the deployed current-hire builder's unchanged defaults. Preserve exact action, gas, slippage, width, tick-spacing, inventory, net-benefit, horizon and freshness limits.",
+      "humanQuestion": "Should this position keep its present range or move? Return hold, a bounded proposed range and size, or a named refusal; explain costs, modeled benefit, width and inventory constraints.",
+      "ownershipBoundary": "A public position observation does not establish requester ownership, permission or execution funding."
+    },
+    {
+      "id": "yield",
+      "service": "YIELD_OPTIMIZATION",
+      "chainId": 56,
+      "source": "Current server-issued Venus Core Pool stablecoin market snapshot",
+      "sourceEndpoint": "https://positioncrew.dolepee.com/api/markets/venus/stable-yields",
+      "capitalUsd": "1000",
+      "capitalBoundary": "Hypothetical economic budget. No owned balance, funded portfolio, deposit, profit or execution permission is established.",
+      "policy": "Use the deployed current-hire builder's unchanged default market set and every exact capital, allocation, action, execution-cost, gas, concentration, liquidity, risk, lockup, horizon and freshness limit. Preserve the server-issued request unchanged.",
+      "humanQuestion": "Is there an eligible allocation worth making after the supplied costs and constraints? Name the destination and bounded amount, or hold/refuse with the controlling reason."
+    }
+  ],
+  "sampling": {
+    "fixedTaskCount": 3,
+    "taskOrder": [
+      "lending",
+      "lp",
+      "yield"
+    ],
+    "selection": "Use only the fixed account, NFT and Venus source. Preserve every source HTTP attempt, including failures. The first successful response is the frozen candidate; malformed, stale or policy-incompatible contents are retained failures, never a reason to choose another source or alter policy.",
+    "maximumCreatedHiresPerTask": 1,
+    "provider": "Explicitly selected PositionCrew first-party provider. This is not a best-provider search, external-provider delivery study or independent customer journey.",
+    "retryPolicy": "At most two GET transport/status attempts: 250ms delay, or 20s only for the inherited narrowly identified LP RPC-exhaustion response. POSTs are never retried. One stable idempotency key per task. No replacement hire, provider switch, semantic resampling or relaxed limit.",
+    "failureBoundary": "If source acquisition cannot yield a usable valid request, retain the failure and do not invent an input or manufacture an equivalent completed pair. All three fixed tasks remain in the report, including incomplete tasks."
+  },
+  "sharedInputs": {
+    "content": [
+      "Exact server-issued request bytes, including all caps, sources, request ID, original timestamps and deadline",
+      "Exact frozen source observation and source binding",
+      "Plain-language task question and readable transcription of supplied facts and limits",
+      "The same precommitted policy definitions, model assumptions and quality criteria"
+    ],
+    "freeze": "Record the input bytes and hashes before their corresponding agent invocation; give the manual participant the identical frozen evidence. Never silently normalize, enrich, refresh or change a signed request.",
+    "unknowns": "Unavailable facts remain unavailable. If a policy or model definition is missing or inconsistent, record that limitation rather than choose an interpretation after seeing an answer.",
+    "referenceTime": "Treat later human work as a retrospective assessment of the frozen observations in their original request window. Preserve original requestedAt, observedAt, source expiry and deadline. Actual marketplace and human completion times are separate facts; do not backdate a run or make expired evidence appear current.",
+    "answerIsolation": "The human packet contains no corresponding agent answer, result status, selected destination, grading reference or computed recommendation. Documentation shared as an input must be identical for both arms, not post-result coaching.",
+    "documentationBoundary": "The common model descriptions document the deployed first-party provider's pre-existing policy. They are supplied as reference material to the human, not additional instructions sent to the public provider. The exact financial request and frozen source facts are shared; orchestration and tool preparation differ and are disclosed."
+  },
+  "budgetSemantics": {
+    "yieldPrincipal": "Proposed allocation and the aggregate principal withdrawn must EACH be no greater than min(capitalUsd, maxActionUsd, maxAllocationUsd when present, otherwise maxActionUsd). Do not add allocation and withdrawal together as if the same principal were two different spending authorizations; independently bound both sides and conserve funding.",
+    "yieldCosts": "The total selected entry and used-source exit cost must be no greater than min(maxGasUsd, maxActionUsd, maxExecutionCostUsd when present, otherwise maxActionUsd). Where a quote lacks a separate gas breakdown, apply the whole relevant cost quote to this ceiling rather than assume gas is zero.",
+    "explicitCurrentYieldRequest": "The fresh server request must declare maxAllocationUsd and maxExecutionCostUsd, with maxActionUsd and maxAllocationUsd representing the builder's explicit principal authority. Preserve the builder's existing fee/gas budget in maxExecutionCostUsd and maxGasUsd. capitalUsd remains the hypothetical economic budget, not evidence of funds or permission.",
+    "legacyBoundary": "Never reinterpret a legacy maxActionUsd fee-sized value as authority to move the entire capitalUsd. A missing explicit cap is not unlimited. Do not retrofit the September 5 request or its automated result with new authority.",
+    "otherServices": "Retain Lending and LP action, gas, slippage and category-specific limits exactly as issued. The study makes no change to any production caller limit.",
+    "precision": "Use exact supplied decimal values for cap checks. Display rounding must not conceal a breach, and fragmented actions or withdrawals must not bypass aggregate limits."
+  },
+  "modelSemantics": {
+    "observationsVersusModels": "Separate observed balances, prices, rates, liquidity, fees and block timing from estimated transaction costs, future fee uptime, constant-rate projections and risk assumptions. No model result is an actual or guaranteed return.",
+    "lending": "Use supplied collateral-enabled flags, liquidation thresholds, prices, available assets, target health and stress policy. Show current and stressed health arithmetic and identify assumptions or missing evidence. Do not fabricate executable collateral or available inventory.",
+    "lp": [
+      "POOL_SHARE_UPTIME_V1 uses feeBase = fees24hUsd * (positionValueUsd / poolLiquidityUsd) * (evaluationHorizonHours / 24). Dollar pool share is a model, not measured active V3 fee entitlement.",
+      "Current fee-uptime policy is 0% out of range, 35% near an edge, 55% at high volatility, otherwise 90%, with earlier conditions taking precedence. These factors are policy assumptions, not observed future uptime.",
+      "Near-edge means floor(10000 * nearest-edge tick distance / existing width) < edgeBufferBps; high volatility means realizedVolatilityBps >= highVolatilityBps.",
+      "Use fees24hUsd once as the supplied run-rate. A shorter measurement window and normalization factor are provenance; do not apply the factor again or describe the extrapolation as a directly measured full day.",
+      "The projection holds supplied prices, position value, pool liquidity and fee run-rate fixed, with linear accrual and no compounding. It excludes unmodeled price movement, impermanent loss and execution failures.",
+      "A proposed range must state its forecast assumptions and satisfy all final width, spacing, inventory and action limits. HOLD can report estimated current-range fees while carrying zero incremental rebalance benefit and no rebalance cost."
+    ],
+    "yield": [
+      "The reference projection holds quoted annual rates constant, uses simple non-compounding accrual and a 365-day year over evaluationHorizonDays. Quoted APY and this projection convention must not be presented as guaranteed future performance.",
+      "Subtract selected entry and used-source exit costs once. A future destination exit, changing rates, depeg and protocol losses are not automatically priced by this model.",
+      "Funding must come from disclosed idle capital or supplied same-asset unlocked positions. Do not invent swaps, borrowing authority, unlocked assets or withdrawal permissions.",
+      "A bounded search or a chosen feasible destination is not proof of a globally optimal allocation. Financial feasibility and user usefulness do not require matching the native generator's preferred answer."
+    ],
+    "modelDisclosureGate": "Include these definitions with the task inputs for both arms. If the final deployed diagnostic release unexpectedly changes strategy or these model semantics, stop before capture and reconcile the precommitment; do not reinterpret the study after outputs."
+  },
+  "execution": {
+    "route": "Public production create -> run -> poll -> durable receipt",
+    "noLocalGeneratorSubstitution": true,
+    "noPayment": true,
+    "noWallet": true,
+    "noCapitalExecution": true,
+    "noPublicCallsFromTemplatePreparation": true,
+    "noSubmission": true
+  },
+  "timing": {
+    "commonStart": "Conceptual task boundary is consumption of the frozen task. The automated harness measures only its frozen-input-ready delivery interval; human reading/interpretation is not equivalent to that measured interval.",
+    "commonFinish": "Each arm must retain a usable answer, refusal or inability. Automated delivery ends at durable receipt retrieval plus identity/hash checks; later assistant interpretation is not timed by this harness.",
+    "agent": "Measure monotonic client elapsed time from frozen-input-ready, before envelope construction, through public create/run/poll and receipt reload with identity/hash checks. This includes local orchestration, waits, failures and bounded transport attempts inside that interval. It excludes prior source acquisition and validation, later interpretation/formatting, model cognition and unmeasured operating overhead.",
+    "manual": "The real participant starts a stopwatch before opening the task worksheet or frozen inputs and stops only when the complete plain-language answer or inability is ready to return. Reading, fact lookup, calculations, documentation, corrections, interruptions and writing remain included. Record actual UTC start/end where captured.",
+    "sourceAcquisition": "Measure original source acquisition separately and disclose it as shared preparation. Do not charge that preparation only to the manual arm or compare its latency against a human's complete task time.",
+    "apiLatency": "Record server API duration separately from measured client delivery elapsed time. Neither is the complete buyer or assistant workflow.",
+    "missingTiming": "Unknown measurements stay unknown. Preserve early access or uncertain start boundaries; do not reset history, estimate a human duration, remove pauses or infer task work from preparation-file timestamps.",
+    "comparisonBoundary": "Automated delivery latency and human completion time use different boundaries. Report separately with this disclosure. Do not compute a controlled end-to-end speedup, pretend interpretation/model overhead was measured, or price unknown overhead at zero."
+  },
+  "manual": {
+    "status": "PENDING_NOT_STARTED",
+    "founderAllowed": true,
+    "independentRequired": false,
+    "blindRequired": false,
+    "priorExposureDisclosure": "Record that Qdee has seen earlier Lending outputs and related product behavior, plus any later exposure to these new inputs or answers. Do not claim an unexposed, independent or blind comparison when it is not one.",
+    "allowedTools": [
+      "calculator",
+      "spreadsheet",
+      "protocol documentation"
+    ],
+    "disallowedTools": [
+      "AI assistants",
+      "agent/provider endpoints",
+      "copying or paraphrasing the corresponding agent answer"
+    ],
+    "answerFormat": "Reuse the existing plain-language Lending, LP and Yield questions and worksheet structure. Provide source facts and exact bounds, then blank fields for the person's own answer. No JSON authoring, wallet connection or transaction is required.",
+    "requiredOriginalFields": [
+      "Participant identity and relationship to PositionCrew",
+      "Prior exposure to earlier outputs, these inputs or the corresponding new agent answer",
+      "Actual stopwatch elapsed time and actual UTC start/end if recorded",
+      "Tools and documentation used",
+      "Actual direct cost paid, with currency or unknown",
+      "Interruptions, early access, errors and separate dated corrections",
+      "Original decision, key calculations, amount or range when applicable, policy checks and reason",
+      "Unresolved evidence and what must be revalidated before any real-money action"
+    ],
+    "nonFabrication": "No participant identity, manual answer, elapsed time, cost, quality grade, independence status or completed comparison is supplied by this template or by the agent arm."
+  },
+  "quality": {
+    "frozenBeforeOutputs": true,
+    "method": "Evaluate the actual outputs against independently computed arithmetic, funding conservation, buyer caps, evidence sufficiency and user usefulness. Do not call the strategy generator to decide correctness or use exact-output parity as the quality score.",
+    "hardFailures": [
+      "Wrong task source, account, position or observation presented as the frozen evidence",
+      "Unsupported action, amount, range, asset availability or funding source",
+      "Allocation, aggregate withdrawals, costs, gas, slippage, width, inventory, concentration, risk, liquidity or lockup policy breached",
+      "Material arithmetic contradiction or rounding that hides a cap breach",
+      "Modeled, hypothetical or unsigned output represented as actual funded execution or guaranteed performance"
+    ],
+    "dimensions": [
+      "Decision supported by the frozen evidence",
+      "Material arithmetic reproducible",
+      "Applicable final-state limits satisfied, or unresolved feasibility clearly refused",
+      "Observations distinguished from costs and model assumptions",
+      "Answer usable and explicit about expiry, uncertainty and revalidation"
+    ],
+    "rating": "PASS, FAIL or NOT_ESTABLISHED per dimension, with an exact explanation. Automated arithmetic review is not an independent human rating.",
+    "outcomeRetention": "Publish or retain all three fixed task outcomes, including failure, refusal, inability, ties and agent losses. Do not replace a failing task or erase a first attempt. Different financially valid answers may pass.",
+    "advantageClaims": "Only supported comparisons may be claimed. No weighted winner, independent demand, superiority or successful external delivery is implied by a generated report."
+  },
+  "costs": {
+    "service": "Record actual public price and receipt cost. Zero is permitted only when confirmed by that run's route or receipt.",
+    "manual": "Record actual direct expenditure reported by the human, including currency. No invented wage or assumed zero.",
+    "modelAndOperatingOverhead": "Record if measured; otherwise explicitly unknown, not zero.",
+    "sharedPreparation": "Disclose source acquisition, common packet preparation and general tool availability separately and symmetrically.",
+    "capital": "Scenario principal, transaction estimates and the cost of completing the study are separate quantities."
+  },
+  "preservation": {
+    "oldStudy": "/Users/qdee/Documents/Codex/competition-controls/build-the-era-positioncrew/audits/current-marketplace-pairs-20260905",
+    "originalComparisons": "Preserve the original August 20 outputs and September 5 offline and marketplace studies unchanged. Their ambiguity, failures, timing and evidence limits remain part of their own records.",
+    "separation": "This prospective protocol has a new study identity and will have new input commitments and marketplace hires. It is not a retroactive repair of an earlier human run, agent result or quality score.",
+    "worksheetFormatReferences": [
+      "/Users/qdee/Documents/Codex/competition-controls/build-the-era-positioncrew/audits/current-marketplace-pairs-20260905/manual-only/lending/WORKSHEET.md",
+      "/Users/qdee/Documents/Codex/competition-controls/build-the-era-positioncrew/audits/current-marketplace-pairs-20260905/manual-only/lp/WORKSHEET.md",
+      "/Users/qdee/Documents/Codex/competition-controls/build-the-era-positioncrew/audits/current-marketplace-pairs-20260905/manual-only/yield/WORKSHEET.md"
+    ],
+    "reuseBoundary": "Reuse questions and blank form structure only. Populate a new manual-only packet from its new frozen inputs; do not copy old observations, agent answers or completed outputs into it."
+  },
+  "publication": {
+    "privatePreparationOnly": true,
+    "finalFreeze": false,
+    "submitted": false,
+    "manualResults": "Absent until genuinely supplied.",
+    "submissionReadiness": "No submission readiness or eligibility guarantee is established by this draft."
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "positioncrew.lp-rebalance.request.v1",
+  "service": "LP_REBALANCE",
+  "requestId": "pancake-position-1456267-120272319",
+  "chainId": 56,
+  "account": "0x556B9306565093C855AEA9AE92A594704c2Cd59e",
+  "protocol": "PancakeSwap V3 position analysis",
+  "requestedAt": "2026-09-06T08:41:48.057Z",
+  "deadline": "2026-09-06T08:43:48.057Z",
+  "maxDataAgeSeconds": 120,
+  "maxActionUsd": "1.956321",
+  "maxGasUsd": "0.250000",
+  "maxSlippageBps": 30,
+  "sources": [
+    {
+      "sourceId": "pancake-position-mainnet-block-120272319",
+      "label": "Block-pinned PancakeSwap V3 position 1456267, pool, oracle, volatility, and swap-window state",
+      "uri": "https://bscscan.com/block/120272319",
+      "observedAt": "2026-09-06T08:41:45.000Z"
+    }
+  ],
+  "pool": "0x36696169C63e42cd08ce11f5deeBbCeBae652050",
+  "token0": {
+    "symbol": "USDT",
+    "address": "0x55d398326f99059fF775485246999027B3197955",
+    "decimals": 18
+  },
+  "token1": {
+    "symbol": "WBNB",
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "decimals": 18
+  },
+  "position": {
+    "lowerTick": -68150,
+    "upperTick": -63690,
+    "liquidity": "612955555285030311979",
+    "positionValueUsd": "3550.911984",
+    "feesEarnedUsd": "18.266638",
+    "token0ShareBps": 5764,
+    "token1ShareBps": 4236
+  },
+  "marketState": {
+    "currentTick": -66281,
+    "token0PriceUsd": "1.00007130",
+    "token1PriceUsd": "755.77009450",
+    "volume24hUsd": "9652558.26",
+    "fees24hUsd": "4826.28",
+    "poolLiquidityUsd": "125755279.66",
+    "realizedVolatilityBps": 61,
+    "volumeMeasurementWindowSeconds": 3602,
+    "volumeNormalizationFactor": "23.986674",
+    "swapCount": 622,
+    "observedAt": "2026-09-06T08:41:45.000Z",
+    "sourceId": "pancake-position-mainnet-block-120272319"
+  },
+  "constraints": {
+    "minimumWidthTicks": 2230,
+    "maximumWidthTicks": 13380,
+    "tickSpacing": 10,
+    "edgeBufferBps": 1000,
+    "highVolatilityBps": 1000,
+    "maximumToken0ShareBps": 7500,
+    "maximumToken1ShareBps": 7500,
+    "minimumNetBenefitUsd": "3.550912",
+    "estimatedGasUsd": "0.028341",
+    "estimatedSwapCostUsd": "0.949819",
+    "evaluationHorizonHours": 24
+  }
+}
