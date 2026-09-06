@@ -168,6 +168,8 @@ export function buildMarketplaceManifest(
     openApiUrl: absolute(origin, "/openapi.json"),
     operatingRecordUrl: absolute(origin, "/api/operations/production"),
     marketplaceDeliveryEvidenceUrl: absolute(origin, "/api/benchmarks/marketplace-provenance"),
+    founderAgentAdvantageStatusUrl: absolute(origin, "/api/benchmarks/founder-comparison/status"),
+    independentAgentAdvantageStatusUrl: absolute(origin, "/api/benchmarks/status"),
     externalComparisonSnapshotUrl: absolute(origin, EXTERNAL_COMPARISON_SNAPSHOT_ROUTE),
     providerContractPreflightUrl: absolute(origin, PROVIDER_CONTRACT_PREFLIGHT_ROUTE),
     venusTestnetNativeSupplyEvidenceUrl: absolute(origin, VENUS_TESTNET_NATIVE_SUPPLY_EVIDENCE_ROUTE),
@@ -195,7 +197,10 @@ export function buildMarketplaceManifest(
       providerContractPreflight: "CALLER_SUPPLIED_JSON_CONTRACT_ONLY",
       venusTestnetNativeSupply: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
       boundedActivation: ALTANA_VENUS_CLAIM_BOUNDARY,
-      agentAdvantage: "PENDING_INDEPENDENT_BLIND_EVALUATION",
+      agentAdvantage: "FOUNDER_REPORT_PUBLISHED_INDEPENDENT_EVALUATION_PENDING",
+      agentAdvantageBoundary:
+        "The published founder comparison is historical, non-independent and non-blind. Its publication does not establish current-task advantage or a completed independent evaluation; consult the separate status endpoints.",
+      lpProviderSelection: "EXPLICIT_CHOICE_FROM_COMPATIBLE_CURRENT_AUDITION_NO_SILENT_FALLBACK",
     },
   };
 }

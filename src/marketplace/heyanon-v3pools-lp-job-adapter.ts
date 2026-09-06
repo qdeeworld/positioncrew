@@ -99,31 +99,82 @@ function parseEventStream(raw: string): unknown {
   return JSON.parse(dataLine ? dataLine.slice(6) : raw) as unknown;
 }
 
+export type HeyAnonMcpToolName = "getCurrentPoolPrice" | "getPredefinedPriceRanges";
+export type HeyAnonMcpCallPhase = "FETCH" | "RESPONSE_BODY";
+export type HeyAnonMcpFailureKind = "LOCAL_TIMEOUT" | "CALLER_CANCELLED" | "UNATTRIBUTED_ABORT" | "TRANSPORT_FAILURE";
+
+export class HeyAnonMcpCallError extends Error {
+  readonly code: string;
+
+  constructor(
+    readonly toolName: HeyAnonMcpToolName,
+    readonly phase: HeyAnonMcpCallPhase,
+    readonly failureKind: HeyAnonMcpFailureKind,
+  ) {
+    const detail = {
+      LOCAL_TIMEOUT: "the local 8000 ms deadline expired",
+      CALLER_CANCELLED: "the caller cancelled the operation; provider availability was not established",
+      UNATTRIBUTED_ABORT: "the operation aborted without a recorded local or caller signal",
+      TRANSPORT_FAILURE: "transport failed; provider availability was not established",
+    }[failureKind];
+    const code = "HEYANON_MCP_" + failureKind;
+    super("[" + code + "] HeyAnon MCP " + toolName + " " + phase + ": " + detail + ".");
+    this.name = "HeyAnonMcpCallError";
+    this.code = code;
+  }
+}
+
 async function callTool(
-  name: "getCurrentPoolPrice" | "getPredefinedPriceRanges",
+  name: HeyAnonMcpToolName,
   args: Record<string, unknown>,
   fetchImpl: typeof fetch,
+  callerSignal?: AbortSignal,
 ): Promise<unknown> {
   const signal = AbortSignal.timeout(8_000);
-  const response = await fetchImpl(HEYANON_V3_POOLS.endpoint, {
-    method: "POST",
-    headers: {
-      accept: "application/json, text/event-stream",
-      "content-type": "application/json",
-    },
-    signal,
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: name,
-      method: "tools/call",
-      params: { name, arguments: args },
-    }),
-  });
-  if (!response.ok) throw new Error(`HeyAnon V3 MCP returned HTTP ${response.status}`);
-  const mcp = McpResponseSchema.parse(parseEventStream(await response.text()));
-  const content = mcp.result.content.find((item) => item.type === "text");
-  if (!content) throw new Error(`HeyAnon V3 MCP returned no ${name} result`);
-  return JSON.parse(content.text) as unknown;
+  let abortKind: "LOCAL_TIMEOUT" | "CALLER_CANCELLED" | undefined =
+    callerSignal?.aborted ? "CALLER_CANCELLED" : undefined;
+  const localAborted = () => { abortKind ??= "LOCAL_TIMEOUT"; };
+  const callerAborted = () => { abortKind ??= "CALLER_CANCELLED"; };
+  signal.addEventListener("abort", localAborted, { once: true });
+  callerSignal?.addEventListener("abort", callerAborted, { once: true });
+  // MCP cancellation is owned here, not by a caller-supplied fetch wrapper.
+  // The same signal also cancels consumption of the fetch response body.
+  const requestSignal = callerSignal ? AbortSignal.any([signal, callerSignal]) : signal;
+  const guarded = async <T>(phase: HeyAnonMcpCallPhase, operation: () => Promise<T>): Promise<T> => {
+    try {
+      return await operation();
+    } catch (error) {
+      const unattributedAbort = error instanceof Error &&
+        (error.name === "AbortError" || error.name === "TimeoutError");
+      throw new HeyAnonMcpCallError(name, phase,
+        abortKind ?? (unattributedAbort ? "UNATTRIBUTED_ABORT" : "TRANSPORT_FAILURE"));
+    }
+  };
+  try {
+    const response = await guarded("FETCH", () => fetchImpl(HEYANON_V3_POOLS.endpoint, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      signal: requestSignal,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: name,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }),
+    }));
+    if (!response.ok) throw new Error(`HeyAnon V3 MCP returned HTTP ${response.status}`);
+    const raw = await guarded("RESPONSE_BODY", () => response.text());
+    const mcp = McpResponseSchema.parse(parseEventStream(raw));
+    const content = mcp.result.content.find((item) => item.type === "text");
+    if (!content) throw new Error(`HeyAnon V3 MCP returned no ${name} result`);
+    return JSON.parse(content.text) as unknown;
+  } finally {
+    signal.removeEventListener("abort", localAborted);
+    callerSignal?.removeEventListener("abort", callerAborted);
+  }
 }
 
 function alignDown(tick: number, spacing: number): number {
@@ -373,11 +424,14 @@ export async function auditionHeyAnonV3LpJob(
     fee: feeTier,
   };
   const shortcut = selectHeyAnonRangeShortcut(request);
+  if (callerSignal?.aborted) {
+    throw new HeyAnonMcpCallError("getCurrentPoolPrice", "FETCH", "CALLER_CANCELLED");
+  }
   const [priceEnvelope, rangeEnvelope] = await Promise.all([
-    callTool("getCurrentPoolPrice", args, fetchImpl).then((value) =>
+    callTool("getCurrentPoolPrice", args, rawFetch, callerSignal).then((value) =>
       PoolPriceEnvelopeSchema.parse(value)
     ),
-    callTool("getPredefinedPriceRanges", { ...args, shortcut }, fetchImpl).then(
+    callTool("getPredefinedPriceRanges", { ...args, shortcut }, rawFetch, callerSignal).then(
       (value) => RangeEnvelopeSchema.parse(value),
     ),
   ]);

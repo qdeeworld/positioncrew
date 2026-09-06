@@ -4,13 +4,16 @@ import { canonicalHash } from "../src/core/canonical.js";
 import { LpRebalanceRequestSchema } from "../src/contracts/lp-rebalance.js";
 import { runCurrentBlockPinnedProviderRequest } from "../src/api/fixture-jobs.js";
 import { createLpLiveMatchAudition, executeLpLiveMatchProvider, selectLpLiveMatchProvider } from "../src/marketplace/lp-live-match.js";
-import { auditionHeyAnonV3LpJob } from "../src/marketplace/heyanon-v3pools-lp-job-adapter.js";
+import { auditionHeyAnonV3LpJob, HeyAnonMcpCallError } from "../src/marketplace/heyanon-v3pools-lp-job-adapter.js";
 import { validatedFreshMarketplaceChain } from "../web/src/job-history.js";
 import { FixtureJobResponseSchema } from "../src/api/fixture-response-schema.js";
 import { sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
 import { BscPositionVerificationError, BscVerificationRpcError } from "../src/marketplace/bsc-verification-rpc.js";
 
-vi.mock("../src/marketplace/heyanon-v3pools-lp-job-adapter.js", () => ({ auditionHeyAnonV3LpJob: vi.fn() }));
+vi.mock("../src/marketplace/heyanon-v3pools-lp-job-adapter.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/marketplace/heyanon-v3pools-lp-job-adapter.js")>(),
+  auditionHeyAnonV3LpJob: vi.fn(),
+}));
 const mockAudition = vi.mocked(auditionHeyAnonV3LpJob);
 const hireId = "11111111-1111-4111-8111-111111111111";
 const jobId = "22222222-2222-4222-8222-222222222222";
@@ -46,6 +49,43 @@ async function prepared() {
 beforeEach(() => mockAudition.mockReset());
 
 describe("selected external LP execution", () => {
+  it.each([
+    { phase: "FETCH", kind: "CALLER_CANCELLED", expected: "LP_DELIVERY_DEADLINE" },
+    { phase: "RESPONSE_BODY", kind: "CALLER_CANCELLED", expected: "LP_DELIVERY_DEADLINE" },
+    { phase: "FETCH", kind: "LOCAL_TIMEOUT", expected: "HEYANON_MCP_LOCAL_TIMEOUT" },
+    { phase: "RESPONSE_BODY", kind: "TRANSPORT_FAILURE", expected: "HEYANON_MCP_TRANSPORT_FAILURE" },
+  ] as const)("preserves $kind provenance during $phase after delayed prerequisites", async ({ phase, kind, expected }) => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      mockAudition.mockImplementationOnce(async (_request, _positionId, options) => {
+        // Three seconds of prerequisites leave less than the MCP's own
+        // eight-second budget before the ten-second delivery deadline.
+        await new Promise<void>((resolve) => setTimeout(resolve, 3_000));
+        return new Promise<Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>>((_resolve, reject) => {
+          const aborted = () => reject(new HeyAnonMcpCallError("getPredefinedPriceRanges", phase, kind));
+          options!.signal!.addEventListener("abort", aborted, { once: true });
+          if (options!.signal!.aborted) aborted();
+        });
+      });
+      const pending = executeLpLiveMatchProvider(input);
+      await vi.advanceTimersByTimeAsync(10_000);
+      const response = await pending;
+      expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+      expect(response.result.deliverable.decision).toBe("NONE");
+      expect(response.result.job.providerId).toBe("erc8004:56:45650");
+      expect(response.liveMatchExecution?.invocation.rawResponseHash).toBeNull();
+      expect(response.liveMatchExecution?.invocation.checks[0]?.code).toBe(expected);
+      if (kind === "CALLER_CANCELLED") {
+        expect(response.liveMatchExecution?.invocation.checks[0]?.detail)
+          .toContain("PositionCrew's LP delivery deadline expired after 10000 ms");
+      }
+      expect(mockAudition).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["position-abi", "factory-abi", "unsupported-fee", "rpc-429"])(
     "persists %s as a verification refusal without provider substitution",
     async (failure) => {

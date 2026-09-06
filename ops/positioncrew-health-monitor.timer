@@ -1,0 +1,13 @@
+[Unit]
+Description=Check PositionCrew every five minutes through September 23, 2026 UTC
+
+[Timer]
+OnCalendar=2026-09-06..23 *:00/5:00 UTC
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=positioncrew-health-monitor.service
+
+[Install]
+WantedBy=timers.target
+

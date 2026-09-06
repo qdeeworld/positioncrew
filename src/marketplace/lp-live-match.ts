@@ -15,7 +15,7 @@ import {
 import { canonicalHash } from "../core/canonical.js";
 import { evaluateFinancialInvariants } from "../evaluators/financial-invariants.js";
 import { HEYANON_V3_POOLS } from "./heyanon-v3pools-adapter.js";
-import { auditionHeyAnonV3LpJob } from "./heyanon-v3pools-lp-job-adapter.js";
+import { auditionHeyAnonV3LpJob, HeyAnonMcpCallError } from "./heyanon-v3pools-lp-job-adapter.js";
 import { BscPositionVerificationError } from "./bsc-verification-rpc.js";
 import {
   LpLiveMatchAuditionSchema,
@@ -67,6 +67,15 @@ const EXECUTION_BOUNDARY = [
 
 export class LpLiveMatchSelectionError extends Error {
   readonly code = "LP_PROVIDER_NOT_SELECTABLE";
+}
+
+class LpExternalDeadlineError extends Error {
+  readonly code = "LP_EXTERNAL_DEADLINE";
+
+  constructor(stage: "audition" | "delivery", milliseconds: number) {
+    super(`PositionCrew's LP ${stage} deadline expired after ${milliseconds} ms; the external invocation did not complete.`);
+    this.name = "LpExternalDeadlineError";
+  }
 }
 
 function elapsed(startedAt: number): number {
@@ -146,7 +155,8 @@ export async function createLpLiveMatchAudition(
   try {
     const controller = new AbortController();
     const fetchImpl = options.fetchImpl ?? fetch;
-    const timeout = setTimeout(() => controller.abort(), 8_000);
+    const deadlineError = new LpExternalDeadlineError("audition", 8_000);
+    const timeout = setTimeout(() => controller.abort(deadlineError), 8_000);
     let assessment: Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>;
     try {
       assessment = await boundedExternalInvocation(
@@ -162,6 +172,8 @@ export async function createLpLiveMatchAudition(
           now,
         }),
         8_000,
+        deadlineError,
+        controller.signal,
       );
     } finally {
       clearTimeout(timeout);
@@ -210,7 +222,10 @@ export async function createLpLiveMatchAudition(
   } catch (error) {
     const detail = error instanceof Error ? error.message : "External provider unavailable";
     const verificationUnavailable = error instanceof BscPositionVerificationError;
-    const failureCode = verificationUnavailable ? "BSC_POSITION_VERIFICATION" : "FRESH_PROVIDER_AUDITION";
+    const failureCode = verificationUnavailable ? "BSC_POSITION_VERIFICATION"
+      : error instanceof LpExternalDeadlineError ? "LP_AUDITION_DEADLINE"
+      : error instanceof HeyAnonMcpCallError ? error.code
+      : "FRESH_PROVIDER_AUDITION";
     candidates.push({
       ...HEYANON_LP,
       status: "UNAVAILABLE",
@@ -239,10 +254,10 @@ export async function createLpLiveMatchAudition(
       eligibleForPositionAssessmentActivation: false,
       eligibleForLiveMatch: false,
       adapterNormalized: false,
-      checks: [{ code: verificationUnavailable ? "BSC_POSITION_VERIFICATION" : "REMOTE_PROVIDER_AVAILABLE", status: "FAIL", detail }],
+      checks: [{ code: failureCode === "FRESH_PROVIDER_AUDITION" ? "REMOTE_PROVIDER_AVAILABLE" : failureCode, status: "FAIL", detail }],
       boundary: verificationUnavailable
         ? "PositionCrew could not independently verify the BSC position, so HeyAnon was not invoked. This is not evidence of a HeyAnon outage. No external result or ranking is claimed."
-        : "The external outage did not select or invoke another provider. No external result or ranking is claimed.",
+        : "The external-provider audition did not complete; this alone does not establish a provider outage. No alternative provider was selected or invoked. No external result or ranking is claimed.",
     };
   }
 
@@ -360,13 +375,28 @@ function exactOutputEvaluator(expectedHash: string) {
   };
 }
 
-async function boundedExternalInvocation<T>(operation: Promise<T>, milliseconds: number): Promise<T> {
+async function boundedExternalInvocation<T>(
+  operation: Promise<T>,
+  milliseconds: number,
+  deadlineError: LpExternalDeadlineError,
+  callerSignal: AbortSignal,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      operation,
+      operation.catch((error: unknown) => {
+        // A cooperative MCP rejection may win the race against our timer.
+        // Restore only this deadline's provenance, never a local MCP timeout
+        // or an unrelated cancellation/transport/verification failure.
+        if (error instanceof HeyAnonMcpCallError &&
+            error.failureKind === "CALLER_CANCELLED" &&
+            callerSignal.aborted && callerSignal.reason === deadlineError) {
+          throw deadlineError;
+        }
+        throw error;
+      }),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`Selected external provider timed out after ${milliseconds} ms`)), milliseconds);
+        timer = setTimeout(() => reject(deadlineError), milliseconds);
       }),
     ]);
   } finally {
@@ -480,7 +510,8 @@ export async function executeLpLiveMatchProvider(input: {
       }
       requireFreshCompletion(request);
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
+      const deadlineError = new LpExternalDeadlineError("delivery", 10_000);
+      const timeout = setTimeout(() => controller.abort(deadlineError), 10_000);
       let assessment: Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>;
       try {
         assessment = await boundedExternalInvocation(
@@ -491,6 +522,8 @@ export async function executeLpLiveMatchProvider(input: {
             now: new Date(),
           }),
           10_000,
+          deadlineError,
+          controller.signal,
         );
       } finally {
         clearTimeout(timeout);
@@ -528,7 +561,14 @@ export async function executeLpLiveMatchProvider(input: {
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Selected external provider failed";
       deliverable = refusal(request, new Date(), reason);
-      checks = [{ code: error instanceof BscPositionVerificationError ? "BSC_POSITION_VERIFICATION" : "FRESH_SELECTED_PROVIDER_RUN", status: "FAIL", detail: reason }];
+      checks = [{
+        code: error instanceof BscPositionVerificationError ? "BSC_POSITION_VERIFICATION"
+          : error instanceof LpExternalDeadlineError ? "LP_DELIVERY_DEADLINE"
+          : error instanceof HeyAnonMcpCallError ? error.code
+          : "FRESH_SELECTED_PROVIDER_RUN",
+        status: "FAIL",
+        detail: reason,
+      }];
     }
     response = await runCurrentBlockPinnedProviderDeliverable(
       request,
