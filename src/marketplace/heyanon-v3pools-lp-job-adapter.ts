@@ -137,6 +137,9 @@ async function callTool(
   const callerAborted = () => { abortKind ??= "CALLER_CANCELLED"; };
   signal.addEventListener("abort", localAborted, { once: true });
   callerSignal?.addEventListener("abort", callerAborted, { once: true });
+  // MCP cancellation is owned here, not by a caller-supplied fetch wrapper.
+  // The same signal also cancels consumption of the fetch response body.
+  const requestSignal = callerSignal ? AbortSignal.any([signal, callerSignal]) : signal;
   const guarded = async <T>(phase: HeyAnonMcpCallPhase, operation: () => Promise<T>): Promise<T> => {
     try {
       return await operation();
@@ -154,7 +157,7 @@ async function callTool(
         accept: "application/json, text/event-stream",
         "content-type": "application/json",
       },
-      signal,
+      signal: requestSignal,
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: name,
@@ -421,11 +424,14 @@ export async function auditionHeyAnonV3LpJob(
     fee: feeTier,
   };
   const shortcut = selectHeyAnonRangeShortcut(request);
+  if (callerSignal?.aborted) {
+    throw new HeyAnonMcpCallError("getCurrentPoolPrice", "FETCH", "CALLER_CANCELLED");
+  }
   const [priceEnvelope, rangeEnvelope] = await Promise.all([
-    callTool("getCurrentPoolPrice", args, fetchImpl, callerSignal).then((value) =>
+    callTool("getCurrentPoolPrice", args, rawFetch, callerSignal).then((value) =>
       PoolPriceEnvelopeSchema.parse(value)
     ),
-    callTool("getPredefinedPriceRanges", { ...args, shortcut }, fetchImpl, callerSignal).then(
+    callTool("getPredefinedPriceRanges", { ...args, shortcut }, rawFetch, callerSignal).then(
       (value) => RangeEnvelopeSchema.parse(value),
     ),
   ]);

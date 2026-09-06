@@ -27,8 +27,11 @@ const TelegramAcceptanceSchema = z.object({
 
 export async function sendTelegram(message: string, options: TelegramNotificationOptions = {}): Promise<void> {
   const env = options.env ?? process.env;
-  const token = env.POSITIONCREW_TELEGRAM_BOT_TOKEN?.trim() || env.CROSSWIND_TELEGRAM_BOT_TOKEN?.trim();
-  const chatId = env.POSITIONCREW_TELEGRAM_CHAT_ID?.trim() || env.CROSSWIND_TELEGRAM_CHAT_ID?.trim();
+  const dedicatedToken = env.POSITIONCREW_TELEGRAM_BOT_TOKEN?.trim();
+  const dedicatedChatId = env.POSITIONCREW_TELEGRAM_CHAT_ID?.trim();
+  const hasDedicatedPair = Boolean(dedicatedToken && dedicatedChatId);
+  const token = hasDedicatedPair ? dedicatedToken : env.CROSSWIND_TELEGRAM_BOT_TOKEN?.trim();
+  const chatId = hasDedicatedPair ? dedicatedChatId : env.CROSSWIND_TELEGRAM_CHAT_ID?.trim();
   if (!token || !chatId) throw new Error("Telegram alert token or chat ID is not configured.");
 
   let response: Response;

@@ -66,6 +66,35 @@ describe("TermiX order notifier", () => {
       attempts: 0,
     },
     {
+      name: "missing token",
+      env: { POSITIONCREW_TELEGRAM_CHAT_ID: configuredEnv.POSITIONCREW_TELEGRAM_CHAT_ID },
+      response: async () => telegramResponse({ ok: true, result: { message_id: 1 } }),
+      error: "Telegram alert token or chat ID is not configured.",
+      attempts: 0,
+    },
+    {
+      name: "dedicated token and legacy chat without a complete pair",
+      env: {
+        POSITIONCREW_TELEGRAM_BOT_TOKEN: configuredEnv.POSITIONCREW_TELEGRAM_BOT_TOKEN,
+        CROSSWIND_TELEGRAM_BOT_TOKEN: " ",
+        CROSSWIND_TELEGRAM_CHAT_ID: configuredEnv.CROSSWIND_TELEGRAM_CHAT_ID,
+      },
+      response: async () => telegramResponse({ ok: true, result: { message_id: 1 } }),
+      error: "Telegram alert token or chat ID is not configured.",
+      attempts: 0,
+    },
+    {
+      name: "legacy token and dedicated chat without a complete pair",
+      env: {
+        POSITIONCREW_TELEGRAM_CHAT_ID: configuredEnv.POSITIONCREW_TELEGRAM_CHAT_ID,
+        CROSSWIND_TELEGRAM_BOT_TOKEN: configuredEnv.CROSSWIND_TELEGRAM_BOT_TOKEN,
+        CROSSWIND_TELEGRAM_CHAT_ID: " ",
+      },
+      response: async () => telegramResponse({ ok: true, result: { message_id: 1 } }),
+      error: "Telegram alert token or chat ID is not configured.",
+      attempts: 0,
+    },
+    {
       name: "transport error containing a private URL",
       env: configuredEnv,
       response: async () => {
@@ -167,7 +196,36 @@ describe("TermiX order notifier", () => {
     expect((await readdir(outbox)).sort()).toEqual([...names.slice(12), "unrelated.json"].sort());
   });
 
-  it("uses legacy Telegram configuration and the configured outbox when dedicated values are blank", async () => {
+  it.each([
+    {
+      name: "the complete dedicated pair takes precedence",
+      dedicatedToken: " test-dedicated-token ",
+      dedicatedChatId: " test-dedicated-chat ",
+      expectedToken: "test-dedicated-token",
+      expectedChatId: "test-dedicated-chat",
+    },
+    {
+      name: "only a dedicated token falls back to both legacy values",
+      dedicatedToken: "test-dedicated-token",
+      dedicatedChatId: "",
+      expectedToken: "test-legacy-token",
+      expectedChatId: "test-legacy-chat",
+    },
+    {
+      name: "only a dedicated chat falls back to both legacy values",
+      dedicatedToken: " ",
+      dedicatedChatId: "test-dedicated-chat",
+      expectedToken: "test-legacy-token",
+      expectedChatId: "test-legacy-chat",
+    },
+    {
+      name: "blank dedicated values fall back to both legacy values",
+      dedicatedToken: " ",
+      dedicatedChatId: "",
+      expectedToken: "test-legacy-token",
+      expectedChatId: "test-legacy-chat",
+    },
+  ])("uses the configured outbox and a complete credential pair: $name", async (credentials) => {
     const { outbox } = await makeOutbox(1);
     const fetchImpl = vi.fn(async (_input: Parameters<typeof fetch>[0], _init?: RequestInit) =>
       telegramResponse({ ok: true, result: { message_id: 1 } })
@@ -175,8 +233,8 @@ describe("TermiX order notifier", () => {
     await notifyTermixOrderAlerts({
       env: {
         ...configuredEnv,
-        POSITIONCREW_TELEGRAM_BOT_TOKEN: " ",
-        POSITIONCREW_TELEGRAM_CHAT_ID: "",
+        POSITIONCREW_TELEGRAM_BOT_TOKEN: credentials.dedicatedToken,
+        POSITIONCREW_TELEGRAM_CHAT_ID: credentials.dedicatedChatId,
         TERMIX_ORDER_OUTBOX_PATH: outbox,
       },
       fetchImpl,
@@ -184,8 +242,8 @@ describe("TermiX order notifier", () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(url).toBe("https://api.telegram.org/bottest-legacy-token/sendMessage");
-    expect(JSON.parse(String(init?.body)).chat_id).toBe("test-legacy-chat");
+    expect(url).toBe("https://api.telegram.org/bot" + credentials.expectedToken + "/sendMessage");
+    expect(JSON.parse(String(init?.body)).chat_id).toBe(credentials.expectedChatId);
     expect(await readdir(outbox)).toEqual([]);
   });
 

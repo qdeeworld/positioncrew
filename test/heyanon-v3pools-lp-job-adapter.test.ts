@@ -169,6 +169,60 @@ function pendingUntilAbort<T>(signal: AbortSignal): Promise<T> {
 }
 
 describe("HeyAnon V3 Pools exact LP job adapter", () => {
+  it.each(["FETCH", "RESPONSE_BODY"] as const)("cancels both MCP %s operations through their actual fetch signals", async (phase) => {
+    const caller = new AbortController();
+    const reason = new Error("private cancellation reason");
+    const signals: AbortSignal[] = [];
+    let pendingPhases = 0;
+    let started!: () => void;
+    const bothStarted = new Promise<void>((resolve) => { started = resolve; });
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => new AbortController().signal);
+    const cooperativeFetch: typeof fetch = async (input, init) => {
+      if (!String(input).includes("heyanon.ai")) return fetchImpl(input, init);
+      const signal = init!.signal!;
+      signals.push(signal);
+      const stall = <T>(): Promise<T> => {
+        pendingPhases += 1;
+        if (pendingPhases === 2) started();
+        return pendingUntilAbort<T>(signal);
+      };
+      if (phase === "FETCH") return stall<Response>();
+      const response = new Response("");
+      response.text = () => stall<string>();
+      return response;
+    };
+    try {
+      const pending = auditionHeyAnonV3LpJob(request, positionId, {
+        fetchImpl: cooperativeFetch, signal: caller.signal, now: new Date("2026-08-30T12:00:30.000Z"),
+      }).catch((error: unknown) => error);
+      await bothStarted;
+      caller.abort(reason);
+      const error = await pending;
+      expect(signals).toHaveLength(2);
+      expect(signals.every((signal) => signal.aborted && signal.reason === reason)).toBe(true);
+      expect(error).toBeInstanceOf(HeyAnonMcpCallError);
+      expect(error).toMatchObject({ phase, failureKind: "CALLER_CANCELLED" });
+      expect((error as Error).message).not.toContain("private");
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("does not begin an MCP request for an already-cancelled caller", async () => {
+    const caller = new AbortController();
+    caller.abort();
+    let mcpCalls = 0;
+    const cancelledFetch: typeof fetch = async (input, init) => {
+      if (String(input).includes("heyanon.ai")) mcpCalls += 1;
+      return fetchImpl(input, init);
+    };
+    const error = await auditionHeyAnonV3LpJob(request, positionId, {
+      fetchImpl: cancelledFetch, signal: caller.signal,
+    }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(mcpCalls).toBe(0);
+  });
+
   it.each([
     { toolName: "getCurrentPoolPrice", phase: "FETCH", kind: "LOCAL_TIMEOUT" },
     { toolName: "getPredefinedPriceRanges", phase: "RESPONSE_BODY", kind: "LOCAL_TIMEOUT" },
