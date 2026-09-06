@@ -118,6 +118,12 @@ async function installDeterministicLiveProbeRoutes(page: Page) {
     `Venus stablecoin markets at BSC block ${blockNumber}`,
     blockNumber,
   );
+  // This is a newly issued synthetic probe, not a replay or silent upgrade of
+  // an existing hire. Match the production builder's separate permissions
+  // before signing, while preserving the fixture's original fee/gas ceilings.
+  yieldRequest.maxExecutionCostUsd = yieldRequest.maxActionUsd;
+  yieldRequest.maxActionUsd = yieldRequest.capitalUsd;
+  yieldRequest.maxAllocationUsd = yieldRequest.capitalUsd;
   const lpRequest = liveLpRequest(now, lpTokenId, blockNumber);
 
   await page.route("**/api/status", async (route) => {
@@ -1275,6 +1281,12 @@ test("a block-pinned Pancake position can become an LP rebalance request", async
 
 test("block-pinned Venus stablecoin rates can become a yield request", async ({ page }) => {
   const live = await installDeterministicLiveProbeRoutes(page);
+  expect(live.yieldRequest).toMatchObject({
+    maxActionUsd: yieldFixture.capitalUsd,
+    maxAllocationUsd: yieldFixture.capitalUsd,
+    maxExecutionCostUsd: yieldFixture.maxActionUsd,
+    maxGasUsd: yieldFixture.maxGasUsd,
+  });
   const mockedHire = await installCurrentCategoryHireRoutes(page, {
     service: "YIELD_OPTIMIZATION",
     benchmarkSlug: "yield-optimization",
