@@ -1,6 +1,22 @@
-# Historical founder benchmark: quality reassessment
+# PositionCrew evidence: founder clarification and historical reassessment
 
-Assessment date: 2026-09-05.
+Founder clarification added: 2026-09-06. Original arithmetic assessment: 2026-09-05.
+
+## Founder clarification
+
+My original founder comparisons used controlled test cases, including synthetic inputs. I am not presenting those examples as observations of real borrowers or LP positions. Matching answers demonstrate output agreement, not independent financial correctness. Human task time and agent API processing time have different boundaries; I do not claim a controlled end-to-end speedup from them.
+
+I have kept the original inputs, manual answers, timestamps and outputs unchanged. The historical findings below remain visible, including limitations and counterexamples. New production results do not repair those old answers retroactively.
+
+Separate automated marketplace jobs now demonstrate assessment of a real public [Venus position](https://positioncrew.dolepee.com/api/benchmark-receipts/bbf025cc-c4e7-410e-9c4a-8330ab570a02), an actual [PancakeSwap LP position](https://positioncrew.dolepee.com/api/benchmark-receipts/57afc631-5e00-4230-a678-ac0b28f1fd38), and [current Venus markets](https://positioncrew.dolepee.com/api/benchmark-receipts/3813d871-5612-49b1-a45f-979ce5748297). These observations were current when captured, not indefinitely valid. Public account data does not establish my ownership; the Yield allocation uses a hypothetical, unfunded $1,000 budget.
+
+A separate public-interface run explicitly selected HeyAnon and received a fresh, saved [LP assessment](https://positioncrew.dolepee.com/api/benchmark-receipts/4c56f6eb-d2b1-4823-98a5-8bce08129647). It returned HOLD because the proposed change did not clear the buyer's economic threshold. HeyAnon supplied the range assessment; PositionCrew supplied the block-pinned economics and checked the limits. This was a free, agent-operated assessment, not an unrelated customer purchase or capital transaction. Earlier failed and expired attempts remain separate evidence.
+
+I do not have new manual answers corresponding to the three new automated runs. They are product evidence, not completed replacement human-versus-agent pairs. I will not combine them with the old synthetic manual outputs or invent missing timing and cost figures.
+
+My current claim is that the marketplace can deliver a bounded assessment, preserve the selected provider's result and explain when no action is justified. I am not claiming demonstrated investment returns, independent demand, an unconditional safety guarantee or automatic satisfaction of the sponsor's real-task comparison requirement.
+
+## Scope of the retained September 5 assessment
 
 This is a later, separate automated arithmetic assessment of the retained August 20 founder comparisons. It did not invoke the strategy generator or conformance evaluator. It is not independent human evaluation, a new paired benchmark, or a replacement for the original frozen rubric. Original requests, answers, timestamps, quality method, scores and hashes remain unchanged.
 
