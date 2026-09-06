@@ -10,7 +10,7 @@ import { FIXTURE_NOW } from "./helpers.js";
 
 const checkId = "yield-refusal-feasibility";
 const evaluatorId = "positioncrew:yield-refusal-feasibility-regression";
-const request = () => YieldOptimizationRequestSchema.parse(structuredClone(fixture));
+const request = () => YieldOptimizationRequestSchema.parse({ ...structuredClone(fixture), requestId: "yield-explicit-refusal-budget-20260906", maxActionUsd: fixture.capitalUsd, maxExecutionCostUsd: fixture.maxActionUsd });
 
 function constraintRefusal(input: YieldOptimizationRequest) {
   const output = createYieldOptimizationDeliverable(input, FIXTURE_NOW);
@@ -59,7 +59,7 @@ describe("request-only Yield constraint refusal proofs", () => {
     { name: "no destination meeting minimum liquidity", change: (input) => { input.opportunities[0]!.liquidityUsd = "999999"; } },
     { name: "zero destination capacity", change: (input) => { input.opportunities[0]!.amountUsd = "0"; } },
     { name: "entry exceeds the gas cap", change: (input) => { input.maxGasUsd = "0.999999999999999999"; } },
-    { name: "entry exceeds the separate action-cost cap", change: (input) => { input.maxActionUsd = "0.999999999999999999"; } },
+    { name: "entry exceeds the separate action-cost cap", change: (input) => { input.maxExecutionCostUsd = "0.999999999999999999"; } },
     { name: "entry consumes all managed principal", change: (input) => { input.currentPositions = []; input.capitalUsd = "1"; } },
     { name: "all principal is locked with no idle funds", change: (input) => { input.currentPositions[0]!.lockupSeconds = 1; } },
     { name: "all held principal is illiquid", change: (input) => { input.currentPositions[0]!.liquidityUsd = "0"; } },
@@ -80,7 +80,7 @@ describe("request-only Yield constraint refusal proofs", () => {
   it("does not turn an exact affordable fee boundary into a refusal", () => {
     const input = request();
     input.maxGasUsd = "2";
-    input.maxActionUsd = "2";
+    input.maxExecutionCostUsd = "2";
     expectRefusalAdmission(input, false);
   });
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
-  BoundedGridRequestSchema, LpRebalanceDeliverableSchema, LpRebalanceRequestSchema, YieldOptimizationRequestSchema,
+  BoundedGridRequestSchema, LpRebalanceDeliverableSchema, LpRebalanceRequestSchema,
   type PositionCrewDeliverable, type PositionCrewRequest,
 } from "../src/contracts/index.js";
 import { evaluateFinancialInvariants } from "../src/evaluators/financial-invariants.js";
@@ -11,7 +11,7 @@ import { createBoundedGridDeliverable } from "../src/providers/bounded-grid.js";
 import { createYieldOptimizationDeliverable } from "../src/providers/yield-optimization.js";
 import { createLendingRescueDeliverable } from "../src/providers/lending-rescue.js";
 import * as providers from "../src/providers/index.js";
-import { FIXTURE_NOW, lendingFixture } from "./helpers.js";
+import { FIXTURE_NOW, freshYieldFixture, lendingFixture } from "./helpers.js";
 
 function fixture(path: string): unknown { return JSON.parse(readFileSync(new URL(`../fixtures/${path}`, import.meta.url), "utf8")); }
 function evaluate(request: PositionCrewRequest, output: PositionCrewDeliverable) {
@@ -53,7 +53,7 @@ function grid() {
   return { request, output };
 }
 function yieldPlan() {
-  const request = YieldOptimizationRequestSchema.parse(fixture("yield-optimization/venus-to-beefy.v1.json"));
+  const request = freshYieldFixture();
   const output = createYieldOptimizationDeliverable(request, FIXTURE_NOW);
   expect(output.status).toBe("ACTIONABLE");
   return { request, output };

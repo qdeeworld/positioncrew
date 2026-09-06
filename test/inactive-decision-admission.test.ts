@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import gridFixture from "../fixtures/bounded-grid/bnb-usdt-grid.v1.json" with { type: "json" };
-import yieldFixture from "../fixtures/yield-optimization/venus-to-beefy.v1.json" with { type: "json" };
 import { BoundedGridRequestSchema } from "../src/contracts/bounded-grid.js";
 import { ProviderStatusSchema } from "../src/contracts/common.js";
 import type { PositionCrewDeliverable, PositionCrewRequest } from "../src/contracts/index.js";
-import { YieldOptimizationRequestSchema } from "../src/contracts/yield-optimization.js";
 import { evaluateFinancialInvariants } from "../src/evaluators/financial-invariants.js";
 import { evaluateProviderConformance } from "../src/evaluators/provider-conformance.js";
 import { executeProvider } from "../src/providers/index.js";
-import { FIXTURE_NOW } from "./helpers.js";
+import { FIXTURE_NOW, freshYieldFixture } from "./helpers.js";
 
 const evaluatorId = "positioncrew:inactive-decision-admission-regression";
 const refusalStatuses = ProviderStatusSchema.options.filter((status) => status.startsWith("REFUSED_"));
@@ -24,9 +22,9 @@ function evaluate(request: PositionCrewRequest, output: PositionCrewDeliverable)
 function nativeInactive(service: "BOUNDED_GRID" | "YIELD_OPTIMIZATION", stale: boolean) {
   const request = service === "BOUNDED_GRID"
     ? BoundedGridRequestSchema.parse(structuredClone(gridFixture))
-    : YieldOptimizationRequestSchema.parse(structuredClone(yieldFixture));
-  // These are the established inactive examples from the economics regressions.
-  if (request.service === "YIELD_OPTIMIZATION") request.maxActionUsd = "0.000000000000000001";
+    : freshYieldFixture();
+  // Preserve the established cost-starved inactive case with an explicit execution-cost cap.
+  if (request.service === "YIELD_OPTIMIZATION") request.maxExecutionCostUsd = "0.000000000000000001";
   if (stale) request.maxDataAgeSeconds = 15;
   const output = executeProvider(request, FIXTURE_NOW);
   if (output.service !== "BOUNDED_GRID" && output.service !== "YIELD_OPTIMIZATION") {

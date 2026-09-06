@@ -33,6 +33,15 @@ export const YieldOptimizationRequestSchema = z
     schemaVersion: z.literal("positioncrew.yield-optimization.request.v1"),
     service: z.literal("YIELD_OPTIMIZATION"),
     ...BaseRequestFields,
+    maxActionUsd: PositiveDecimalSchema.describe(
+      "Conservative ceiling on each of total allocated principal, total withdrawn principal, and execution costs. Legacy requests retain this ceiling; it is never inferred to be only a fee budget.",
+    ),
+    maxAllocationUsd: UnsignedDecimalSchema.describe(
+      "Optional stricter ceiling on total destination allocation and total withdrawn principal. Effective principal limit is the minimum of this field, maxActionUsd, and capitalUsd; zero forbids a new allocation.",
+    ).optional(),
+    maxExecutionCostUsd: UnsignedDecimalSchema.describe(
+      "Optional stricter execution-cost budget, separate from principal. All quoted entry and selected exit costs must also fit maxGasUsd and maxActionUsd; absent gas breakdowns are not assumed free.",
+    ).optional(),
     capitalUsd: PositiveDecimalSchema.describe(
       "Total managed principal, including current positions and idle funds; migration costs are funded from this amount.",
     ),

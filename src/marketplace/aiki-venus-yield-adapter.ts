@@ -160,18 +160,24 @@ export async function auditionAiKiVenusYield(
     ) return candidate;
     return leader;
   });
+  const firstPartySelectedOpportunity = firstParty.status === "ACTIONABLE"
+    ? request.opportunities.find((opportunity) =>
+        opportunity.opportunityId === firstParty.selectedOpportunityId
+      )
+    : undefined;
+  const firstPartySelectedApyBps = firstPartySelectedOpportunity?.grossApyBps ?? null;
   const base = {
     provider: AIKI_VENUS_YIELD,
     evaluatedAt: now.toISOString(),
     marketCount: request.opportunities.length,
-    positionCrewSelectedMarket: frozenRateLeader.vaultOrMarket,
-    positionCrewGrossApyBps: frozenRateLeader.grossApyBps,
+    positionCrewSelectedMarket: firstPartySelectedOpportunity?.vaultOrMarket ?? null,
+    positionCrewGrossApyBps: firstPartySelectedApyBps,
     exactRequestAccepted: false as const,
     eligibleForRateRankingActivation: false,
     eligibleForYieldSelection: false,
     eligibleForLiveMatch: false,
   };
-  const partialBoundary = "AiKi ranked live Venus supply rates for the same market set. PositionCrew independently binds those rates to the request's pinned block and applies liquidity, risk, cost, concentration, expiry, and horizon constraints through a disclosed compatibility adapter.";
+  const partialBoundary = "AiKi ranked live Venus supply rates for the same market set. PositionCrew independently binds those rates to the request's pinned block and applies the unchanged allocation and withdrawal principal caps, execution cost and gas caps, liquidity, risk, concentration, expiry, and horizon constraints through a disclosed compatibility adapter.";
 
   try {
     const markets = request.opportunities.map((candidate) => candidate.vaultOrMarket);
@@ -193,7 +199,6 @@ export async function auditionAiKiVenusYield(
     const sameRateLeader = frozenRateLeader.vaultOrMarket.toLowerCase() === parsed.assessment.recommendedMarket.toLowerCase();
     const externalRoute = parsed.assessment.routes.find((route) => route.market.toLowerCase() === parsed.assessment.recommendedMarket.toLowerCase());
     const externalRate = externalRoute ? Number(externalRoute.simpleAnnualRateBps) : null;
-    const localRate = frozenRateLeader.grossApyBps;
     const mismatchedRateMarkets = parsed.assessment.routes.filter((route) =>
       pinnedState.rates.get(route.market.toLowerCase()) !== BigInt(route.supplyRatePerBlock)
     );
@@ -248,11 +253,11 @@ export async function auditionAiKiVenusYield(
       { code: "EXACT_MARKET_SET", status: exactMarketSet ? "PASS" : "FAIL", detail: exactMarketSet ? "AiKi evaluated the same frozen Venus market set." : "AiKi returned a different market set." },
       { code: "PINNED_RATE_BINDING", status: pinnedRateBinding ? "PASS" : "FAIL", detail: pinnedRateBinding ? "Every provider per-block rate matches an independent Venus read at the request's pinned BSC block." : !exactMarketSet ? "The provider did not return the exact requested market set, so complete pinned-rate agreement cannot be established." : `${mismatchedRateMarkets.length} of ${parsed.assessment.routes.length} provider rates differ from the saved BSC block. Agreement on the best market does not establish agreement on this exact snapshot.` },
       { code: "PINNED_APY_BINDING", status: requestApyBinding ? "PASS" : "FAIL", detail: requestApyBinding ? "Every request APY matches the independently pinned rate annualized with measured BSC block time." : "At least one caller-supplied APY does not match independently annualized pinned state." },
-      { code: "SAME_RATE_LEADER", status: sameRateLeader ? "PASS" : "FAIL", detail: sameRateLeader ? "Both providers identified the same highest-rate market." : "The providers identified different rate leaders." },
+      { code: "SAME_RATE_LEADER", status: sameRateLeader ? "PASS" : "FAIL", detail: sameRateLeader ? "AiKi identified the highest-rate opportunity in the frozen request." : "AiKi's recommended market differs from the frozen request's highest-rate opportunity." },
       { code: "PINNED_RATE_LEADER", status: samePinnedRateLeader ? "PASS" : "FAIL", detail: samePinnedRateLeader ? "The provider recommendation is also the highest-rate market in the independently pinned on-chain state." : "The provider recommendation is not the rate leader in the independently pinned on-chain state." },
       { code: "OBSERVATION_FRESHNESS", status: observationFresh ? "PASS" : "FAIL", detail: observationFresh ? "The provider observation is inside the buyer's freshness window." : "The provider observation is stale or future-dated." },
       { code: "PERSISTED_RESULT", status: parsed.evidence.persisted ? "PASS" : "FAIL", detail: "AiKi marked this assessment as persisted." },
-      { code: "BUYER_CONSTRAINT_EVALUATION", status: normalizedContractPass ? "PASS" : "FAIL", detail: normalizedContractPass ? "PositionCrew evaluated the provider's attributable market thesis against the unchanged liquidity, risk, cost, concentration, expiry, and horizon limits." : "The provider thesis could not produce a schema-valid bounded decision under the buyer's request." },
+      { code: "BUYER_CONSTRAINT_EVALUATION", status: normalizedContractPass ? "PASS" : "FAIL", detail: normalizedContractPass ? "PositionCrew evaluated the provider's attributable market thesis against the unchanged allocation and withdrawal principal caps, execution cost and gas caps, liquidity, risk, concentration, expiry, and horizon limits." : "The provider thesis could not produce a schema-valid bounded decision under the buyer's request." },
       { code: "EXACT_OUTPUT_CONTRACT", status: normalizedContractPass ? "PASS" : "FAIL", detail: normalizedContractPass ? "The disclosed adapter normalized the provider thesis into positioncrew.yield-optimization.deliverable.v1." : "No valid normalized Yield deliverable is available." },
     ];
     const rateRankingCompatible = exactMarketSet && sameRateLeader && parsed.evidence.persisted;
@@ -268,13 +273,13 @@ export async function auditionAiKiVenusYield(
         selectedProvider: "POSITIONCREW",
         externalEligible: eligible,
         basis: eligible
-          ? "The first-party provider won the native exact-contract tiebreak; the external rate thesis remains attributable and fully evaluated."
-          : "The external rate thesis failed at least one pinned-state, freshness, or buyer-constraint check.",
+          ? "PositionCrew remains selected; the external rate thesis passed the recorded compatibility checks."
+          : "PositionCrew remains selected; the external rate thesis failed at least one recorded compatibility check.",
       },
       externalRecommendedMarket: parsed.assessment.recommendedMarket,
       sameRateLeader,
       externalSimpleAnnualRateBps: externalRate,
-      rateDifferenceBps: localRate === null || externalRate === null ? null : Math.abs(localRate - externalRate),
+      rateDifferenceBps: firstPartySelectedApyBps === null || externalRate === null ? null : Math.abs(firstPartySelectedApyBps - externalRate),
       attributable: exactMarketSet,
       persisted: parsed.evidence.persisted,
       checks,

@@ -4,13 +4,12 @@ import { describe, expect, it } from "vitest";
 import {
   BoundedGridRequestSchema,
   LpRebalanceRequestSchema,
-  YieldOptimizationRequestSchema,
 } from "../src/contracts/index.js";
 import { createBoundedGridDeliverable } from "../src/providers/bounded-grid.js";
 import { createLpRebalanceDeliverable } from "../src/providers/lp-rebalance.js";
 import { createYieldOptimizationDeliverable } from "../src/providers/yield-optimization.js";
 import { evaluateProviderConformance } from "../src/evaluators/provider-conformance.js";
-import { FIXTURE_NOW } from "./helpers.js";
+import { FIXTURE_NOW, freshYieldFixture } from "./helpers.js";
 
 function fixture(relativePath: string): unknown {
   const path = fileURLToPath(new URL(`../fixtures/${relativePath}`, import.meta.url));
@@ -53,9 +52,7 @@ describe("main-track provider breadth", () => {
   });
 
   it("selects a bounded yield migration after costs and risk filters", () => {
-    const request = YieldOptimizationRequestSchema.parse(
-      fixture("yield-optimization/venus-to-beefy.v1.json"),
-    );
+    const request = freshYieldFixture();
     const result = createYieldOptimizationDeliverable(request, FIXTURE_NOW);
 
     expect(result.status).toBe("ACTIONABLE");
@@ -67,9 +64,7 @@ describe("main-track provider breadth", () => {
   });
 
   it("holds yield when the route cannot recover its costs", () => {
-    const request = YieldOptimizationRequestSchema.parse(
-      fixture("yield-optimization/venus-to-beefy.v1.json"),
-    );
+    const request = freshYieldFixture();
     request.opportunities[0]!.estimatedEntryCostUsd = "20";
     const result = createYieldOptimizationDeliverable(request, FIXTURE_NOW);
 

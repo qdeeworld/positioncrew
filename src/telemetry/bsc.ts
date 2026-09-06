@@ -1966,7 +1966,11 @@ export async function inspectVenusStableYields(
     requestedAt,
     deadline,
     maxDataAgeSeconds: 120,
-    maxActionUsd: decimal(Math.max(0.25, estimatedEntryCostUsd * 2), 6),
+    // A fresh request explicitly separates principal from costs. Never upgrade
+    // a previously issued request's smaller maxActionUsd into principal consent.
+    maxActionUsd: decimal(capitalUsd, 2),
+    maxAllocationUsd: decimal(capitalUsd, 2),
+    maxExecutionCostUsd: decimal(Math.max(0.25, estimatedEntryCostUsd * 2), 6),
     maxGasUsd: decimal(Math.max(0.25, estimatedEntryCostUsd * 2), 6),
     maxSlippageBps: 0,
     sources: [{

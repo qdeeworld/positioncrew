@@ -22,7 +22,10 @@ const request: YieldOptimizationRequest = {
   requestedAt: "2026-09-01T13:00:10.000Z",
   deadline: "2026-09-01T13:05:10.000Z",
   maxDataAgeSeconds: 300,
-  maxActionUsd: "20",
+  // Explicit synthetic principal and cost budgets for the adapter assertions.
+  maxActionUsd: "1000",
+  maxAllocationUsd: "1000",
+  maxExecutionCostUsd: "20",
   maxGasUsd: "5",
   maxSlippageBps: 30,
   sources: [{ sourceId, label: "Pinned Venus rates", uri: "https://bscscan.com/block/119000000", observedAt }],
@@ -127,6 +130,41 @@ describe("AiKi Venus Yield adapter", () => {
     expect(result.normalizedDeliverable?.schemaVersion).toBe("positioncrew.yield-optimization.deliverable.v1");
     expect(result.selection?.selectedProvider).toBe("POSITIONCREW");
     expect(result.checks.every((check) => check.status === "PASS")).toBe(true);
+  });
+
+  it.each(["NO_ACTION", "REFUSED_CONSTRAINTS"] as const)("does not report a leftover native selection on %s", async (status) => {
+    const firstParty = createYieldOptimizationDeliverable(request, now);
+    expect(firstParty.status).toBe("ACTIONABLE");
+    // Retain the old selected ID deliberately: inactive status must take precedence.
+    firstParty.status = status;
+    firstParty.decision = status === "NO_ACTION" ? "HOLD" : "NONE";
+    const result = await auditionAiKiVenusYield(request, firstParty, {
+      fetchImpl: fetcher() as typeof fetch,
+      now,
+      rpcUrl: "https://rpc.test",
+    });
+    expect(result.positionCrewSelectedMarket).toBeNull();
+    expect(result.positionCrewGrossApyBps).toBeNull();
+    expect(result.rateDifferenceBps).toBeNull();
+  });
+
+  it("reports the actual native selection separately from the frozen rate leader", async () => {
+    const priced = structuredClone(request);
+    priced.opportunities[0]!.estimatedEntryCostUsd = "5";
+    const firstParty = createYieldOptimizationDeliverable(priced, now);
+    expect(firstParty.status).toBe("ACTIONABLE");
+    expect(firstParty.selectedOpportunityId).toBe(priced.opportunities[1]!.opportunityId);
+    const result = await auditionAiKiVenusYield(priced, firstParty, {
+      fetchImpl: fetcher() as typeof fetch,
+      now,
+      rpcUrl: "https://rpc.test",
+    });
+    expect(result.positionCrewSelectedMarket).toBe(markets[1]);
+    expect(result.positionCrewGrossApyBps).toBe(261);
+    expect(result.rateDifferenceBps).toBe(2);
+    expect(result.sameRateLeader).toBe(true);
+    expect(result.checks.find((check) => check.code === "SAME_RATE_LEADER")?.status).toBe("PASS");
+    expect(result.checks.find((check) => check.code === "PINNED_RATE_LEADER")?.status).toBe("PASS");
   });
 
   it("fails closed when a provider rate does not match the pinned Venus block", async () => {

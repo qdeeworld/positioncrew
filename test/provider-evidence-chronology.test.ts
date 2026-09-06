@@ -73,7 +73,7 @@ function noActionRequest(service: PositionCrewRequest["service"]) {
       request.position.token1ShareBps = 5_000;
       break;
     case "YIELD_OPTIMIZATION":
-      request.maxActionUsd = "0.000000000000000001";
+      request.maxExecutionCostUsd = "0.000000000000000001";
       break;
     case "BOUNDED_GRID":
       request.constraints.minimumExpectedNetProfitUsd = "1000000";

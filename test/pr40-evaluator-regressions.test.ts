@@ -133,7 +133,8 @@ describe("PR40 independent evaluator regressions", () => {
   it.each(["LENDING_RESCUE", "LP_REBALANCE", "YIELD_OPTIMIZATION", "BOUNDED_GRID"] as const)(
     "requires usable expiry for a fresh non-action result in %s", (service) => {
       const { request } = example(service);
-      request.maxActionUsd = "0.000000000000000001";
+      if (request.service === "YIELD_OPTIMIZATION") request.maxExecutionCostUsd = "0.000000000000000001";
+      else request.maxActionUsd = "0.000000000000000001";
       const output = executeProvider(request, FIXTURE_NOW);
       expect(output.status).not.toBe("ACTIONABLE");
       expect(evaluate(request, output).passed).toBe(true);
