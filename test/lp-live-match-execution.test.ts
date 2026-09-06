@@ -10,7 +10,10 @@ import { FixtureJobResponseSchema } from "../src/api/fixture-response-schema.js"
 import { sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
 import { BscPositionVerificationError, BscVerificationRpcError } from "../src/marketplace/bsc-verification-rpc.js";
 
-vi.mock("../src/marketplace/heyanon-v3pools-lp-job-adapter.js", () => ({ auditionHeyAnonV3LpJob: vi.fn() }));
+vi.mock("../src/marketplace/heyanon-v3pools-lp-job-adapter.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/marketplace/heyanon-v3pools-lp-job-adapter.js")>(),
+  auditionHeyAnonV3LpJob: vi.fn(),
+}));
 const mockAudition = vi.mocked(auditionHeyAnonV3LpJob);
 const hireId = "11111111-1111-4111-8111-111111111111";
 const jobId = "22222222-2222-4222-8222-222222222222";

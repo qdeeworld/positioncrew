@@ -1,0 +1,28 @@
+[Unit]
+Description=PositionCrew finite read-only public health monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pc-health
+Group=pc-health
+EnvironmentFile=/etc/positioncrew-health-monitor/monitor.env
+ExecStart=/usr/bin/node /opt/positioncrew-health-monitor/positioncrew-health-monitor.mjs
+TimeoutStartSec=30
+StateDirectory=positioncrew-health-monitor
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/positioncrew-health-monitor
+
