@@ -42,7 +42,7 @@ The original founder report's canonical output parity is not a correctness ratin
 
 ### Real-source founder comparison
 
-The [three-task paired report](https://positioncrew.dolepee.com/evidence/real-source-founder-2026-09-06/index.md) attaches original founder answers, frozen requests, marketplace outputs, corrections, supplied worksheets and separate arithmetic checks. It assesses an actual Venus borrower, an actual PancakeSwap V3 NFT and real Venus yield markets with hypothetical principal. The founder used a calculator or Excel; task instructions and non-blind scoring were AI-assisted.
+The [three-task paired report](https://positioncrew.dolepee.com/evidence/real-source-founder-2026-09-06/index.html) attaches original founder answers, frozen requests, marketplace outputs, corrections, supplied worksheets and separate arithmetic checks. It assesses an actual Venus borrower, an actual PancakeSwap V3 NFT and real Venus yield markets with hypothetical principal. The founder used a calculator or Excel; task instructions and non-blind scoring were AI-assisted.
 
 The core decisions agree: no rescue, retain the LP range, and conditionally select USDT yield. The agent reserves the Yield entry fee while the manual answer leaves its funding unspecified; the report also retains agent limitations. Manual full-task times and automated delivery latency have different boundaries, so no controlled speedup or three-agent-win claim is made. This is not independent customer demand, paid commerce, a funded Yield portfolio or realised trading performance.
 
