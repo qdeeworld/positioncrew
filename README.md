@@ -38,7 +38,15 @@ The September 5 audit found LP width rounding, accumulated Grid inventory, and f
 
 Current validation checks delivered limits independently of the strategy generator. LP ranges must fit the final aligned bounds; V3 inventory is valued using token decimals and supplied USD prices across the current tick interval. Grid checks all-buy/no-sell accumulation within the stated price interval and a separate zero-price stress. Yield checks explicit withdrawals, retained positions, post-cost protocol totals and the gas budget. Fee projections, oracle authenticity, market impact and unsigned execution remain distinct trust boundaries.
 
-The founder report's canonical output parity is not a correctness rating or a controlled end-to-end speedup. Authentic public-state tasks with equivalent manual and agent timing boundaries are needed for stronger Agent Advantage evidence; independent/blind evaluation is optional, not a TermiX eligibility rule.
+The original founder report's canonical output parity is not a correctness rating or a controlled end-to-end speedup. It remains a historical synthetic comparison, separate from the newer study below. Independent/blind evaluation is optional, not a TermiX eligibility rule.
+
+### Real-source founder comparison
+
+The [three-task paired report](https://positioncrew.dolepee.com/evidence/real-source-founder-2026-09-06/index.md) attaches original founder answers, frozen requests, marketplace outputs, corrections, supplied worksheets and separate arithmetic checks. It assesses an actual Venus borrower, an actual PancakeSwap V3 NFT and real Venus yield markets with hypothetical principal. The founder used a calculator or Excel; task instructions and non-blind scoring were AI-assisted.
+
+The core decisions agree: no rescue, retain the LP range, and conditionally select USDT yield. The agent reserves the Yield entry fee while the manual answer leaves its funding unspecified; the report also retains agent limitations. Manual full-task times and automated delivery latency have different boundaries, so no controlled speedup or three-agent-win claim is made. This is not independent customer demand, paid commerce, a funded Yield portfolio or realised trading performance.
+
+The high-stakes scope is liquidation-risk assessment and LP range-trading analysis, not an executed rescue, a smart-contract security audit or trading fills. Sponsor acceptance of the required trading/equities/security task classification is not claimed by the report.
 
 The persisted lifecycle uses these routes:
 

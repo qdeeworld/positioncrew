@@ -1110,9 +1110,9 @@ function ResultAdvantageBand({
         <div className="result-advantage-copy">
           <span className="result-advantage-state"><ShieldCheck size={13} /> Conformance only</span>
           <strong>Verified output contract, outside the three-task comparison.</strong>
-          <small>Yield optimisation is not one of the pre-registered Agent Advantage tasks. Its {conformanceScore}/100 receipt is a deterministic conformance result, not an advantage claim.</small>
+          <small>Yield was outside the original synthetic three-task comparison. The newer real-source study includes a hypothetical-capital Yield assessment. This receipt's {conformanceScore}/100 conformance score is not an advantage claim.</small>
         </div>
-        <a href="#evidence">Inspect evidence <ArrowRight size={13} /></a>
+        <a href="/evidence/real-source-founder-2026-09-06/index.md" style={{ minHeight: 44, display: "inline-flex", alignItems: "center" }}>Read the real-source comparison <ArrowRight size={13} /></a>
       </section>
     );
   }
@@ -1172,6 +1172,8 @@ function ResultAdvantageBand({
         <div className="result-advantage-copy">
           <span className="result-advantage-state"><BadgeCheck size={13} /> Founder comparison published</span>
           <strong>{founderTask.title}: exact canonical output match.</strong>
+          <small>This is the historical synthetic comparison, not a financial-correctness score. A newer report pairs real-source Lending, LP and Yield assessments with founder answers, using disclosed AI-assisted scoring.</small>
+          <a href="/evidence/real-source-founder-2026-09-06/index.md" style={{ minHeight: 44, display: "inline-flex", alignItems: "center" }}>Read the real-source comparison <ArrowRight size={13} /></a>
           <div className="result-advantage-metrics" aria-label="Recorded task comparison">
             <span><small>Agent D1 API</small><b>{founderTask.agentElapsedMilliseconds.toLocaleString("en-US")} ms</b></span>
             <span><small>Manual wall clock</small><b>{founderTask.manualElapsedMilliseconds.toLocaleString("en-US")} ms</b></span>
