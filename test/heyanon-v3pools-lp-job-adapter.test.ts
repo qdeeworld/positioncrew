@@ -267,17 +267,29 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
     expect((error as Error).message).not.toContain("private");
   });
 
-  it.each(["uncooperative", "cooperative"] as const)("preserves public deadline attribution for an %s MCP fetch without retries or selection", async (mode) => {
+  it.each([
+    { mode: "uncooperative", phase: "FETCH" },
+    { mode: "cooperative", phase: "FETCH" },
+    { mode: "cooperative", phase: "RESPONSE_BODY" },
+  ] as const)("preserves public deadline attribution for $mode MCP $phase without retries or selection", async ({ mode, phase }) => {
     vi.useFakeTimers();
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => new AbortController().signal);
     let mcpCalls = 0;
+    let pendingCalls = 0;
     let started!: () => void;
     const mcpStarted = new Promise<void>((resolve) => { started = resolve; });
     const stalledFetch: typeof fetch = async (input, init) => {
       if (!String(input).includes("heyanon.ai")) return fetchImpl(input, init);
       mcpCalls += 1;
-      if (mcpCalls === 2) started();
-      return mode === "cooperative" ? pendingUntilAbort<Response>(init!.signal!) : new Promise<Response>(() => {});
+      const stall = <T>(): Promise<T> => {
+        pendingCalls += 1;
+        if (pendingCalls === 2) started();
+        return mode === "cooperative" ? pendingUntilAbort<T>(init!.signal!) : new Promise<T>(() => {});
+      };
+      if (phase === "FETCH") return stall<Response>();
+      const response = new Response("");
+      response.text = () => stall<string>();
+      return response;
     };
     try {
       const pending = createLpLiveMatchAudition(request, {
@@ -295,13 +307,10 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
       expect(result.externalProviderComparison.attributableResult).toBe(false);
       expect(result.externalProviderComparison.boundary).toContain("does not establish a provider outage");
       expect(result.externalProviderComparison.boundary).not.toContain("The external outage");
-      if (mode === "uncooperative") {
-        expect(external?.checks[0]?.code).toBe("LP_AUDITION_DEADLINE");
-      } else {
-        expect(external?.checks[0]?.detail).toContain("HEYANON_MCP_CALLER_CANCELLED");
-        expect(external?.checks[0]?.detail).toContain("FETCH");
-        expect(external?.checks[0]?.detail).not.toContain("private");
-      }
+      expect(external?.checks[0]?.code).toBe("LP_AUDITION_DEADLINE");
+      expect(external?.checks[0]?.detail).toContain("PositionCrew's LP audition deadline expired after 8000 ms");
+      expect(external?.checks[0]?.detail).not.toContain("CALLER_CANCELLED");
+      expect(external?.checks[0]?.detail).not.toContain("private");
     } finally {
       timeoutSpy.mockRestore();
       vi.useRealTimers();

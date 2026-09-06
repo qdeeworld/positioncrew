@@ -173,6 +173,7 @@ export async function createLpLiveMatchAudition(
         }),
         8_000,
         deadlineError,
+        controller.signal,
       );
     } finally {
       clearTimeout(timeout);
@@ -378,11 +379,22 @@ async function boundedExternalInvocation<T>(
   operation: Promise<T>,
   milliseconds: number,
   deadlineError: LpExternalDeadlineError,
+  callerSignal: AbortSignal,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      operation,
+      operation.catch((error: unknown) => {
+        // A cooperative MCP rejection may win the race against our timer.
+        // Restore only this deadline's provenance, never a local MCP timeout
+        // or an unrelated cancellation/transport/verification failure.
+        if (error instanceof HeyAnonMcpCallError &&
+            error.failureKind === "CALLER_CANCELLED" &&
+            callerSignal.aborted && callerSignal.reason === deadlineError) {
+          throw deadlineError;
+        }
+        throw error;
+      }),
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(deadlineError), milliseconds);
       }),
@@ -511,6 +523,7 @@ export async function executeLpLiveMatchProvider(input: {
           }),
           10_000,
           deadlineError,
+          controller.signal,
         );
       } finally {
         clearTimeout(timeout);

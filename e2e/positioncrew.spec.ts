@@ -1799,7 +1799,9 @@ test("providers expose machine-readable manifests and exact schemas", async ({ p
   expect(marketplaceResponse.ok()).toBeTruthy();
   const marketplace = await marketplaceResponse.json();
   expect(marketplace.providers).toHaveLength(4);
-  expect(marketplace.claims.agentAdvantage).toBe("PENDING_INDEPENDENT_BLIND_EVALUATION");
+  expect(marketplace.claims.agentAdvantage).toBe("FOUNDER_REPORT_PUBLISHED_INDEPENDENT_EVALUATION_PENDING");
+  expect(marketplace.founderAgentAdvantageStatusUrl).toMatch(/\/api\/benchmarks\/founder-comparison\/status$/);
+  expect(marketplace.independentAgentAdvantageStatusUrl).toMatch(/\/api\/benchmarks\/status$/);
   expect(marketplace.claims.judgeTrial).toBe("NO_WALLET_PROVIDER_CALL");
   expect(marketplace.operatingRecordUrl).toMatch(/\/api\/operations\/production$/);
 
