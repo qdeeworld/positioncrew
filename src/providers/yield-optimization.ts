@@ -90,10 +90,16 @@ function candidatePlan(
     const destinationHeadroom = protocolLimit - (heldByProtocol.get(destination) ?? 0n) +
       (availableByProtocol.get(destination) ?? 0n);
     const spendable = idleCapital + sources.reduce((sum, source) => sum + availableWithdrawal(source), 0n) - migrationCost;
-    const allocation = minimum(
+    const principalLimit = minimum(parseFixed(request.capitalUsd),
+      minimum(parseFixed(request.maxActionUsd), parseFixed(request.maxAllocationUsd ?? request.maxActionUsd)));
+    // Costs are separately bounded, but source withdrawals still move capital.
+    // Reserving route costs within capped source funding avoids authorizing a
+    // larger withdrawal merely because the destination allocation fits its cap.
+    const cappedFunding = minimum(spendable, idleCapital + principalLimit - migrationCost);
+    const allocation = minimum(principalLimit, minimum(
       minimum(parseFixed(opportunity.amountUsd), parseFixed(opportunity.liquidityUsd)),
-      minimum(destinationHeadroom, spendable),
-    );
+      minimum(destinationHeadroom, cappedFunding),
+    ));
     if (allocation <= 0n) return null;
 
     const withdrawals = new Map<string, bigint>();
@@ -129,7 +135,9 @@ function candidatePlan(
       sources = usedSources;
       continue;
     }
-    if (migrationCost > parseFixed(request.maxActionUsd) || migrationCost > parseFixed(request.maxGasUsd)) return null;
+    if (migrationCost > parseFixed(request.maxActionUsd) || migrationCost > parseFixed(request.maxGasUsd)
+      || migrationCost > parseFixed(request.maxExecutionCostUsd ?? request.maxActionUsd)
+      || totalWithdrawn > principalLimit) return null;
 
     const idleCapitalUsed = spend - totalWithdrawn;
     const finalByProtocol = new Map(heldByProtocol);
@@ -175,7 +183,8 @@ function* fundingSourceSets(
 ): Generator<Position[]> {
   yield [];
   const entryCost = parseFixed(opportunity.estimatedEntryCostUsd);
-  const costLimit = minimum(parseFixed(request.maxActionUsd), parseFixed(request.maxGasUsd));
+  const costLimit = minimum(parseFixed(request.maxActionUsd),
+    minimum(parseFixed(request.maxGasUsd), parseFixed(request.maxExecutionCostUsd ?? request.maxActionUsd)));
   const byApy = (left: Position, right: Position): number =>
     left.grossApyBps - right.grossApyBps || left.opportunityId.localeCompare(right.opportunityId);
   const affordable = sources.map((source) => ({
@@ -299,7 +308,10 @@ export function createYieldOptimizationDeliverable(
       summary: "No evaluated funded yield move clears final portfolio concentration, liquidity, risk, gas, cost, and net-benefit limits.",
       risks: [
         "Yield can change before the next evaluation.",
-        "Entry and selected exit quotes lack a gas breakdown; their full sum must fit both maxGasUsd and the maxActionUsd cost budget.",
+        "Allocation and total withdrawals each fit capitalUsd, maxActionUsd, and any maxAllocationUsd cap. A fee budget never increases principal authority.",
+        "Entry and selected exit quotes lack a gas breakdown; their full sum must fit maxGasUsd, maxActionUsd, and any separate maxExecutionCostUsd budget.",
+        "Yield estimates use constant quoted annual rates, simple non-compounding accrual, and a 365-day year over evaluationHorizonDays; no forecast is guaranteed.",
+        "Modeled net benefit subtracts entry and used-source exit costs once. A future destination exit, changing rates, depeg, and protocol losses are not priced.",
         "A HOLD result does not certify that existing holdings satisfy the requested concentration cap.",
         "The bounded funding search does not examine every withdrawal combination; HOLD does not prove that no feasible migration exists.",
       ],
@@ -334,7 +346,10 @@ export function createYieldOptimizationDeliverable(
       `${selected.opportunity.protocol} risk tier is ${selected.opportunity.riskTier}.`,
       "Quoted APY is variable and is not a guaranteed return.",
       `Liquidity snapshot is ${selected.opportunity.liquidityUsd} USD.`,
-      "Entry and selected exit quotes lack a gas breakdown; their full sum is bounded by maxGasUsd and the maxActionUsd cost budget.",
+      "Allocation and total withdrawals each fit capitalUsd, maxActionUsd, and any maxAllocationUsd cap. A fee budget never increases principal authority.",
+      "Entry and selected exit quotes lack a gas breakdown; their full sum must fit maxGasUsd, maxActionUsd, and any separate maxExecutionCostUsd budget.",
+      "Yield estimates use constant quoted annual rates, simple non-compounding accrual, and a 365-day year over evaluationHorizonDays; no forecast is guaranteed.",
+      "Modeled net benefit subtracts entry and used-source exit costs once. A future destination exit, changing rates, depeg, and protocol losses are not priced.",
       "The withdrawal plan uses same-asset unlocked positions; it does not quote swaps or borrowing-market collateral checks.",
       "The bounded funding search compares APY and withdrawal-cost orderings; the selected plan is not guaranteed globally optimal.",
     ],

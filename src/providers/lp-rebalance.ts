@@ -43,7 +43,10 @@ function refusal(
     summary: "LP evidence or constraints are unsafe; no rebalance was proposed.",
     actionSteps: [],
     invalidationConditions: ["Refresh the pool and position snapshot before retrying."],
-    limitations: reasons.length > 0 ? reasons : ["No safe action is available."],
+    limitations: [
+      ...(reasons.length > 0 ? reasons : ["No safe action is available."]),
+      "No economic forecast is made for this refusal; zero-valued result fields are placeholders, not a prediction of zero pool fees.",
+    ],
   });
 }
 
@@ -112,6 +115,21 @@ export function createLpRebalanceDeliverable(
   const volumeBoundary = request.marketState.volumeMeasurementWindowSeconds
     ? `The 24-hour fee input is a run-rate extrapolated from ${request.marketState.volumeMeasurementWindowSeconds} seconds and ${request.marketState.swapCount ?? 0} onchain swaps.`
     : "Fee estimates use the frozen pool-share and uptime model, not guaranteed future volume.";
+  const forecastLimitations = [
+    "POOL_SHARE_UPTIME_V1: feeBase = fees24hUsd * (positionValueUsd / poolLiquidityUsd) * (evaluationHorizonHours / 24). USD pool share is a model, not measured active V3 fee entitlement.",
+    `Current gross fees = feeBase * ${currentUptimeBps}/10000. The ${currentUptimeBps / 100}% fee-uptime multiplier is a policy assumption, not an observed or guaranteed future time in range.`,
+    "Current fee uptime is 0% out of range, 35% near an edge, 55% at high volatility, otherwise 90%; earlier conditions take precedence.",
+    "Near-edge means floor(10000 * nearest-edge tick distance / existing width) < edgeBufferBps. High volatility means realizedVolatilityBps >= highVolatilityBps.",
+    `The ${request.constraints.evaluationHorizonHours}-hour projection holds supplied prices, position value, pool liquidity and fee run-rate fixed, with linear accrual and no compounding.`,
+    "The fee model excludes unmodeled price movement, impermanent loss and execution failures. Fees may not cover costs.",
+    volumeBoundary,
+    "fees24hUsd is used directly as the 24-hour input; any supplied volumeNormalizationFactor is provenance and is not applied a second time.",
+    "Fixed-point products and quotients truncate at 18 decimal places. HOLD fee amounts truncate to at most 6 decimals; actionable amounts use at most 18.",
+  ];
+  const holdForecastLimitations = [
+    ...forecastLimitations,
+    "HOLD reports modeled fees for the existing range, with zero incremental benefit and no rebalance cost; it does not predict that fee accrual stops.",
+  ];
 
   const declineCandidate = (reason: string): LpRebalanceDeliverable => {
     if (lpConstraintRefusalJustified(request)) {
@@ -140,7 +158,7 @@ export function createLpRebalanceDeliverable(
       limitations: [
         reason,
         "This candidate decline does not prove every provider must refuse or certify the existing inventory as within policy.",
-        volumeBoundary,
+        ...holdForecastLimitations,
       ],
     });
   };
@@ -169,9 +187,7 @@ export function createLpRebalanceDeliverable(
         `Current tick approaches within ${request.constraints.edgeBufferBps} bps of either range edge.`,
         `Realized volatility reaches ${request.constraints.highVolatilityBps} bps.`,
       ],
-      limitations: [
-        volumeBoundary,
-      ],
+      limitations: holdForecastLimitations,
     });
   }
 
@@ -195,7 +211,7 @@ export function createLpRebalanceDeliverable(
       inventoryExposure: { token0Bps: request.position.token0ShareBps, token1Bps: request.position.token1ShareBps },
       summary: "No feasible range change remains after tick alignment and width limits; keep the existing position.",
       actionSteps: [], invalidationConditions: ["Refresh if the position, volatility or buyer limits change."],
-      limitations: ["An unchanged range is not credited with improved fee uptime or hypothetical rebalance profit.", volumeBoundary],
+      limitations: ["An unchanged range is not credited with improved fee uptime or hypothetical rebalance profit.", ...holdForecastLimitations],
     });
   }
   proposedDecision = proposedWidth > width ? "WIDEN" : proposedWidth < width ? "NARROW" : "SHIFT";
@@ -216,6 +232,14 @@ export function createLpRebalanceDeliverable(
     netBenefit >= parseFixed(request.constraints.minimumNetBenefitUsd) &&
     gasUsd <= parseFixed(request.maxGasUsd) &&
     totalCostUsd <= parseFixed(request.maxActionUsd);
+  const candidateForecastLimitations = [
+    ...forecastLimitations,
+    `Candidate gross fees = feeBase * (${width}/${proposedWidth}) * ${proposedUptimeBps}/10000. Width density uses the original width divided by the actual tick-aligned candidate width.`,
+    "Proposed fee uptime is an assumed 75% for NARROW and 95% for SHIFT or WIDEN; inverse-width fee scaling is modeled, not measured.",
+    "Incremental fees = candidate gross fees - current gross fees. Rebalance cost = estimatedGasUsd + estimatedSwapCostUsd. Net benefit = max(0, incremental fees - rebalance cost).",
+    `Break-even hours = rebalance cost * ${request.constraints.evaluationHorizonHours} / incremental fees, only for positive incremental fees accruing at a constant modeled rate.`,
+    "Costs use the supplied gas and swap estimates once; they do not establish actual transaction charges or future exit costs.",
+  ];
 
   if (!economicsPass) {
     return LpRebalanceDeliverableSchema.parse({
@@ -239,7 +263,9 @@ export function createLpRebalanceDeliverable(
       actionSteps: [],
       invalidationConditions: ["Pool fees, volatility, range position, or execution costs change."],
       limitations: [
-        `Projected net benefit ${formatFixed(netBenefit, 6)} USD does not clear ${request.constraints.minimumNetBenefitUsd} USD.`,
+        `Candidate modeled net benefit ${formatFixed(netBenefit, 6)} USD; required minimum ${request.constraints.minimumNetBenefitUsd} USD. At least one economic or cost limit did not pass.`,
+        ...candidateForecastLimitations,
+        "HOLD returns current-range fees and zero incremental benefit/cost; the candidate equations describe the rejected range, not a proposed action.",
       ],
     });
   }
@@ -275,7 +301,7 @@ export function createLpRebalanceDeliverable(
     ],
     limitations: [
       `Fee uptime is a model assumption, not a forecast: current ${currentUptimeBps / 100}%, proposed ${proposedUptimeBps / 100}%. Fees may not cover costs.`,
-      ...(request.marketState.volumeMeasurementWindowSeconds ? [volumeBoundary] : []),
+      ...candidateForecastLimitations,
       "V3 inventory uses supplied USD prices and token decimals; share caps include both ends of the current tick interval plus a rounding margin. Revalidate prices, sqrt price and execution amounts before any transaction.",
     ],
   });

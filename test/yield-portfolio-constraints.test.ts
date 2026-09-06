@@ -29,7 +29,7 @@ function request(): YieldOptimizationRequest {
     schemaVersion: "positioncrew.yield-optimization.request.v1", service: "YIELD_OPTIMIZATION",
     requestId: "yield-independent-001", chainId: 56, account: `0x${"1".repeat(40)}`,
     protocol: "Yield Router", requestedAt: observedAt, deadline: "2026-09-05T10:05:00.000Z",
-    maxDataAgeSeconds: 300, maxActionUsd: "20", maxGasUsd: "5", maxSlippageBps: 30,
+    maxDataAgeSeconds: 300, maxActionUsd: "1000", maxExecutionCostUsd: "20", maxGasUsd: "5", maxSlippageBps: 30,
     sources: [{ sourceId: "independent-yield-snapshot", label: "Independent audit fixture", uri: "https://example.com/yield", observedAt }],
     capitalUsd: "1000", currentPositions: [position(1)], opportunities: [position(2)],
     constraints: {
@@ -72,6 +72,10 @@ function assertPortfolio(r: YieldOptimizationRequest) {
   expect(allocation > 0n && allocation <= usd(selected.amountUsd) && allocation <= usd(selected.liquidityUsd)).toBe(true);
   expect(cost).toBe(usd(result.migrationCostUsd));
   expect(cost <= usd(r.maxGasUsd) && cost <= usd(r.maxActionUsd)).toBe(true);
+  expect(cost <= usd(r.maxExecutionCostUsd ?? r.maxActionUsd)).toBe(true);
+  const principalLimit = [usd(r.capitalUsd), usd(r.maxActionUsd), usd(r.maxAllocationUsd ?? r.maxActionUsd)]
+    .reduce((limit, value) => value < limit ? value : limit);
+  expect(allocation <= principalLimit && withdrawn <= principalLimit).toBe(true);
   expect(withdrawn + idleUsed).toBe(allocation + cost);
   expect(idleUsed >= 0n && idleUsed <= usd(r.capitalUsd) - held).toBe(true);
   expect(usd(result.postMigrationCapitalUsd!)).toBe(postCapital);
@@ -151,7 +155,7 @@ describe("yield portfolio financial constraints", () => {
 
   it("enforces the separate action cost budget", () => {
     const r = request();
-    r.maxActionUsd = "1.999999999999999999";
+    r.maxExecutionCostUsd = "1.999999999999999999";
     expect(assertPortfolio(r).status).toBe("NO_ACTION");
   });
 
@@ -176,7 +180,7 @@ describe("yield portfolio financial constraints", () => {
 
   it("combines B and C when expensive A invalidates every APY prefix and neither singleton clears benefit", () => {
     const r = request();
-    r.capitalUsd = "900";
+    r.capitalUsd = "900"; r.maxActionUsd = "900";
     r.currentPositions = [
       position(1, { opportunityId: "A", protocol: "Venus", amountUsd: "300", grossApyBps: 100, estimatedExitCostUsd: "100" }),
       position(3, { opportunityId: "B", protocol: "Venus", amountUsd: "300", grossApyBps: 300 }),
@@ -200,7 +204,7 @@ describe("yield portfolio financial constraints", () => {
 
   it("finds the funded cheap combination even when expensive A fits the budget individually", () => {
     const r = request();
-    r.capitalUsd = "900";
+    r.capitalUsd = "900"; r.maxActionUsd = "900";
     r.maxGasUsd = "4";
     r.currentPositions = [
       position(1, { opportunityId: "A", protocol: "Venus", amountUsd: "100", grossApyBps: 100, estimatedExitCostUsd: "3" }),
@@ -221,7 +225,7 @@ describe("yield portfolio financial constraints", () => {
 
   it("uses a bounded search for a large portfolio requiring joint funding", () => {
     const r = request();
-    r.capitalUsd = "1280";
+    r.capitalUsd = "1280"; r.maxActionUsd = "1280";
     r.maxGasUsd = "3";
     r.currentPositions = Array.from({ length: 128 }, (_, index) => position(index + 10, {
       protocol: "Venus", amountUsd: "10", grossApyBps: 100, estimatedExitCostUsd: "0.01",

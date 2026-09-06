@@ -43,8 +43,13 @@ export function yieldConstraintRefusalJustified(input: YieldOptimizationRequest)
   if (new Set(request.currentPositions.map((position) => position.vaultOrMarket.toLowerCase())).size
     !== request.currentPositions.length) return false;
 
+  const principalLimit = minimum(capital,
+    minimum(parseFixed(request.maxActionUsd), parseFixed(request.maxAllocationUsd ?? request.maxActionUsd)));
+  if (principalLimit === 0n) return true;
+
   const idle = capital - held;
-  const feeLimit = minimum(parseFixed(request.maxGasUsd), parseFixed(request.maxActionUsd));
+  const feeLimit = minimum(parseFixed(request.maxGasUsd),
+    minimum(parseFixed(request.maxActionUsd), parseFixed(request.maxExecutionCostUsd ?? request.maxActionUsd)));
   const minimumLiquidity = parseFixed(request.constraints.minimumLiquidityUsd);
   const allowlist = new Set(request.constraints.protocolAllowlist.map(protocolKey));
   for (const destination of request.opportunities) {

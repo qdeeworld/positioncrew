@@ -313,8 +313,13 @@ function yieldChecks(request: YieldOptimizationRequest, output: YieldOptimizatio
     && idleUsed <= capital - held && withdrawnTotal + idleUsed === allocation + cost
     && output.decision === (withdrawnTotal > 0n ? "MIGRATE" : "SUPPLY"),
     "Distinct unlocked positions and available idle principal fund the allocation plus costs exactly."));
-  result.push(check("yield-cost-limits", cost === routeCost && cost <= parseFixed(request.maxGasUsd) && cost <= parseFixed(request.maxActionUsd),
-    "Full entry and actually used exit quotes equal reported route cost and fit gas and action-cost ceilings."));
+  const principalLimit = [capital, parseFixed(request.maxActionUsd), parseFixed(request.maxAllocationUsd ?? request.maxActionUsd)]
+    .reduce((limit, value) => value < limit ? value : limit);
+  result.push(check("yield-principal-limits", allocation <= principalLimit && withdrawnTotal <= principalLimit,
+    "Total allocated and total withdrawn principal each fit the explicit allocation cap, legacy action cap, and managed capital. Execution-cost budgets never authorize more principal."));
+  result.push(check("yield-cost-limits", cost === routeCost && cost <= parseFixed(request.maxGasUsd) && cost <= parseFixed(request.maxActionUsd)
+    && cost <= parseFixed(request.maxExecutionCostUsd ?? request.maxActionUsd),
+    "Full entry and actually used exit quotes equal reported route cost and fit the separate execution-cost, gas, and legacy action ceilings."));
   const postCapital = capital - cost, remainingIdle = capital - held - idleUsed;
   const protocolAmounts = new Map<string, bigint>();
   for (const position of request.currentPositions) {

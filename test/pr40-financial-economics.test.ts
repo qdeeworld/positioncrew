@@ -97,7 +97,7 @@ describe("inactive LP and Yield economics", () => {
       request.marketState.token0PriceUsd = "1";
       request.position.token0ShareBps = 5_000;
       request.position.token1ShareBps = 5_000;
-    } else request.maxActionUsd = "0.000000000000000001";
+    } else if (request.service === "YIELD_OPTIMIZATION") request.maxExecutionCostUsd = "0.000000000000000001";
     if (refusal) request.maxDataAgeSeconds = 15;
     const output = executeProvider(request, FIXTURE_NOW);
     expect(output.status).not.toBe("ACTIONABLE");

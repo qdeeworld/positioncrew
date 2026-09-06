@@ -45,6 +45,20 @@ async function signed<S extends Service>(service: S) {
   return { request, binding, observation: { ...OBSERVATION, binding } };
 }
 
+async function signedExplicitYield() {
+  // Construct the new test policy before signing; never upgrade a bound legacy request.
+  const original = requestFor("YIELD_OPTIMIZATION");
+  const request: RequestFor<"YIELD_OPTIMIZATION"> = {
+    ...original,
+    requestId: `${original.requestId}-explicit-budget-test`,
+    maxActionUsd: original.capitalUsd,
+    maxAllocationUsd: original.capitalUsd,
+    maxExecutionCostUsd: original.maxActionUsd,
+  };
+  const binding = await issueServerObservationBinding(request, OBSERVATION, KEY, NOW);
+  return { request, binding, observation: { ...OBSERVATION, binding } };
+}
+
 interface MutationCase { name: string; service: Service; mutate: (request: PositionCrewRequest) => void }
 function mutation<S extends Service>(service: S, name: string, mutate: (request: RequestFor<S>) => void): MutationCase {
   return { name, service, mutate: (request) => mutate(request as RequestFor<S>) };
@@ -108,6 +122,29 @@ describe("server observation authentication", () => {
   it.each(IMMUTABLE_MUTATIONS)("rejects changed $name after issuance", async ({ service, mutate }) => {
     const { request, observation } = await signed(service);
     mutate(request);
+    await expect(verifyServerObservationBinding(request, observation, KEY, NOW)).rejects.toMatchObject({ code: "REFRESH_REQUIRED" });
+  });
+
+  it("authenticates a fresh Yield policy with separate allocation and execution-cost caps", async () => {
+    const { request, binding, observation } = await signedExplicitYield();
+    expect(await verifyServerObservationBinding(request, observation, KEY, NOW)).toEqual(binding);
+  });
+
+  it.each(["maxAllocationUsd", "maxExecutionCostUsd"] as const)("rejects changed explicit Yield %s", async (field) => {
+    const { request, observation } = await signedExplicitYield();
+    request[field] = "999999";
+    await expect(verifyServerObservationBinding(request, observation, KEY, NOW)).rejects.toMatchObject({ code: "REFRESH_REQUIRED" });
+  });
+
+  it.each(["maxAllocationUsd", "maxExecutionCostUsd"] as const)("rejects removed explicit Yield %s", async (field) => {
+    const { request, observation } = await signedExplicitYield();
+    delete request[field];
+    await expect(verifyServerObservationBinding(request, observation, KEY, NOW)).rejects.toMatchObject({ code: "REFRESH_REQUIRED" });
+  });
+
+  it.each(["maxAllocationUsd", "maxExecutionCostUsd"] as const)("rejects injecting Yield %s into a signed legacy request", async (field) => {
+    const { request, observation } = await signed("YIELD_OPTIMIZATION");
+    request[field] = "1";
     await expect(verifyServerObservationBinding(request, observation, KEY, NOW)).rejects.toMatchObject({ code: "REFRESH_REQUIRED" });
   });
 
