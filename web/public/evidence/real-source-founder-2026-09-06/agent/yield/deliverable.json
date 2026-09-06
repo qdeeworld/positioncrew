@@ -1,0 +1,48 @@
+{
+  "actionSteps": [
+    "Reserve 0.013228 USD from managed capital for the quoted entry and exit costs.",
+    "Supply 999.986772 USD to 0xfD5840Cd36d94D7229439859C0112a4185BC0255.",
+    "Re-evaluate before 2026-09-06T08:43:51.000Z."
+  ],
+  "allocationUsd": "999.986772",
+  "annualYieldUpliftUsd": "27.49963623",
+  "breakEvenDays": "0.17557395885596411",
+  "currentWeightedApyBps": 0,
+  "decision": "SUPPLY",
+  "expiresAt": "2026-09-06T08:43:51.000Z",
+  "finalProtocolAllocations": [
+    {
+      "amountUsd": "999.986772",
+      "protocol": "venus core pool"
+    }
+  ],
+  "generatedAt": "2026-09-06T08:41:55.500Z",
+  "grossApyBps": 275,
+  "idleCapitalUsedUsd": "1000",
+  "invalidationConditions": [
+    "APY, liquidity, lockup, protocol allowlist, or route costs change.",
+    "Current time passes 2026-09-06T08:43:51.000Z."
+  ],
+  "migrationCostUsd": "0.013228",
+  "netBenefitUsd": "6.76750422109589041",
+  "postMigrationCapitalUsd": "999.986772",
+  "remainingIdleCapitalUsd": "0",
+  "requestId": "venus-yield-120272332",
+  "risks": [
+    "Venus Core Pool risk tier is MEDIUM.",
+    "Quoted APY is variable and is not a guaranteed return.",
+    "Liquidity snapshot is 63183613.03 USD.",
+    "Allocation and total withdrawals each fit capitalUsd, maxActionUsd, and any maxAllocationUsd cap. A fee budget never increases principal authority.",
+    "Entry and selected exit quotes lack a gas breakdown; their full sum must fit maxGasUsd, maxActionUsd, and any separate maxExecutionCostUsd budget.",
+    "Yield estimates use constant quoted annual rates, simple non-compounding accrual, and a 365-day year over evaluationHorizonDays; no forecast is guaranteed.",
+    "Modeled net benefit subtracts entry and used-source exit costs once. A future destination exit, changing rates, depeg, and protocol losses are not priced.",
+    "The withdrawal plan uses same-asset unlocked positions; it does not quote swaps or borrowing-market collateral checks.",
+    "The bounded funding search compares APY and withdrawal-cost orderings; the selected plan is not guaranteed globally optimal."
+  ],
+  "schemaVersion": "positioncrew.yield-optimization.deliverable.v1",
+  "selectedOpportunityId": "venus-core-usdt-supply",
+  "service": "YIELD_OPTIMIZATION",
+  "status": "ACTIONABLE",
+  "summary": "SUPPLY 999.98 USD to venus-core-usdt-supply; projected 90-day net benefit is 6.76 USD.",
+  "withdrawals": []
+}

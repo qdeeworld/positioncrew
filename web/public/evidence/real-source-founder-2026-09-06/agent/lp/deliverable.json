@@ -1,0 +1,36 @@
+{
+  "actionSteps": [],
+  "breakEvenHours": null,
+  "decision": "HOLD",
+  "estimatedRebalanceCostUsd": "0",
+  "expectedGrossFeesUsd": "0.12265",
+  "expectedNetBenefitUsd": "0",
+  "expiresAt": "2026-09-06T08:43:45.000Z",
+  "generatedAt": "2026-09-06T08:41:50.754Z",
+  "invalidationConditions": [
+    "Current tick approaches within 1000 bps of either range edge.",
+    "Realized volatility reaches 1000 bps."
+  ],
+  "inventoryExposure": {
+    "token0Bps": 5764,
+    "token1Bps": 4236
+  },
+  "limitations": [
+    "POOL_SHARE_UPTIME_V1: feeBase = fees24hUsd * (positionValueUsd / poolLiquidityUsd) * (evaluationHorizonHours / 24). USD pool share is a model, not measured active V3 fee entitlement.",
+    "Current gross fees = feeBase * 9000/10000. The 90% fee-uptime multiplier is a policy assumption, not an observed or guaranteed future time in range.",
+    "Current fee uptime is 0% out of range, 35% near an edge, 55% at high volatility, otherwise 90%; earlier conditions take precedence.",
+    "Near-edge means floor(10000 * nearest-edge tick distance / existing width) < edgeBufferBps. High volatility means realizedVolatilityBps >= highVolatilityBps.",
+    "The 24-hour projection holds supplied prices, position value, pool liquidity and fee run-rate fixed, with linear accrual and no compounding.",
+    "The fee model excludes unmodeled price movement, impermanent loss and execution failures. Fees may not cover costs.",
+    "The 24-hour fee input is a run-rate extrapolated from 3602 seconds and 622 onchain swaps.",
+    "fees24hUsd is used directly as the 24-hour input; any supplied volumeNormalizationFactor is provenance and is not applied a second time.",
+    "Fixed-point products and quotients truncate at 18 decimal places. HOLD fee amounts truncate to at most 6 decimals; actionable amounts use at most 18.",
+    "HOLD reports modeled fees for the existing range, with zero incremental benefit and no rebalance cost; it does not predict that fee accrual stops."
+  ],
+  "proposedRange": null,
+  "requestId": "pancake-position-1456267-120272319",
+  "schemaVersion": "positioncrew.lp-rebalance.deliverable.v1",
+  "service": "LP_REBALANCE",
+  "status": "NO_ACTION",
+  "summary": "The LP remains safely inside its range and no rebalance clears the policy gate."
+}

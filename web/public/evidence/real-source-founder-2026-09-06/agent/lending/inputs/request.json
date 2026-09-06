@@ -1,0 +1,163 @@
+{
+  "schemaVersion": "positioncrew.lending-rescue.request.v1",
+  "service": "LENDING_RESCUE",
+  "requestId": "venus-live-e0270268-1788684102284",
+  "chainId": 56,
+  "account": "0xe02702687b1653a782af57fbcc56d59b7e99a935",
+  "protocol": "Venus Classic",
+  "requestedAt": "2026-09-06T08:41:42.284Z",
+  "deadline": "2026-09-06T08:46:42.284Z",
+  "maxDataAgeSeconds": 300,
+  "maxActionUsd": "250",
+  "maxGasUsd": "0.1",
+  "maxSlippageBps": 30,
+  "sources": [
+    {
+      "sourceId": "venus-mainnet-block-120272302",
+      "label": "Venus Classic account and oracle snapshot at BSC block 120272302",
+      "uri": "https://bscscan.com/block/120272302",
+      "observedAt": "2026-09-06T08:41:38.000Z"
+    }
+  ],
+  "market": "0xfD36E2c2a6789Db23113685031d7F16329158384",
+  "position": {
+    "collateral": [
+      {
+        "symbol": "Cake",
+        "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+        "decimals": 18,
+        "amount": "200.005483359942731854",
+        "priceUsd": "2.19035768",
+        "sourceId": "venus-mainnet-block-120272302",
+        "observedAt": "2026-09-06T08:41:38.000Z",
+        "liquidationThresholdBps": 5500,
+        "collateralEnabled": true
+      },
+      {
+        "symbol": "BNB",
+        "address": "0x0000000000000000000000000000000000000000",
+        "decimals": 18,
+        "amount": "1.277072730182259174",
+        "priceUsd": "755.7700945",
+        "sourceId": "venus-mainnet-block-120272302",
+        "observedAt": "2026-09-06T08:41:38.000Z",
+        "liquidationThresholdBps": 8000,
+        "collateralEnabled": true
+      },
+      {
+        "symbol": "DOGE",
+        "address": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
+        "decimals": 8,
+        "amount": "0.00000045",
+        "priceUsd": "0.09063121",
+        "sourceId": "venus-mainnet-block-120272302",
+        "observedAt": "2026-09-06T08:41:38.000Z",
+        "liquidationThresholdBps": 4300,
+        "collateralEnabled": true
+      },
+      {
+        "symbol": "LINK",
+        "address": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
+        "decimals": 18,
+        "amount": "0.00000000305850752",
+        "priceUsd": "12.19231",
+        "sourceId": "venus-mainnet-block-120272302",
+        "observedAt": "2026-09-06T08:41:38.000Z",
+        "liquidationThresholdBps": 6300,
+        "collateralEnabled": true
+      },
+      {
+        "symbol": "BCH",
+        "address": "0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf",
+        "decimals": 18,
+        "amount": "0.000000002518600889",
+        "priceUsd": "259.68782",
+        "sourceId": "venus-mainnet-block-120272302",
+        "observedAt": "2026-09-06T08:41:38.000Z",
+        "liquidationThresholdBps": 6000,
+        "collateralEnabled": true
+      }
+    ],
+    "debt": [
+      {
+        "symbol": "USDT",
+        "address": "0x55d398326f99059fF775485246999027B3197955",
+        "decimals": 18,
+        "amount": "284.079669040740587598",
+        "priceUsd": "1.0000713",
+        "sourceId": "venus-mainnet-block-120272302",
+        "observedAt": "2026-09-06T08:41:38.000Z"
+      }
+    ]
+  },
+  "availableAssets": [
+    {
+      "symbol": "USDT",
+      "address": "0x55d398326f99059fF775485246999027B3197955",
+      "decimals": 18,
+      "availableAmount": "0"
+    },
+    {
+      "symbol": "Cake",
+      "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+      "decimals": 18,
+      "availableAmount": "0"
+    },
+    {
+      "symbol": "BUSD",
+      "address": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
+      "decimals": 18,
+      "availableAmount": "0"
+    },
+    {
+      "symbol": "BNB",
+      "address": "0x0000000000000000000000000000000000000000",
+      "decimals": 18,
+      "availableAmount": "0.022081065478050443"
+    },
+    {
+      "symbol": "LTC",
+      "address": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94",
+      "decimals": 18,
+      "availableAmount": "0.000000000000000001"
+    },
+    {
+      "symbol": "XVS",
+      "address": "0xcF6BB5389c92Bdda8a3747Ddb454cB7a64626C63",
+      "decimals": 18,
+      "availableAmount": "0"
+    },
+    {
+      "symbol": "FIL",
+      "address": "0x0D8Ce2A99Bb6e3B7Db580eD848240e4a0F9aE153",
+      "decimals": 18,
+      "availableAmount": "0"
+    },
+    {
+      "symbol": "DOGE",
+      "address": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
+      "decimals": 8,
+      "availableAmount": "0"
+    },
+    {
+      "symbol": "LINK",
+      "address": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
+      "decimals": 18,
+      "availableAmount": "0"
+    },
+    {
+      "symbol": "BCH",
+      "address": "0x8fF795a6F4D97E7887C79beA79aba5cc76444aDf",
+      "decimals": 18,
+      "availableAmount": "0.000000000000000004"
+    }
+  ],
+  "allowedActions": [
+    "REPAY_DEBT",
+    "ADD_COLLATERAL"
+  ],
+  "targetHealthFactor": "1.25",
+  "stressPriceDropBps": 1000,
+  "oracleDeviationToleranceBps": 100,
+  "estimatedGasUsd": "0.013225"
+}

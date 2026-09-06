@@ -1,0 +1,9 @@
+{
+  "studyId": "positioncrew-prospective-marketplace-pairs-release130-20260906",
+  "protocolHash": "sha256:0377a35cd3ebbdbae2f3d02a11a0faf85686ebad7ed30a3cace7b82291150dc2",
+  "precommittedAt": "2026-09-06T08:41:29.027Z",
+  "sourceCommit": "35626ba2f35102dc42e442e223044d782169fa07",
+  "sitesVersion": 130,
+  "manualArms": "PENDING",
+  "publicJobsStarted": false
+}

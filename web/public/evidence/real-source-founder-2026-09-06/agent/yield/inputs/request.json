@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "positioncrew.yield-optimization.request.v1",
+  "service": "YIELD_OPTIMIZATION",
+  "requestId": "venus-yield-120272332",
+  "chainId": 56,
+  "account": "0x0000000000000000000000000000000000000000",
+  "protocol": "Venus Core Pool stablecoin supply",
+  "requestedAt": "2026-09-06T08:41:53.233Z",
+  "deadline": "2026-09-06T08:43:53.233Z",
+  "maxDataAgeSeconds": 120,
+  "maxActionUsd": "1000.00",
+  "maxGasUsd": "0.250000",
+  "maxSlippageBps": 0,
+  "sources": [
+    {
+      "sourceId": "venus-yield-mainnet-block-120272332",
+      "label": "Block-pinned Venus Core Pool stablecoin base-rate state",
+      "uri": "https://bscscan.com/block/120272332",
+      "observedAt": "2026-09-06T08:41:51.000Z"
+    }
+  ],
+  "maxAllocationUsd": "1000.00",
+  "maxExecutionCostUsd": "0.250000",
+  "capitalUsd": "1000.00",
+  "currentPositions": [],
+  "opportunities": [
+    {
+      "opportunityId": "venus-core-usdt-supply",
+      "protocol": "Venus Core Pool",
+      "vaultOrMarket": "0xfD5840Cd36d94D7229439859C0112a4185BC0255",
+      "asset": {
+        "symbol": "USDT",
+        "address": "0x55d398326f99059fF775485246999027B3197955",
+        "decimals": 18
+      },
+      "amountUsd": "1000.00",
+      "grossApyBps": 275,
+      "liquidityUsd": "63183613.03",
+      "lockupSeconds": 0,
+      "estimatedEntryCostUsd": "0.013228",
+      "estimatedExitCostUsd": "0.013228",
+      "riskTier": "MEDIUM",
+      "observedAt": "2026-09-06T08:41:51.000Z",
+      "sourceId": "venus-yield-mainnet-block-120272332"
+    },
+    {
+      "opportunityId": "venus-core-fdusd-supply",
+      "protocol": "Venus Core Pool",
+      "vaultOrMarket": "0xC4eF4229FEc74Ccfe17B2bdeF7715fAC740BA0ba",
+      "asset": {
+        "symbol": "FDUSD",
+        "address": "0xc5f0f7b66764F6ec8C8Dff7BA683102295E16409",
+        "decimals": 18
+      },
+      "amountUsd": "1000.00",
+      "grossApyBps": 248,
+      "liquidityUsd": "2987723.55",
+      "lockupSeconds": 0,
+      "estimatedEntryCostUsd": "0.013228",
+      "estimatedExitCostUsd": "0.013228",
+      "riskTier": "MEDIUM",
+      "observedAt": "2026-09-06T08:41:51.000Z",
+      "sourceId": "venus-yield-mainnet-block-120272332"
+    },
+    {
+      "opportunityId": "venus-core-usdc-supply",
+      "protocol": "Venus Core Pool",
+      "vaultOrMarket": "0xecA88125a5ADbe82614ffC12D0DB554E2e2867C8",
+      "asset": {
+        "symbol": "USDC",
+        "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+        "decimals": 18
+      },
+      "amountUsd": "1000.00",
+      "grossApyBps": 207,
+      "liquidityUsd": "20619111.88",
+      "lockupSeconds": 0,
+      "estimatedEntryCostUsd": "0.013228",
+      "estimatedExitCostUsd": "0.013228",
+      "riskTier": "MEDIUM",
+      "observedAt": "2026-09-06T08:41:51.000Z",
+      "sourceId": "venus-yield-mainnet-block-120272332"
+    },
+    {
+      "opportunityId": "venus-core-dai-supply",
+      "protocol": "Venus Core Pool",
+      "vaultOrMarket": "0x334b3eCB4DCa3593BCCC3c7EBD1A1C1d1780FBF1",
+      "asset": {
+        "symbol": "DAI",
+        "address": "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3",
+        "decimals": 18
+      },
+      "amountUsd": "1000.00",
+      "grossApyBps": 183,
+      "liquidityUsd": "1017009.39",
+      "lockupSeconds": 0,
+      "estimatedEntryCostUsd": "0.013228",
+      "estimatedExitCostUsd": "0.013228",
+      "riskTier": "MEDIUM",
+      "observedAt": "2026-09-06T08:41:51.000Z",
+      "sourceId": "venus-yield-mainnet-block-120272332"
+    }
+  ],
+  "constraints": {
+    "protocolAllowlist": [
+      "Venus Core Pool"
+    ],
+    "maximumRiskTier": "MEDIUM",
+    "maximumProtocolConcentrationBps": 10000,
+    "maximumLockupSeconds": 0,
+    "minimumLiquidityUsd": "100000",
+    "minimumNetBenefitUsd": "1",
+    "evaluationHorizonDays": 90
+  }
+}
