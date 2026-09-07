@@ -300,6 +300,58 @@ describe("public fixture job boundary", () => {
     expect(deliverableSchema).toMatchObject({ $id: deliverableSchemaId, type: "object" });
   });
 
+  it.each(PROVIDER_CATALOG)("separates public assessment terms from legacy pricing for $slug", (provider) => {
+    const origin = "https://positioncrew.example";
+    const manifest = buildProviderManifest(provider, origin);
+
+    expect(manifest).toMatchObject({
+      pricing: {
+        ...provider.price,
+        scope: "LEGACY_LISTED_TESTNET_PRICE_NOT_COLLECTED_BY_PUBLIC_ASSESSMENTS",
+        publicAssessment: {
+          amount: "0", token: "NONE", directCostUsd: "0.00",
+          walletRequired: false, settlement: "NO_PAYMENT",
+        },
+        judgeTrial: { amount: "0", deprecated: true, replacement: "pricing.publicAssessment" },
+      },
+      commerce: {
+        assessmentPaths: {
+          callerSuppliedScenario: {
+            url: `${origin}${provider.endpoint}`,
+            method: provider.method,
+            evidenceMode: "CALLER_SUPPLIED_OBSERVATIONS",
+            observationTrust: "CALLER_SUPPLIED_NOT_CHAIN_AUTHENTICATED",
+            persistence: "IN_MEMORY_CONFORMANCE",
+          },
+          currentHire: {
+            url: `${origin}/api/benchmark-hires`, method: "POST",
+            evidenceMode: "CURRENT_BLOCK_PINNED",
+            observationTrust: "SERVER_ISSUED_ATTESTATION_AT_ADMISSION",
+            observationsRefetchedDuringExecution: false,
+            persistence: "D1_REQUEST_RESULT_RECEIPT",
+          },
+          historicalHire: {
+            evidenceMode: "HISTORICAL_FIXTURE",
+            observationTrust: "IMMUTABLE_HISTORICAL_INPUT_NOT_CURRENT_STATE",
+          },
+        },
+      },
+    });
+  });
+
+  it("links the real-source report separately from the historical and independent status endpoints", () => {
+    const origin = "https://positioncrew.example";
+    expect(buildMarketplaceManifest(origin)).toMatchObject({
+      founderAgentAdvantageStatusUrl: `${origin}/api/benchmarks/founder-comparison/status`,
+      independentAgentAdvantageStatusUrl: `${origin}/api/benchmarks/status`,
+      realSourceFounderReportUrl: `${origin}/evidence/real-source-founder-2026-09-06/index.html`,
+      claims: { publicAssessment: "ZERO_COST_UNSIGNED_PLAN_OR_REFUSAL_NO_PAYMENT" },
+    });
+    expect(buildOpenApiDocument(origin).info).toMatchObject({
+      description: expect.stringContaining("four current block-pinned categories and three historical tasks"),
+    });
+  });
+
   it("does not carry the locked benchmark onto a modified fixture", async () => {
     const modified = structuredClone(lendingFixture);
     modified.maxActionUsd = "100";
