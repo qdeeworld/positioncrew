@@ -97,6 +97,20 @@ function receiptIdFromHash(): string | null {
   return window.location.hash.match(/^#jobs\/receipt\/([0-9a-f-]{36})$/i)?.[1] ?? null;
 }
 
+function publicRequestError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+  if (/expired|expiry|freshness window|stale (?:request|observation|evidence)/i.test(message)) {
+    return "This saved request is no longer current. Reload the position or markets, then compare providers again before starting a new assessment. Existing receipts remain historical evidence.";
+  }
+  if (/verification RPC unavailable|BSC RPC.*(?:unavailable|403)|403 Forbidden/i.test(message)) {
+    return "Live chain verification is temporarily unavailable. Retry the current check when the data service recovers; do not loosen your limits to continue.";
+  }
+  if (/timed out|did not complete within|Failed to fetch|NetworkError/i.test(message)) {
+    return "The request could not finish in time. A saved job may still exist: check Recent jobs and retry its status before creating another hire.";
+  }
+  return message;
+}
+
 async function jsonResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
@@ -416,7 +430,7 @@ export default function App() {
       if (controller.signal.aborted) return;
       setActiveJob(null);
       setMarketplaceTrace(null);
-      setReceiptError(receiptError instanceof Error ? receiptError.message : "Receipt unavailable");
+      setReceiptError(publicRequestError(receiptError, "Receipt unavailable"));
     } finally {
       if (receiptLoadController.current === controller) {
         receiptLoadController.current = null;
@@ -640,7 +654,7 @@ export default function App() {
       setSessionJobs((jobs) => [sessionJob, ...jobs].slice(0, 20));
     } catch (jobError) {
       if (!isCurrentRun()) return;
-      setJobError(jobError instanceof Error ? jobError.message : "Provider job failed");
+      setJobError(publicRequestError(jobError, "Provider job failed"));
     } finally {
       if (isCurrentRun()) {
         setLoading(false);
