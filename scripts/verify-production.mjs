@@ -39,9 +39,9 @@ const expectedAacpOwner = "0xbad35fa6e368e90fc4faf63507f2d0a2fdf94baf";
 const referencePancakePositionId = "1456267";
 const expectedShadowGridClaimBoundary = [
   "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
-  "This legacy portfolio model starts with half the entire requested capital in base and half in quote, less gas; it does not derive initial inventory from the planner's emitted SELL orders.",
-  "The corrected planner may deploy less capital. These outcomes belong to the separate legacy 50/50 portfolio simulation, not performance or risk validation of that planner. Historical balances and outcomes have not been recalculated.",
-  "MATURE means collection thresholds passed, not profitability, financial correctness, or comparability with the corrected planner.",
+  "New V2 windows derive initial base from emitted SELL reservations and retain unused capital as quote cash after gas. Initial inventory is marked at the frozen mid price, not an executed purchase.",
+  "Legacy V1 windows retain their original half-budget base and half-budget quote model. Portfolio cohorts are reported separately; historical balances and outcomes have not been recalculated.",
+  "MATURE means collection thresholds passed within a portfolio cohort, not profitability or financial correctness. Legacy history cannot mature the corrected portfolio cohort.",
   "Conservative sampled crossings are simulations, not transactions, executable fills, realised PnL, strategy returns, or audited financial performance.",
   "The operator-scheduled record proves no external buyer, payment, revenue, demand, or Agent Advantage.",
 ];
@@ -522,6 +522,8 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
   };
 }
 
+import { committedShadowGridCohortMember, verifyShadowGridPortfolioCohorts } from "./verify-shadow-grid-cohorts.mjs";
+
 async function verifyShadowGridLedger(ledger) {
   assert(
     ledger.schemaVersion ===
@@ -629,10 +631,30 @@ async function verifyShadowGridLedger(ledger) {
     maturity.nonVoidRatePct === expectedNonVoidRate,
     "Forward-shadow non-void rate does not match retained terminal windows",
   );
+  assert(Array.isArray(ledger.cohortWindows) && ledger.cohortWindows.length <= 500 &&
+    ledger.cohortWindows.length === summary.openedWindowCount &&
+    new Set(ledger.cohortWindows.map((window) => window.windowId)).size === ledger.cohortWindows.length,
+  "Forward-shadow ledger omitted complete retained cohort membership");
+  const committedWindows = [];
+  const verifiedById = new Map();
+  // Read every retained chain with bounded concurrency, rather than trusting
+  // producer cohort totals or limiting membership verification to ten windows.
+  for (let offset = 0; offset < ledger.cohortWindows.length; offset += 4) {
+    const batch = await Promise.all(ledger.cohortWindows.slice(offset, offset + 4).map(async (window) => {
+      const detail = await fetchJson(`bounded-grid-cohort-window-${window.windowId}`, window.receiptUrl);
+      const verified = verifyShadowGridWindow(detail, window);
+      const member = committedShadowGridCohortMember(detail, window);
+      return { window, verified, member };
+    }));
+    for (const { window, verified, member } of batch) {
+      verifiedById.set(window.windowId, { window, verified });
+      committedWindows.push(member);
+    }
+  }
+  const mixedPortfolios = verifyShadowGridPortfolioCohorts(ledger, committedWindows);
   const expectedMature =
-    maturity.observedDays >= 7 &&
-    summary.terminalWindowCount >= 30 &&
-    (maturity.nonVoidRatePct ?? 0) >= 90;
+    !mixedPortfolios &&
+    ledger.portfolioCohorts.some((cohort) => cohort.openedWindowCount > 0 && cohort.mature);
   assert(
     maturity.mature === expectedMature,
     "Forward-shadow maturity status does not follow its published thresholds",
@@ -667,8 +689,7 @@ async function verifyShadowGridLedger(ledger) {
         ledger.recentWindows.length,
     "Forward-shadow recent windows are duplicated or exceed retained windows",
   );
-  const verifiedWindows = await Promise.all(
-    ledger.recentWindows.map(async (window) => {
+  const verifiedWindows = ledger.recentWindows.map((window) => {
       assert(window.pair === "WBNB/USDT", `${window.windowId} changed its summary market`);
       assert(window.horizonMinutes === 15, `${window.windowId} changed its summary horizon`);
       if (window.simulatedNetOutcomeUsd !== null) {
@@ -678,13 +699,11 @@ async function verifyShadowGridLedger(ledger) {
           `${window.windowId} has a non-numeric simulated summary outcome`,
         );
       }
-      const detail = await fetchJson(
-        `bounded-grid-forward-shadow-window-${window.windowId}`,
-        window.receiptUrl,
-      );
-      return verifyShadowGridWindow(detail, window);
-    }),
-  );
+      const retained = verifiedById.get(window.windowId);
+      assert(retained && canonicalSha256(retained.window) === canonicalSha256(window),
+        `${window.windowId} recent projection differs from verified cohort membership`);
+      return retained.verified;
+    });
 
   return {
     schemaVersion: ledger.schemaVersion,
@@ -692,6 +711,8 @@ async function verifyShadowGridLedger(ledger) {
     model: ledger.model,
     maturity: ledger.maturity,
     summary: ledger.summary,
+    portfolioCohorts: ledger.portfolioCohorts,
+    verifiedCohortWindowCount: committedWindows.length,
     claimBoundary: ledger.claimBoundary,
     verifiedRecentWindows: verifiedWindows,
   };

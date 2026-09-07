@@ -13,6 +13,7 @@ import {
 import termixIdentityEvidence from "../../../evidence/termix-identities.mainnet.json" with { type: "json" };
 import termixListingEvidence from "../../../evidence/termix-listings.mainnet.json" with { type: "json" };
 import { shortHash } from "../presentation";
+import { ShadowGridPortfolioCohorts, shadowPortfolioLabel } from "./ShadowGridPortfolioCohorts";
 import type {
   AacpProductionReadiness,
   AgentCaptureManifestResponse,
@@ -400,11 +401,14 @@ export function EvidenceView({
             <h2 id="forward-shadow-title">Bounded Grid shadow outcome ledger</h2>
           </div>
           <span className={`state-label ${forwardShadowStatusTone}`}>
-            <Radio size={13} /> {forwardShadowStatusLabel}
+            <Radio size={13} /> {forwardShadowLedger?.maturity.mixedPortfolios ? "Separate portfolio cohorts" : forwardShadowStatusLabel}
           </span>
         </div>
         {forwardShadowLedger ? (
           <>
+            {forwardShadowLedger.portfolioCohorts ? (
+              <ShadowGridPortfolioCohorts cohorts={forwardShadowLedger.portfolioCohorts} />
+            ) : (
             <div className="forward-shadow-facts">
               <div>
                 <strong>{forwardShadowLedger.summary.precommittedWindowCount}</strong>
@@ -431,6 +435,7 @@ export function EvidenceView({
                 </small>
               </div>
             </div>
+            )}
             <div className="forward-shadow-model">
               <span><strong>Strategy</strong><code>{forwardShadowLedger.model.strategyVersion}</code></span>
               <span><strong>Fill model</strong><code>{forwardShadowLedger.model.name}</code></span>
@@ -447,6 +452,7 @@ export function EvidenceView({
                     window.sourceBlockNumber !== null;
                   return (
                     <article key={window.windowId} className={`forward-shadow-window ${window.state.toLowerCase()}`}>
+                      <small>{shadowPortfolioLabel(window.portfolioModel)} portfolio</small>
                       <div>
                         <span className={`state-label ${shadowStateTone(window.state)}`}>{shadowStateLabel(window.state)}</span>
                         <time dateTime={window.startedAt}>

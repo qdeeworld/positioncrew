@@ -11,11 +11,14 @@ export const SHADOW_GRID_STRATEGY_VERSION = "positioncrew:bounded-grid-forward-s
 export const SHADOW_GRID_FILL_MODEL = "CONSERVATIVE_SAMPLED_CROSSING_V1";
 export const SHADOW_GRID_HORIZON_MINUTES = 15;
 export const SHADOW_GRID_SAMPLE_CADENCE_MINUTES = 5;
+export const SHADOW_GRID_LEGACY_PORTFOLIO = "LEGACY_HALF_BUDGET_BASE_HALF_QUOTE_V1";
+export const SHADOW_GRID_PLAN_PORTFOLIO = "PLAN_SELL_RESERVATIONS_IDLE_CASH_V2";
+type ShadowGridPortfolioModel = typeof SHADOW_GRID_LEGACY_PORTFOLIO | typeof SHADOW_GRID_PLAN_PORTFOLIO;
 export const SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY = [
   "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
-  "This legacy portfolio model starts with half the entire requested capital in base and half in quote, less gas; it does not derive initial inventory from the planner's emitted SELL orders.",
-  "The corrected planner may deploy less capital. These outcomes belong to the separate legacy 50/50 portfolio simulation, not performance or risk validation of that planner. Historical balances and outcomes have not been recalculated.",
-  "MATURE means collection thresholds passed, not profitability, financial correctness, or comparability with the corrected planner.",
+  "New V2 windows derive initial base from emitted SELL reservations and retain unused capital as quote cash after gas. Initial inventory is marked at the frozen mid price, not an executed purchase.",
+  "Legacy V1 windows retain their original half-budget base and half-budget quote model. Portfolio cohorts are reported separately; historical balances and outcomes have not been recalculated.",
+  "MATURE means collection thresholds passed within a portfolio cohort, not profitability or financial correctness. Legacy history cannot mature the corrected portfolio cohort.",
   "Conservative sampled crossings are simulations, not transactions, executable fills, realised PnL, strategy returns, or audited financial performance.",
   "The operator-scheduled record proves no external buyer, payment, revenue, demand, or Agent Advantage.",
 ] as const;
@@ -87,6 +90,7 @@ export interface ShadowGridPublicEvent {
 
 export interface ShadowGridPublicWindow {
   windowId: string;
+  portfolioModel: ShadowGridPortfolioModel;
   state: "PRECOMMITTED" | "REFUSED" | "CLOSED" | "VOID_SOURCE_GAP" | "RISK_EXIT";
   initializationState: "PRECOMMITTED" | "VOIDED_BEFORE_PRECOMMIT";
   precommitPersisted: boolean;
@@ -164,7 +168,9 @@ export function createShadowGridEvent(input: {
     previousEventHash: input.previous?.eventHash ?? null,
     eventType: input.eventType,
     recordedAt: input.recordedAt,
-    payload: input.payload,
+    payload: input.eventType === "EPOCH_STARTED"
+      ? { ...input.payload, portfolioModel: SHADOW_GRID_PLAN_PORTFOLIO }
+      : input.payload,
   });
   const eventHash = canonicalHash(body);
   const event: ShadowGridPublicEvent = { ...body, eventHash };
@@ -284,6 +290,15 @@ function fillsFrom(events: readonly ShadowGridEvent[]): ShadowGridFillPayload[] 
     .map((event) => parseShadowGridEvent(event).payload as ShadowGridFillPayload);
 }
 
+function portfolioModel(events: readonly ShadowGridEvent[]): ShadowGridPortfolioModel {
+  if (!events[0]) throw new Error("Shadow-grid run is empty");
+  const model = parseShadowGridEvent(events[0]).payload.portfolioModel;
+  // Missing markers belong to immutable windows created before this migration.
+  if (model === undefined || model === SHADOW_GRID_LEGACY_PORTFOLIO) return SHADOW_GRID_LEGACY_PORTFOLIO;
+  if (model === SHADOW_GRID_PLAN_PORTFOLIO) return SHADOW_GRID_PLAN_PORTFOLIO;
+  throw new Error("Unknown committed shadow-grid portfolio model");
+}
+
 function portfolio(events: readonly ShadowGridEvent[]): {
   quoteUsd: number;
   baseAmount: number;
@@ -298,6 +313,17 @@ function portfolio(events: readonly ShadowGridEvent[]): {
   const gasUsd = Number(precommit.request.constraints.estimatedGasUsd);
   let quoteUsd = capital / 2 - gasUsd;
   let baseAmount = capital / 2 / initialPrice;
+  if (portfolioModel(events) === SHADOW_GRID_PLAN_PORTFOLIO) {
+    baseAmount = precommit.deliverable.orders
+      .filter((order) => order.side === "SELL")
+      .reduce((sum, order) => sum + Number(order.baseAmount), 0);
+    quoteUsd = capital - baseAmount * initialPrice - gasUsd;
+    if (![capital, initialPrice, gasUsd, baseAmount, quoteUsd].every(Number.isFinite) ||
+        capital <= 0 || initialPrice <= 0 || gasUsd < 0 || baseAmount < 0 || quoteUsd < -0.000000005) {
+      throw new Error("Plan-aligned shadow inventory cannot be funded by the committed capital");
+    }
+    quoteUsd = Math.max(0, quoteUsd);
+  }
   let feesUsd = 0;
   let slippageUsd = 0;
   for (const fill of fillsFrom(events)) {
@@ -389,6 +415,9 @@ export function calculateShadowGridTerminal(
   const riskExit = finalPrice <= lower || finalPrice >= upper || net <= -maximumLoss;
   return {
     initialCapitalUsd: fixed(state.initialCapitalUsd),
+    portfolioModel: portfolioModel(events),
+    finalBaseAmount: fixed(state.baseAmount),
+    finalQuoteUsd: fixed(state.quoteUsd),
     finalEquityUsd: fixed(finalEquity),
     gasUsd: fixed(state.gasUsd),
     feesUsd: fixed(state.feesUsd),
@@ -437,6 +466,7 @@ export function publicShadowGridWindow(
     : null;
   return {
     windowId: events[0]!.runId,
+    portfolioModel: portfolioModel(events),
     state: shadowGridRunState(events),
     initializationState: precommit ? "PRECOMMITTED" : "VOIDED_BEFORE_PRECOMMIT",
     precommitPersisted: precommit !== null,
@@ -500,7 +530,37 @@ export function summarizeShadowGridRuns(
   const nonVoidRatePct = terminal.length === 0
     ? null
     : Number((((terminal.length - voided.length) / terminal.length) * 100).toFixed(2));
-  const mature = valid && observedDays >= 7 && terminal.length >= 30 && (nonVoidRatePct ?? 0) >= 90;
+  const models = new Set(windows.map((window) => window.portfolioModel));
+  const mixedPortfolios = models.size > 1;
+  const mature = !mixedPortfolios && valid && observedDays >= 7 && terminal.length >= 30 && (nonVoidRatePct ?? 0) >= 90;
+  const portfolioCohorts = [SHADOW_GRID_LEGACY_PORTFOLIO, SHADOW_GRID_PLAN_PORTFOLIO].map((model) => {
+    const members = windows.filter((window) => window.portfolioModel === model);
+    const ended = members.filter((window) => window.terminalAt !== null);
+    const voidCount = ended.filter((window) => window.state === "VOID_SOURCE_GAP").length;
+    const outcomes = ended.filter((window) => window.state === "CLOSED" || window.state === "RISK_EXIT");
+    const firstWindowStartedAt = members.length === 0 ? null
+      : new Date(Math.min(...members.map((window) => Date.parse(window.startedAt)))).toISOString();
+    const days = firstWindowStartedAt === null ? 0 : Math.max(0,
+      (now.getTime() - Date.parse(firstWindowStartedAt)) / 86_400_000);
+    const rate = ended.length === 0 ? null : (ended.length - voidCount) / ended.length * 100;
+    const cohortMature = valid && days >= 7 && ended.length >= 30 && (rate ?? 0) >= 90;
+    return {
+      portfolioModel: model,
+      openedWindowCount: members.length,
+      terminalWindowCount: ended.length,
+      voidWindowCount: voidCount,
+      returnBearingWindowCount: outcomes.length,
+      firstWindowStartedAt,
+      observedDays: Number(days.toFixed(2)),
+      nonVoidRatePct: rate === null ? null : Number(rate.toFixed(2)),
+      mature: cohortMature,
+      positiveWindowCount: outcomes.filter((window) => Number(window.simulatedNetOutcomeUsd) > 0).length,
+      negativeWindowCount: outcomes.filter((window) => Number(window.simulatedNetOutcomeUsd) < 0).length,
+      simulatedNetOutcomeUsd: cohortMature
+        ? fixed(outcomes.reduce((sum, window) => sum + Number(window.simulatedNetOutcomeUsd ?? 0), 0))
+        : null,
+    };
+  });
   const aggregate = returnBearing.reduce(
     (sum, window) => sum + Number(window.simulatedNetOutcomeUsd ?? 0),
     0,
@@ -514,10 +574,11 @@ export function summarizeShadowGridRuns(
     model: {
       name: SHADOW_GRID_FILL_MODEL,
       strategyVersion: SHADOW_GRID_STRATEGY_VERSION,
-      portfolioModel: "LEGACY_HALF_BUDGET_BASE_HALF_QUOTE_V1" as const,
-      initialBase: "capitalUsd / (2 * initialMidPriceUsd)",
-      initialQuote: "capitalUsd / 2 - estimatedGasUsd",
-      plannerPortfolioAligned: false,
+      portfolioModel: mixedPortfolios ? "MIXED_SEPARATE_COHORTS" : (windows[0]?.portfolioModel ?? SHADOW_GRID_PLAN_PORTFOLIO),
+      activePortfolioModel: SHADOW_GRID_PLAN_PORTFOLIO,
+      initialBase: "V2: sum(emitted SELL baseAmount); legacy V1: capitalUsd / (2 * initialMidPriceUsd)",
+      initialQuote: "V2: capitalUsd - initialBase * initialMidPriceUsd - estimatedGasUsd; unused capital remains cash",
+      plannerPortfolioAligned: !mixedPortfolios && !models.has(SHADOW_GRID_LEGACY_PORTFOLIO),
       pair: "WBNB/USDT" as const,
       capitalMode: "ZERO_FUND_SHADOW" as const,
       cadenceMinutes: 60 as const,
@@ -525,6 +586,7 @@ export function summarizeShadowGridRuns(
       horizonMinutes: 15 as const,
     },
     maturity: {
+      mixedPortfolios,
       observedDays: Number(observedDays.toFixed(2)),
       terminalWindowCount: terminal.length,
       minimumObservedDays: 7 as const,
@@ -548,7 +610,11 @@ export function summarizeShadowGridRuns(
       negativeWindowCount: negative.length,
       simulatedNetOutcomeUsd: mature ? fixed(aggregate) : null,
     },
-    recentWindows: windows.sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)).slice(0, 10),
+    portfolioCohorts,
+    // Complete retained membership manifest. Each entry points to its committed
+    // snapshot head; verifiers must derive model/epoch from the opening event.
+    cohortWindows: windows,
+    recentWindows: [...windows].sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)).slice(0, 10),
     claimBoundary: [...SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY],
   };
 }
