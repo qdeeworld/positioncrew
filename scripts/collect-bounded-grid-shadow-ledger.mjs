@@ -18,6 +18,9 @@ const TERMINAL = new Set([
 ]);
 const CLAIM_BOUNDARY = Object.freeze([
   "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
+  "This legacy portfolio model starts with half the entire requested capital in base and half in quote, less gas; it does not derive initial inventory from the planner's emitted SELL orders.",
+  "The corrected planner may deploy less capital. These outcomes belong to the separate legacy 50/50 portfolio simulation, not performance or risk validation of that planner. Historical balances and outcomes have not been recalculated.",
+  "MATURE means collection thresholds passed, not profitability, financial correctness, or comparability with the corrected planner.",
   "Conservative sampled crossings are simulations, not transactions, executable fills, realised PnL, strategy returns, or audited financial performance.",
   "The operator-scheduled record proves no external buyer, payment, revenue, demand, or Agent Advantage.",
 ]);
