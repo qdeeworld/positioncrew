@@ -80,7 +80,7 @@ export interface HeyAnonV3LpJobAssessment {
   recommendation: ExternalRange;
   normalizedDeliverable: LpRebalanceDeliverable;
   checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
-  attributableResult: true;
+  attributableResult: boolean;
   status: "INCOMPATIBLE_CONSTRAINTS" | "ELIGIBLE_WITH_ADAPTER";
   eligibleForLpRebalance: boolean;
   invocation: {
@@ -600,7 +600,7 @@ export async function auditionHeyAnonV3LpJob(
     },
     normalizedDeliverable,
     checks,
-    attributableResult: true,
+    attributableResult: providerMarketBinding,
     status: eligible ? "ELIGIBLE_WITH_ADAPTER" : "INCOMPATIBLE_CONSTRAINTS",
     eligibleForLpRebalance: eligible,
     invocation: {
@@ -633,8 +633,12 @@ export async function auditionHeyAnonV3LpJob(
       }),
     },
     claimBoundary: [
-      "The external agent produced the attributable range recommendation; PositionCrew supplied the pinned position and market economics.",
-      "The compatibility adapter aligned ticks, evaluated buyer constraints, and normalized the result without changing the external range thesis.",
+      providerMarketBinding
+        ? "The external agent produced the attributable range recommendation; PositionCrew supplied the pinned position and market economics."
+        : "The external endpoint response is retained by its raw-response hash, but its market declarations contradict this job; no exact-job recommendation is attributed.",
+      providerMarketBinding
+        ? "The compatibility adapter aligned ticks, evaluated buyer constraints, and normalized the result without changing the external range thesis."
+        : "Normalized calculations use PositionCrew's pinned inputs and do not make the contradictory external response compatible or selectable.",
       "No approval, payment, signature, liquidity movement, or protocol transaction occurred.",
     ],
   };

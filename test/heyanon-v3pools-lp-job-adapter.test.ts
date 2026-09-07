@@ -224,6 +224,9 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
     });
     expect(result.status).toBe("INCOMPATIBLE_CONSTRAINTS");
     expect(result.eligibleForLpRebalance).toBe(false);
+    expect(result.attributableResult).toBe(false);
+    expect(result.claimBoundary.join(" ")).toContain("no exact-job recommendation is attributed");
+    expect(result.claimBoundary.join(" ")).not.toContain("produced the attributable range recommendation");
     expect(result.checks.find((check) => check.code === checkCode)?.status).toBe("FAIL");
     expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_RANGE_RECOMMENDATION")?.status).toBe("FAIL");
     expect(result.invocation.rawResponseHash).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -241,6 +244,8 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
     });
     expect(result.status).toBe("ELIGIBLE_WITH_ADAPTER");
     expect(result.eligibleForLpRebalance).toBe(true);
+    expect(result.attributableResult).toBe(true);
+    expect(result.claimBoundary.join(" ")).toContain("produced the attributable range recommendation");
     expect(result.checks.every((check) => check.status === "PASS")).toBe(true);
   });
 
@@ -252,6 +257,12 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
       }, canonicalHash(input), new Date("2026-08-30T12:00:30.000Z"), { fetchImpl: mutatedProviderFetch(variant) });
       expect(result.audition.candidates.find((candidate) => candidate.providerKey === "HEYANON")?.selectable).toBe(false);
       expect(result.externalProviderComparison.eligibleForLiveMatch).toBe(false);
+      expect(result.externalProviderComparison.attributableResult).toBe(false);
+      if (marketMismatchCases.some(([marketVariant]) => marketVariant === variant)) {
+        expect(result.externalProviderComparison.boundary).toContain("no exact-job recommendation is attributed");
+        expect(result.audition.candidates.find((candidate) => candidate.providerKey === "HEYANON")?.rawResponseHash)
+          .toMatch(/^sha256:[a-f0-9]{64}$/);
+      }
     },
   );
 
@@ -279,6 +290,11 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
         expect(response.liveMatchExecution?.selection.selectedProvider).toBe("HEYANON");
         expect(response.result.job.providerId).toBe("erc8004:56:45650");
         expect(response.result.deliverable.decision).toBe("NONE");
+        if (marketMismatchCases.some(([marketVariant]) => marketVariant === variant)) {
+          expect(response.liveMatchExecution?.invocation.rawResponseHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+          expect(response.liveMatchExecution?.invocation.checks.find((check) =>
+            check.code === "ATTRIBUTABLE_RANGE_RECOMMENDATION")?.status).toBe("FAIL");
+        }
       } finally {
         vi.useRealTimers();
       }
@@ -600,6 +616,7 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
   it("preserves an attributable recommendation while rejecting a range outside buyer limits", async () => {
     const result = await auditionHeyAnonV3LpJob(request, positionId, { fetchImpl });
     expect(result.attributableResult).toBe(true);
+    expect(result.claimBoundary.join(" ")).toContain("produced the attributable range recommendation");
     expect(result.checks.find((check) => check.code === "EXACT_POSITION_BINDING")?.status).toBe("PASS");
     expect(result.checks.find((check) => check.code === "RANGE_WIDTH_POLICY")?.status).toBe("FAIL");
     expect(result.status).toBe("INCOMPATIBLE_CONSTRAINTS");
@@ -645,6 +662,7 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
       now: new Date("2026-08-30T12:03:00.000Z"),
     });
     expect(result.normalizedDeliverable.status).toBe("REFUSED_EXPIRED");
+    expect(result.attributableResult).toBe(true);
     expect(result.checks.find((check) => check.code === "NORMALIZED_EVIDENCE_GATE")?.status).toBe("FAIL");
     expect(result.eligibleForLpRebalance).toBe(false);
   });

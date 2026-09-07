@@ -166,6 +166,24 @@ describe("AiKi Yield dependency failures", () => {
     expect(result.checks[0]!.detail).toContain("incomplete or unsupported evidence");
   });
 
+  it.each([
+    ["valid hex that cannot decode as a uint256 ABI result", "0x1"],
+    ["a decoded uint256 supply rate that cannot be annualized", `0x${"f".repeat(64)}`],
+  ])("attributes %s to pinned verification rather than AiKi", async (_description, resultData) => {
+    const result = await compare(transport({
+      rpc: (body) => body.method === "eth_call"
+        ? Response.json({ jsonrpc: "2.0", id: body.id, result: resultData })
+        : undefined,
+    }));
+    expectUnavailable(result, "PINNED_STATE_UNAVAILABLE");
+    expect(result.checks[0]!.detail).toBe(
+      "PositionCrew could not independently verify the request's pinned Venus state: supply-rate decoding or annualization did not produce usable evidence. Reload current markets before retrying.",
+    );
+    expect(result.checks[0]!.detail).not.toContain(resultData);
+    expect(result.checks[0]!.detail).not.toMatch(/AbiDecoding|viem|Data size|safe integer/);
+    expect(result.boundary).toContain("does not establish that AiKi was offline");
+  });
+
   it("describes a declared provider failure without publishing its raw error", async () => {
     const result = await compare(transport({
       external: () => Response.json({ error: "upstream failed; secret=not-for-display" }),

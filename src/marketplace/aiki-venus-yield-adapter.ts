@@ -190,61 +190,72 @@ async function readPinnedSupplyState(
   request: YieldOptimizationRequest,
   fetchImpl: typeof fetch,
   rpcUrl: string,
-): Promise<{ rates: Map<string, bigint>; secondsPerBlock: number }> {
-  const blockNumber = pinnedBlock(request);
-  const priorBlockNumber = blockNumber > 120n ? blockNumber - 120n : 0n;
-  const blockTag = `0x${blockNumber.toString(16)}`;
-  const data = encodeFunctionData({ abi: VTOKEN_ABI, functionName: "supplyRatePerBlock" });
-  const markets = [...new Map(
-    [...request.currentPositions, ...request.opportunities].map((position) =>
-      [position.vaultOrMarket.toLowerCase(), position.vaultOrMarket] as const
-    ),
-  ).values()];
-  const rateEntriesPromise = Promise.all(markets.map(async (market, index) => {
-    const payload = await readPinnedRpcResponse(
-      fetchImpl,
-      rpcUrl,
-      {
-        jsonrpc: "2.0",
-        id: index + 1,
-        method: "eth_call",
-        params: [{ to: market, data }, blockTag],
-      },
-      JsonRpcResponseSchema,
-      blockNumber,
+): Promise<{ rates: Map<string, bigint>; secondsPerBlock: number; apyByMarket: Map<string, number> }> {
+  try {
+    const blockNumber = pinnedBlock(request);
+    const priorBlockNumber = blockNumber > 120n ? blockNumber - 120n : 0n;
+    const blockTag = `0x${blockNumber.toString(16)}`;
+    const data = encodeFunctionData({ abi: VTOKEN_ABI, functionName: "supplyRatePerBlock" });
+    const markets = [...new Map(
+      [...request.currentPositions, ...request.opportunities].map((position) =>
+        [position.vaultOrMarket.toLowerCase(), position.vaultOrMarket] as const
+      ),
+    ).values()];
+    const rateEntriesPromise = Promise.all(markets.map(async (market, index) => {
+      const payload = await readPinnedRpcResponse(
+        fetchImpl,
+        rpcUrl,
+        {
+          jsonrpc: "2.0",
+          id: index + 1,
+          method: "eth_call",
+          params: [{ to: market, data }, blockTag],
+        },
+        JsonRpcResponseSchema,
+        blockNumber,
+      );
+      const rate = decodeFunctionResult({
+        abi: VTOKEN_ABI,
+        functionName: "supplyRatePerBlock",
+        data: payload.result as `0x${string}`,
+      });
+      return [market.toLowerCase(), rate] as const;
+    }));
+    const readBlock = async (number: bigint, id: number) => {
+      const payload = await readPinnedRpcResponse(
+        fetchImpl,
+        rpcUrl,
+        {
+          jsonrpc: "2.0",
+          id,
+          method: "eth_getBlockByNumber",
+          params: [`0x${number.toString(16)}`, false],
+        },
+        JsonRpcBlockResponseSchema,
+        number,
+      );
+      return payload.result;
+    };
+    const [entries, block, priorBlock] = await Promise.all([
+      rateEntriesPromise,
+      readBlock(blockNumber, 10_001),
+      readBlock(priorBlockNumber, 10_002),
+    ]);
+    const secondsPerBlock = Math.max(
+      0.1,
+      Number(BigInt(block.timestamp) - BigInt(priorBlock.timestamp)) / 120,
     );
-    const rate = decodeFunctionResult({
-      abi: VTOKEN_ABI,
-      functionName: "supplyRatePerBlock",
-      data: payload.result as `0x${string}`,
-    });
-    return [market.toLowerCase(), rate] as const;
-  }));
-  const readBlock = async (number: bigint, id: number) => {
-    const payload = await readPinnedRpcResponse(
-      fetchImpl,
-      rpcUrl,
-      {
-        jsonrpc: "2.0",
-        id,
-        method: "eth_getBlockByNumber",
-        params: [`0x${number.toString(16)}`, false],
-      },
-      JsonRpcBlockResponseSchema,
-      number,
+    const apyByMarket = new Map(entries.map(([market, rate]) =>
+      [market, annualizedYieldBps(rate, secondsPerBlock)] as const
+    ));
+    return { rates: new Map(entries), secondsPerBlock, apyByMarket };
+  } catch (error) {
+    if (error instanceof YieldComparisonUnavailable) throw error;
+    throw new YieldComparisonUnavailable(
+      "PINNED_STATE_UNAVAILABLE",
+      "PositionCrew could not independently verify the request's pinned Venus state: supply-rate decoding or annualization did not produce usable evidence. Reload current markets before retrying.",
     );
-    return payload.result;
-  };
-  const [entries, block, priorBlock] = await Promise.all([
-    rateEntriesPromise,
-    readBlock(blockNumber, 10_001),
-    readBlock(priorBlockNumber, 10_002),
-  ]);
-  const secondsPerBlock = Math.max(
-    0.1,
-    Number(BigInt(block.timestamp) - BigInt(priorBlock.timestamp)) / 120,
-  );
-  return { rates: new Map(entries), secondsPerBlock };
+  }
 }
 
 export async function auditionAiKiVenusYield(
@@ -300,9 +311,7 @@ export async function auditionAiKiVenusYield(
       pinnedState.rates.get(route.market.toLowerCase()) !== BigInt(route.supplyRatePerBlock)
     );
     const pinnedRateBinding = exactMarketSet && mismatchedRateMarkets.length === 0;
-    const pinnedApyByMarket = new Map([...pinnedState.rates].map(([market, rate]) =>
-      [market, annualizedYieldBps(rate, pinnedState.secondsPerBlock)] as const
-    ));
+    const pinnedApyByMarket = pinnedState.apyByMarket;
     const requestApyBinding = [...request.currentPositions, ...request.opportunities].every((position) =>
       pinnedApyByMarket.get(position.vaultOrMarket.toLowerCase()) === position.grossApyBps
     );
