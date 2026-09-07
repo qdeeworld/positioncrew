@@ -168,13 +168,15 @@ export function buildProviderManifest(
           observationsRefetchedDuringExecution: false,
           persistence: "D1_REQUEST_RESULT_RECEIPT",
         },
-        historicalHire: {
-          url: absolute(origin, "/api/benchmark-hires"),
-          method: "POST",
-          evidenceMode: "HISTORICAL_FIXTURE",
-          observationTrust: "IMMUTABLE_HISTORICAL_INPUT_NOT_CURRENT_STATE",
-          persistence: "D1_REQUEST_RESULT_RECEIPT",
-        },
+        ...(provider.service === "YIELD_OPTIMIZATION" ? {} : {
+          historicalHire: {
+            url: absolute(origin, "/api/benchmark-hires"),
+            method: "POST",
+            evidenceMode: "HISTORICAL_FIXTURE",
+            observationTrust: "IMMUTABLE_HISTORICAL_INPUT_NOT_CURRENT_STATE",
+            persistence: "D1_REQUEST_RESULT_RECEIPT",
+          },
+        }),
       },
       boundary:
         "Public assessments cost $0.00 and do not collect the legacy listed testnet price. Direct provider jobs evaluate caller-supplied scenarios without authenticating their chain observations. The separate durable hire API supports three frozen historical tasks and four current block-pinned categories; current snapshot attestations are checked at admission, not re-fetched from chain during execution. Durable hires preserve request and result receipts in D1. No assessment moves funds, grants wallet authority, executes a protocol transaction, or proves external demand. Revalidate current state before any financial action.",

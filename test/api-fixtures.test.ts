@@ -330,13 +330,20 @@ describe("public fixture job boundary", () => {
             observationsRefetchedDuringExecution: false,
             persistence: "D1_REQUEST_RESULT_RECEIPT",
           },
-          historicalHire: {
-            evidenceMode: "HISTORICAL_FIXTURE",
-            observationTrust: "IMMUTABLE_HISTORICAL_INPUT_NOT_CURRENT_STATE",
-          },
         },
       },
     });
+    if (provider.service === "YIELD_OPTIMIZATION") {
+      expect(manifest).not.toHaveProperty("commerce.assessmentPaths.historicalHire");
+    } else {
+      expect(manifest).toHaveProperty("commerce.assessmentPaths.historicalHire", {
+        url: `${origin}/api/benchmark-hires`,
+        method: "POST",
+        evidenceMode: "HISTORICAL_FIXTURE",
+        observationTrust: "IMMUTABLE_HISTORICAL_INPUT_NOT_CURRENT_STATE",
+        persistence: "D1_REQUEST_RESULT_RECEIPT",
+      });
+    }
   });
 
   it("links the real-source report separately from the historical and independent status endpoints", () => {
