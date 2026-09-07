@@ -39,9 +39,9 @@ const expectedAacpOwner = "0xbad35fa6e368e90fc4faf63507f2d0a2fdf94baf";
 const referencePancakePositionId = "1456267";
 const expectedShadowGridClaimBoundary = [
   "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
-  "This legacy portfolio model starts with half the entire requested capital in base and half in quote, less gas; it does not derive initial inventory from the planner's emitted SELL orders.",
-  "The corrected planner may deploy less capital. These outcomes belong to the separate legacy 50/50 portfolio simulation, not performance or risk validation of that planner. Historical balances and outcomes have not been recalculated.",
-  "MATURE means collection thresholds passed, not profitability, financial correctness, or comparability with the corrected planner.",
+  "New V2 windows derive initial base from emitted SELL reservations and retain unused capital as quote cash after gas. Initial inventory is marked at the frozen mid price, not an executed purchase.",
+  "Legacy V1 windows retain their original half-budget base and half-budget quote model. Portfolio cohorts are reported separately; historical balances and outcomes have not been recalculated.",
+  "MATURE means collection thresholds passed within a portfolio cohort, not profitability or financial correctness. Legacy history cannot mature the corrected portfolio cohort.",
   "Conservative sampled crossings are simulations, not transactions, executable fills, realised PnL, strategy returns, or audited financial performance.",
   "The operator-scheduled record proves no external buyer, payment, revenue, demand, or Agent Advantage.",
 ];

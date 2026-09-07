@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import boundedGridFixture from "../fixtures/bounded-grid/bnb-usdt-grid.v1.json" with { type: "json" };
 import { BoundedGridRequestSchema } from "../src/contracts/index.js";
 import { createBoundedGridDeliverable } from "../src/providers/bounded-grid.js";
+import { canonicalHash } from "../src/core/canonical.js";
+import { canonicalJson } from "../src/commerce/fresh-hire-schema.js";
 import {
   SHADOW_GRID_FILL_MODEL,
   SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY,
   SHADOW_GRID_STRATEGY_VERSION,
+  SHADOW_GRID_LEGACY_PORTFOLIO,
+  SHADOW_GRID_PLAN_PORTFOLIO,
   calculateShadowGridTerminal,
   createShadowGridEvent,
   deriveShadowGridFills,
@@ -14,6 +18,7 @@ import {
   verifyShadowGridRun,
   type ShadowGridPriceSample,
   type ShadowGridRunBinding,
+  type ShadowGridPrecommitPayload,
 } from "../src/operations/bounded-grid-forward-shadow.js";
 
 type StoredEvent = Parameters<typeof verifyShadowGridRun>[0][number];
@@ -173,6 +178,93 @@ function terminalRun(ordinal: number, voided: boolean, negative = false): Stored
 }
 
 describe("bounded-grid forward shadow evidence", () => {
+  // Synthetic migration fixtures only: persisted production events are never rewritten.
+  function legacyFixture(events: StoredEvent[]): StoredEvent[] {
+    let previousEventHash: string | null = null;
+    return events.map((event) => {
+      const { eventHash: _oldHash, ...body } = parseShadowGridEvent(event);
+      if (body.eventType === "EPOCH_STARTED") delete body.payload.portfolioModel;
+      body.previousEventHash = previousEventHash;
+      const eventHash = canonicalHash(body);
+      previousEventHash = eventHash;
+      return { ...event, previousEventHash: body.previousEventHash, eventHash,
+        eventJson: canonicalJson({ ...body, eventHash }) };
+    });
+  }
+
+  function resizedPlan(): StoredEvent[] {
+    const events = precommittedRun();
+    const payload = parseShadowGridEvent(events[1]!).payload as unknown as ShadowGridPrecommitPayload;
+    payload.request.constraints.capitalUsd = "1000";
+    payload.request.constraints.estimatedGasUsd = "1";
+    payload.request.constraints.lowerPrice = "7";
+    payload.request.constraints.upperPrice = "13";
+    payload.request.marketState.midPrice = "10";
+    payload.request.marketState.venueFeeBps = 100;
+    payload.request.maxSlippageBps = 100;
+    payload.deliverable.decision = "BUILD_GRID";
+    payload.deliverable.orders = [
+      { side: "BUY", price: "8", baseAmount: "2", maximumQuoteAmount: "16.16" },
+      { side: "SELL", price: "12", baseAmount: "6.6330544973", maximumQuoteAmount: "79.5966539676" },
+    ];
+    return append(events.slice(0, 1), binding(), "PRECOMMITTED", events[1]!.recordedAt, { ...payload });
+  }
+
+  it("marks new epochs with a hashed plan portfolio and retains idle cash on a no-fill move", () => {
+    const events = resizedPlan();
+    expect(parseShadowGridEvent(events[0]!).payload.portfolioModel).toBe(SHADOW_GRID_PLAN_PORTFOLIO);
+    const observed = sample(binding().horizonEndsAt, "9.9");
+    expect(deriveShadowGridFills(events, observed)).toEqual([]);
+    const terminal = calculateShadowGridTerminal(events, observed);
+    expect(terminal.portfolioModel).toBe(SHADOW_GRID_PLAN_PORTFOLIO);
+    expect(terminal.finalBaseAmount).toBe("6.63305450");
+    expect(terminal.finalQuoteUsd).toBe("932.66945503");
+    expect(terminal.netOutcomeUsd).toBe("-1.66330545");
+    expect(terminal.gasUsd).toBe("1.00000000");
+  });
+
+  it("preserves legacy 50/50 arithmetic for unmarked precommitted windows", () => {
+    const events = legacyFixture(resizedPlan());
+    const before = JSON.stringify(events);
+    expect(verifyShadowGridRun(events).valid).toBe(true);
+    const terminal = calculateShadowGridTerminal(events, sample(binding().horizonEndsAt, "9.9"));
+    expect(terminal.portfolioModel).toBe(SHADOW_GRID_LEGACY_PORTFOLIO);
+    expect(terminal.netOutcomeUsd).toBe("-6.00000000");
+    expect(JSON.stringify(events)).toBe(before);
+  });
+
+  it("reconciles a buy fill against plan inventory, cash, fees and slippage", () => {
+    let events = resizedPlan();
+    const observed = sample(binding().horizonEndsAt, "7.9");
+    const fills = deriveShadowGridFills(events, observed);
+    expect(fills).toHaveLength(1);
+    expect(fills[0]).toMatchObject({ side: "BUY", baseAmount: "2.00000000",
+      grossQuoteUsd: "16.16000000", feeUsd: "0.16160000", slippageUsd: "0.16000000" });
+    events = append(events, binding(), "OBSERVED", observed.sampledAt, { ...observed });
+    events = append(events, binding(), "SHADOW_FILL", observed.sampledAt, fills[0]!);
+    const terminal = calculateShadowGridTerminal(events, observed);
+    expect(Number(terminal.finalBaseAmount)).toBeCloseTo(8.6330544973, 7);
+    expect(Number(terminal.finalQuoteUsd)).toBeCloseTo(916.347855027, 7);
+    expect(Number(terminal.finalEquityUsd)).toBeCloseTo(916.347855027 + 8.6330544973 * 7.9, 7);
+    expect(terminal.feesUsd).toBe("0.16160000");
+    expect(terminal.slippageUsd).toBe("0.16000000");
+    expect(verifyShadowGridRun(events).valid).toBe(true);
+  });
+
+  it("does not let mature legacy history mature the new portfolio cohort", () => {
+    const historical = Array.from({ length: 30 }, (_, index) => legacyFixture(terminalRun(index + 1, false)));
+    const projection = summarizeShadowGridRuns([...historical, terminalRun(100, false)], ORIGIN,
+      new Date("2026-10-01T00:00:00.000Z"));
+    expect(projection.model.portfolioModel).toBe("MIXED_SEPARATE_COHORTS");
+    expect(projection.status).toBe("COLLECTING");
+    expect(projection.maturity.mature).toBe(false);
+    expect(projection.summary.simulatedNetOutcomeUsd).toBeNull();
+    expect(projection.portfolioCohorts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ portfolioModel: SHADOW_GRID_LEGACY_PORTFOLIO, terminalWindowCount: 30, mature: true }),
+      expect.objectContaining({ portfolioModel: SHADOW_GRID_PLAN_PORTFOLIO, terminalWindowCount: 1, mature: false, simulatedNetOutcomeUsd: null }),
+    ]));
+  });
+
   it("rejects a mutated canonical event and a broken previous-hash link", () => {
     const events = precommittedRun();
     expect(verifyShadowGridRun(events)).toMatchObject({ valid: true });
