@@ -522,6 +522,8 @@ function verifyShadowGridWindow(envelope, summaryWindow) {
   };
 }
 
+import { verifyShadowGridPortfolioCohorts } from "./verify-shadow-grid-cohorts.mjs";
+
 async function verifyShadowGridLedger(ledger) {
   assert(
     ledger.schemaVersion ===
@@ -629,10 +631,10 @@ async function verifyShadowGridLedger(ledger) {
     maturity.nonVoidRatePct === expectedNonVoidRate,
     "Forward-shadow non-void rate does not match retained terminal windows",
   );
+  const mixedPortfolios = verifyShadowGridPortfolioCohorts(ledger);
   const expectedMature =
-    maturity.observedDays >= 7 &&
-    summary.terminalWindowCount >= 30 &&
-    (maturity.nonVoidRatePct ?? 0) >= 90;
+    !mixedPortfolios &&
+    ledger.portfolioCohorts.some((cohort) => cohort.openedWindowCount > 0 && cohort.mature);
   assert(
     maturity.mature === expectedMature,
     "Forward-shadow maturity status does not follow its published thresholds",
@@ -692,6 +694,7 @@ async function verifyShadowGridLedger(ledger) {
     model: ledger.model,
     maturity: ledger.maturity,
     summary: ledger.summary,
+    portfolioCohorts: ledger.portfolioCohorts,
     claimBoundary: ledger.claimBoundary,
     verifiedRecentWindows: verifiedWindows,
   };

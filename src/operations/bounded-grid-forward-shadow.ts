@@ -538,15 +538,19 @@ export function summarizeShadowGridRuns(
     const ended = members.filter((window) => window.terminalAt !== null);
     const voidCount = ended.filter((window) => window.state === "VOID_SOURCE_GAP").length;
     const outcomes = ended.filter((window) => window.state === "CLOSED" || window.state === "RISK_EXIT");
-    const days = members.length === 0 ? 0 : Math.max(0,
-      (now.getTime() - Math.min(...members.map((window) => Date.parse(window.startedAt)))) / 86_400_000);
+    const firstWindowStartedAt = members.length === 0 ? null
+      : new Date(Math.min(...members.map((window) => Date.parse(window.startedAt)))).toISOString();
+    const days = firstWindowStartedAt === null ? 0 : Math.max(0,
+      (now.getTime() - Date.parse(firstWindowStartedAt)) / 86_400_000);
     const rate = ended.length === 0 ? null : (ended.length - voidCount) / ended.length * 100;
     const cohortMature = valid && days >= 7 && ended.length >= 30 && (rate ?? 0) >= 90;
     return {
       portfolioModel: model,
       openedWindowCount: members.length,
       terminalWindowCount: ended.length,
+      voidWindowCount: voidCount,
       returnBearingWindowCount: outcomes.length,
+      firstWindowStartedAt,
       observedDays: Number(days.toFixed(2)),
       nonVoidRatePct: rate === null ? null : Number(rate.toFixed(2)),
       mature: cohortMature,

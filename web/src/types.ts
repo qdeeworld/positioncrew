@@ -972,8 +972,28 @@ export type BoundedGridForwardShadowLedgerStatus =
   | "DEGRADED"
   | "SOURCE_UNAVAILABLE";
 
+export type ShadowGridPortfolioModel =
+  | "LEGACY_HALF_BUDGET_BASE_HALF_QUOTE_V1"
+  | "PLAN_SELL_RESERVATIONS_IDLE_CASH_V2";
+
+export interface BoundedGridPortfolioCohort {
+  portfolioModel: ShadowGridPortfolioModel;
+  openedWindowCount: number;
+  terminalWindowCount: number;
+  voidWindowCount: number;
+  returnBearingWindowCount: number;
+  firstWindowStartedAt: string | null;
+  observedDays: number;
+  nonVoidRatePct: number | null;
+  mature: boolean;
+  positiveWindowCount: number;
+  negativeWindowCount: number;
+  simulatedNetOutcomeUsd: string | null;
+}
+
 export interface BoundedGridForwardShadowWindow {
   windowId: string;
+  portfolioModel?: ShadowGridPortfolioModel;
   state: BoundedGridForwardShadowState;
   pair: "WBNB/USDT";
   sourceHireId: string | null;
@@ -998,6 +1018,8 @@ export interface BoundedGridForwardShadowLedger {
   model: {
     name: "CONSERVATIVE_SAMPLED_CROSSING_V1";
     strategyVersion: "positioncrew:bounded-grid-forward-shadow:v1";
+    portfolioModel?: ShadowGridPortfolioModel | "MIXED_SEPARATE_COHORTS";
+    activePortfolioModel?: ShadowGridPortfolioModel;
     pair: "WBNB/USDT";
     capitalMode: "ZERO_FUND_SHADOW";
     cadenceMinutes: 60;
@@ -1005,6 +1027,7 @@ export interface BoundedGridForwardShadowLedger {
     horizonMinutes: 15;
   };
   maturity: {
+    mixedPortfolios?: boolean;
     observedDays: number;
     terminalWindowCount: number;
     minimumObservedDays: 7;
@@ -1025,6 +1048,8 @@ export interface BoundedGridForwardShadowLedger {
     negativeWindowCount: number;
     simulatedNetOutcomeUsd: string | null;
   };
+  // Optional only for rendering archived pre-migration ledger responses.
+  portfolioCohorts?: BoundedGridPortfolioCohort[];
   recentWindows: BoundedGridForwardShadowWindow[];
   claimBoundary: string[];
 }
