@@ -951,8 +951,8 @@ test("serves and renders four evidence-only external comparison candidates", asy
   for (const name of ["Health Factor Monitor", "BNB LP Range Rebalancer", "BNB Yield Optimizer", "GridMaster Ops"]) {
     await expect(region.getByRole("heading", { name })).toBeVisible();
   }
-  await expect(region.getByText("Service: Endpoint reachable", { exact: true })).toHaveCount(3);
-  await expect(region.getByText("Service: Listed only", { exact: true })).toHaveCount(1);
+  await expect(region.getByText("At last check: Endpoint responded", { exact: true })).toHaveCount(3);
+  await expect(region.getByText("At last check: Listed only", { exact: true })).toHaveCount(1);
   await expect(region.getByText("Quote required", { exact: true })).toHaveCount(2);
   await expect(region.getByText("Not published", { exact: true })).toHaveCount(1);
   await expect(region.getByText("Not verified", { exact: true })).toHaveCount(1);

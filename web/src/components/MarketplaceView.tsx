@@ -203,11 +203,11 @@ export function MarketplaceView({
                             onClick={() => onSelect(provider.service)}
                           >
                             <span className="provider-icon">{Icon && <Icon size={17} aria-hidden="true" />}</span>
-                            <span><strong>{provider.name}</strong><small>ERC-8004 #{provider.identity.agentId} · {shortHash(provider.providerId, 12)}</small></span>
+                            <span><strong>{provider.name}</strong><small>ERC-8004 #{provider.identity.agentId} · {provider.identity.explorerUrl.startsWith("https://testnet.bscscan.com/") ? "BSC testnet evidence" : "Identity evidence"} · {shortHash(provider.providerId, 12)}</small></span>
                           </button>
                         </td>
                         <td><span className="category-label">{provider.category}</span></td>
-                        <td><span className="trial-price"><strong>{provider.price.amount} {provider.price.token}</strong><small>Trial free</small></span></td>
+                        <td><span className="trial-price"><strong>$0.00</strong><small>Current assessment · no payment</small></span></td>
                         <td><span className="verification-label"><BadgeCheck size={14} /> {result?.result.evaluation.score ?? "-"}/100</span></td>
                         <td><span className={`availability-label ${availability.className}`}><i /> {availability.label}</span></td>
                       </tr>
@@ -256,7 +256,7 @@ export function MarketplaceView({
                 <dl className="provider-facts">
                   <div><dt><Server size={14} /> Endpoint</dt><dd><code>{selected.method} {selected.endpoint}</code></dd></div>
                   <div><dt><Radio size={14} /> Health</dt><dd><code>GET {selected.healthEndpoint}</code></dd></div>
-                  <div><dt><BadgeCheck size={14} /> BSC identity</dt><dd><a href={selected.identity.explorerUrl} target="_blank" rel="noreferrer">ERC-8004 #{selected.identity.agentId} <ExternalLink size={11} aria-hidden="true" /></a></dd></div>
+                  <div><dt><BadgeCheck size={14} /> Identity evidence</dt><dd><a href={selected.identity.explorerUrl} target="_blank" rel="noreferrer">ERC-8004 #{selected.identity.agentId} · {selected.identity.explorerUrl.startsWith("https://testnet.bscscan.com/") ? "BSC testnet" : "View network"} <ExternalLink size={11} aria-hidden="true" /></a></dd></div>
                   <div><dt><Code2 size={14} /> Machine contract</dt><dd><a href={selected.manifestEndpoint} target="_blank" rel="noreferrer">Inspect provider manifest <ExternalLink size={11} aria-hidden="true" /></a></dd></div>
                   <div><dt><Database size={14} /> Request</dt><dd><code>{selected.requestSchema}</code></dd></div>
                   <div><dt><Code2 size={14} /> Deliverable</dt><dd><code>{selected.deliverableSchema}</code></dd></div>
@@ -294,7 +294,7 @@ export function MarketplaceView({
             <div>
               <span className="page-kicker">Discovery pool, not eligibility</span>
               <h2 id="external-comparison-heading">External agents still have to prove the job.</h2>
-              <p>These ERC-8004 identities are discovery leads, not automatic recommendations. Exact-job admission happens only after a current request is loaded.</p>
+              <p>These historical ERC-8004 observations are discovery leads, not current availability checks or recommendations. The date on each card describes that saved observation. Exact-job admission requires a fresh request and supported provider adapter.</p>
             </div>
             {externalComparisons ? (
               <span className="external-snapshot-pin">BSC #{Number(externalComparisons.chain.blockNumber).toLocaleString("en-US")}</span>
@@ -316,9 +316,9 @@ export function MarketplaceView({
                     <h3>{candidate.name}</h3>
                     <code>ERC-8004 #{candidate.agentTokenId} · {shortHash(candidate.identity.owner, 12)}</code>
                     <div className="external-candidate-statuses">
-                      <span>Registry: Listed</span>
-                      <span className={candidate.serviceReachability.status === "REACHABLE" ? "reachable" : "listed"}>
-                        Service: {candidate.serviceReachability.status === "REACHABLE" ? "Endpoint reachable" : "Listed only"}
+                      <span>Registry: Listed at snapshot</span>
+                      <span className="listed">
+                        At last check: {candidate.serviceReachability.status === "REACHABLE" ? "Endpoint responded" : "Listed only"}
                       </span>
                     </div>
                     <dl className="external-candidate-facts">
@@ -329,7 +329,7 @@ export function MarketplaceView({
                       {candidate.feedback.recordCount} indexed feedback · {candidate.validation.recordCount} indexed validations
                     </p>
                     <time dateTime={candidate.serviceReachability.checkedAt}>
-                      Checked {exactUtc(candidate.serviceReachability.checkedAt)}
+                      Historical check: {exactUtc(candidate.serviceReachability.checkedAt)}
                     </time>
                     <div className="external-candidate-links">
                       <a href={candidate.identity.sourceUrl} target="_blank" rel="noreferrer">Identity <ExternalLink size={11} aria-hidden="true" /></a>
