@@ -158,9 +158,11 @@ export function createBoundedGridDeliverable(
     };
   }
   const respectsRiskLimits = (plan: ReturnType<typeof planForBudget>) =>
-    plan.maximumInventory <= inventoryLimit && plan.worstCaseLoss <= lossLimit;
+    plan.maximumInventory <= inventoryLimit && plan.worstCaseLoss <= lossLimit
+      && plan.worstCaseLoss <= capital;
 
-  // Risk is monotone in funded order size. Keep unused capital outside this grid.
+  // Risk and required funding are monotone in order size. Reserve all modeled
+  // costs from capital before committing orders; future sells cannot fund them.
   let budgetLower = 0n;
   let budgetUpper = capital;
   let plan = planForBudget(capital);
@@ -186,7 +188,7 @@ export function createBoundedGridDeliverable(
       now,
       evidence.expiresAt,
       "NO_ACTION",
-      "No grid size meets the profit target, reachable inventory cap, zero-price stress loss budget, and order precision limits.",
+      "No grid size meets the profit target, total capital including modeled costs, reachable inventory cap, zero-price stress loss budget, and order precision limits.",
       [
         `After risk sizing: projected net ${formatFixed(netProfit, 6)} USD; zero-price stress loss ${formatFixed(worstCaseLoss, 6)} USD; in-range inventory bound ${formatFixed(maximumInventory, 6)} USD.`,
         "The loss model includes all funded base inventory falling to zero plus estimated costs; it is not an execution-enforced loss guarantee.",
@@ -234,6 +236,7 @@ export function createBoundedGridDeliverable(
       "No hard loss guarantee: gaps, cancellation failures, and costs above estimates are not execution-enforced. A lowerPrice cancellation is not a stop-loss guarantee.",
       "Assumes quote remains worth 1 USD, pre-funded SELL base, no leverage, and each order fills at most once. Replacement orders require a fresh inventory and risk check.",
       "Unused requested capital remains outside the proposed orders. Cycle profit is hypothetical; additional fills require new authorization and risk checks.",
+      "Total capital reserves initial SELL inventory, all BUY reservations, and modeled fees, slippage, and gas without assuming any future SELL proceeds.",
     ],
   });
 }

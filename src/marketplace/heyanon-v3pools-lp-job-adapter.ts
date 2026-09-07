@@ -54,6 +54,7 @@ const McpResponseSchema = z.object({
   jsonrpc: z.literal("2.0"),
   id: z.union([z.string(), z.number()]),
   result: z.object({
+    isError: z.boolean().optional(),
     content: z.array(z.object({ type: z.literal("text"), text: z.string() }).passthrough()).min(1),
   }).passthrough(),
 }).passthrough();
@@ -168,6 +169,10 @@ async function callTool(
     if (!response.ok) throw new Error(`HeyAnon V3 MCP returned HTTP ${response.status}`);
     const raw = await guarded("RESPONSE_BODY", () => response.text());
     const mcp = McpResponseSchema.parse(parseEventStream(raw));
+    if (mcp.id !== name) throw new Error(`HeyAnon V3 MCP response ID does not match ${name}`);
+    if ("error" in mcp || mcp.result.isError === true) {
+      throw new Error(`HeyAnon V3 MCP reported a tool error for ${name}`);
+    }
     const content = mcp.result.content.find((item) => item.type === "text");
     if (!content) throw new Error(`HeyAnon V3 MCP returned no ${name} result`);
     return JSON.parse(content.text) as unknown;
@@ -455,6 +460,21 @@ export async function auditionHeyAnonV3LpJob(
     pinnedPosition.liquidity === request.position.liquidity;
   const poolBinding = pinnedPool === request.pool.toLowerCase();
   const tickSpacingBinding = pinnedTickSpacing === request.constraints.tickSpacing;
+  const token0Symbol = request.token0.symbol.trim().toLowerCase();
+  const token1Symbol = request.token1.symbol.trim().toLowerCase();
+  const providerTokenPairBinding =
+    priceEnvelope.data.token0Symbol.trim().toLowerCase() === token0Symbol &&
+    priceEnvelope.data.token1Symbol.trim().toLowerCase() === token1Symbol;
+  // The provider publishes percent fees; compare exact fixed-point units rather
+  // than rounding a contradictory declaration into the NFT's fee tier.
+  const providerFeeBinding = parseFixed(priceEnvelope.data.fee.slice(0, -1)) * 10_000n ===
+    BigInt(feeTier) * FIXED_SCALE;
+  // HeyAnon's range label uses token1/token0, matching its raw tick-price range.
+  // Case and surrounding whitespace are formatting, not token aliases.
+  const providerRangeSymbols = rangeEnvelope.data.pool.split("/").map((symbol) => symbol.trim().toLowerCase());
+  const providerRangePoolBinding = providerRangeSymbols.length === 2 &&
+    providerRangeSymbols[0] === token1Symbol && providerRangeSymbols[1] === token0Symbol;
+  const providerMarketBinding = providerTokenPairBinding && providerFeeBinding && providerRangePoolBinding;
   const priceBps = relativeDifferenceBps(
     Number(priceEnvelope.data.poolPrice),
     Number(request.marketState.token1PriceUsd) / Number(request.marketState.token0PriceUsd),
@@ -483,6 +503,27 @@ export async function auditionHeyAnonV3LpJob(
         : `The request tick spacing does not match fee tier ${feeTier}.`,
     },
     {
+      code: "PROVIDER_TOKEN_PAIR_BINDING",
+      status: providerTokenPairBinding ? "PASS" as const : "FAIL" as const,
+      detail: providerTokenPairBinding
+        ? "The provider price response declares the requested token symbols in their original order."
+        : "The provider price response declares a different token pair or token order.",
+    },
+    {
+      code: "PROVIDER_FEE_TIER_BINDING",
+      status: providerFeeBinding ? "PASS" as const : "FAIL" as const,
+      detail: providerFeeBinding
+        ? `The provider fee declaration exactly matches the pinned NFT fee tier ${feeTier}.`
+        : "The provider fee declaration does not match the pinned NFT fee tier.",
+    },
+    {
+      code: "PROVIDER_RANGE_POOL_BINDING",
+      status: providerRangePoolBinding ? "PASS" as const : "FAIL" as const,
+      detail: providerRangePoolBinding
+        ? "The provider range label declares the requested token1/token0 market."
+        : "The provider range label declares a different market or price orientation.",
+    },
+    {
       code: "CURRENT_PRICE_COHERENCE",
       status: pricePass ? "PASS" as const : "FAIL" as const,
       detail: pricePass
@@ -491,8 +532,10 @@ export async function auditionHeyAnonV3LpJob(
     },
     {
       code: "ATTRIBUTABLE_RANGE_RECOMMENDATION",
-      status: "PASS" as const,
-      detail: `The listed provider returned the ${shortcut} preset chosen from the buyer's unchanged width bounds for the exact pool and fee tier.`,
+      status: providerMarketBinding ? "PASS" as const : "FAIL" as const,
+      detail: providerMarketBinding
+        ? `The listed provider returned the ${shortcut} preset with market declarations matching the request and pinned fee tier.`
+        : "The endpoint returned a range, but contradictory market declarations prevent attributing it to this exact job.",
     },
     {
       code: "RANGE_CONTAINS_CURRENT_TICK",

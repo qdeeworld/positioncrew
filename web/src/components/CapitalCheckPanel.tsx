@@ -115,7 +115,7 @@ async function fetchJson<T>(path: string, signal: AbortSignal): Promise<T> {
       const detail = Array.isArray(body?.details) ? String(body.details[0]) : `HTTP ${response.status}`;
       throw new Error(detail);
     }
-    return response.json() as Promise<T>;
+    return await response.json() as T;
   } finally {
     window.clearTimeout(timeout);
     signal.removeEventListener("abort", abortRequest);
@@ -285,13 +285,19 @@ export function CapitalCheckPanel({ onOpenJob }: { onOpenJob: (service: ServiceI
       <form className="capital-check-form" onSubmit={(event) => { event.preventDefault(); void scanCapital(); }}>
         <label>
           <span>BSC wallet address</span>
-          <div><WalletCards size={17} aria-hidden="true" /><input value={account} onChange={(event) => { cancelScan(); setAccount(event.target.value); setCards(null); setError(null); }} placeholder="0x..." spellCheck={false} autoComplete="off" aria-invalid={account.length > 0 && !validAccount} /></div>
-          <small>Used for the block-pinned Venus account read.</small>
+          <div><WalletCards size={17} aria-hidden="true" /><input value={account} onChange={(event) => { cancelScan(); setAccount(event.target.value); setCards(null); setError(null); }} placeholder="0x..." spellCheck={false} autoComplete="off" aria-invalid={account.length > 0 && !validAccount}
+                aria-describedby="capital-wallet-help" /></div>
+          <small id="capital-wallet-help" aria-live="polite">{account.length > 0 && !validAccount
+              ? "Enter a 0x-prefixed BSC address with exactly 40 hexadecimal characters."
+              : "Used for the block-pinned Venus account read. Enter a 0x-prefixed, 40-character hexadecimal address."}</small>
         </label>
         <label>
           <span>PancakeSwap V3 NFT ID <em>optional</em></span>
-          <div><Layers3 size={17} aria-hidden="true" /><input value={positionId} onChange={(event) => { cancelScan(); setPositionId(event.target.value); setCards(null); setError(null); }} placeholder="Position token ID" inputMode="numeric" pattern="[0-9]*" aria-invalid={!validPositionId} /></div>
-          <small>Required only to inspect a specific LP position.</small>
+          <div><Layers3 size={17} aria-hidden="true" /><input value={positionId} onChange={(event) => { cancelScan(); setPositionId(event.target.value); setCards(null); setError(null); }} placeholder="Position token ID" inputMode="numeric" pattern="[0-9]*" aria-invalid={!validPositionId}
+                aria-describedby="capital-nft-help" /></div>
+          <small id="capital-nft-help" aria-live="polite">{!validPositionId
+              ? "Enter a positive whole-number NFT ID, with no spaces or leading zeroes (up to 78 digits), or leave it empty."
+              : "Required only to inspect a specific LP position. Use a positive whole-number NFT ID, or leave empty."}</small>
         </label>
         <button type="submit" disabled={scanning || !validAccount || !validPositionId}>
           {scanning ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : cards ? <RefreshCw size={17} aria-hidden="true" /> : <Radar size={17} aria-hidden="true" />}
