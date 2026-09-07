@@ -97,16 +97,18 @@ function receiptIdFromHash(): string | null {
   return window.location.hash.match(/^#jobs\/receipt\/([0-9a-f-]{36})$/i)?.[1] ?? null;
 }
 
-function publicRequestError(error: unknown, fallback: string): string {
+function publicRequestError(error: unknown, fallback: string, phase: "hire" | "receipt" = "hire"): string {
   const message = error instanceof Error ? error.message : fallback;
   if (/expired|expiry|freshness window|stale (?:request|observation|evidence)/i.test(message)) {
     return "This saved request is no longer current. Reload the position or markets, then compare providers again before starting a new assessment. Existing receipts remain historical evidence.";
   }
-  if (/verification RPC unavailable|BSC RPC.*(?:unavailable|403)|403 Forbidden/i.test(message)) {
+  if (/verification RPC unavailable|BSC RPC.*(?:unavailable|403)/i.test(message)) {
     return "Live chain verification is temporarily unavailable. Retry the current check when the data service recovers; do not loosen your limits to continue.";
   }
   if (/timed out|did not complete within|Failed to fetch|NetworkError/i.test(message)) {
-    return "The request could not finish in time. A saved job may still exist: check Recent jobs and retry its status before creating another hire.";
+    return phase === "receipt"
+      ? "The receipt could not be loaded in time. Use Retry receipt to retrieve the existing result; do not create another hire."
+      : "The hire request could not finish in time. Use Retry current hire to recover this request with the same idempotency key. If the job is already saved in Recent jobs, retry its status instead of creating another hire.";
   }
   return message;
 }
@@ -430,7 +432,7 @@ export default function App() {
       if (controller.signal.aborted) return;
       setActiveJob(null);
       setMarketplaceTrace(null);
-      setReceiptError(publicRequestError(receiptError, "Receipt unavailable"));
+      setReceiptError(publicRequestError(receiptError, "Receipt unavailable", "receipt"));
     } finally {
       if (receiptLoadController.current === controller) {
         receiptLoadController.current = null;
