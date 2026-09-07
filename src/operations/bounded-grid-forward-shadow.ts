@@ -13,6 +13,9 @@ export const SHADOW_GRID_HORIZON_MINUTES = 15;
 export const SHADOW_GRID_SAMPLE_CADENCE_MINUTES = 5;
 export const SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY = [
   "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
+  "This legacy portfolio model starts with half the entire requested capital in base and half in quote, less gas; it does not derive initial inventory from the planner's emitted SELL orders.",
+  "The corrected planner may deploy less capital. These outcomes belong to the separate legacy 50/50 portfolio simulation, not performance or risk validation of that planner. Historical balances and outcomes have not been recalculated.",
+  "MATURE means collection thresholds passed, not profitability, financial correctness, or comparability with the corrected planner.",
   "Conservative sampled crossings are simulations, not transactions, executable fills, realised PnL, strategy returns, or audited financial performance.",
   "The operator-scheduled record proves no external buyer, payment, revenue, demand, or Agent Advantage.",
 ] as const;
@@ -511,6 +514,10 @@ export function summarizeShadowGridRuns(
     model: {
       name: SHADOW_GRID_FILL_MODEL,
       strategyVersion: SHADOW_GRID_STRATEGY_VERSION,
+      portfolioModel: "LEGACY_HALF_BUDGET_BASE_HALF_QUOTE_V1" as const,
+      initialBase: "capitalUsd / (2 * initialMidPriceUsd)",
+      initialQuote: "capitalUsd / 2 - estimatedGasUsd",
+      plannerPortfolioAligned: false,
       pair: "WBNB/USDT" as const,
       capitalMode: "ZERO_FUND_SHADOW" as const,
       cadenceMinutes: 60 as const,

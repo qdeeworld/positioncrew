@@ -72,8 +72,11 @@ export function createBscVerificationRpc(
           throw new AttemptError("RPC transport failed", !options.signal?.aborted);
         }
         if (!response.ok) {
+          // An endpoint can deny this read while another already-approved public
+          // transport remains available. Never expand the allowlist, forward
+          // credentials, or retry the external provider to recover this prerequisite.
           throw new AttemptError(`HTTP ${response.status}`,
-            response.status === 408 || response.status === 429 || response.status >= 500);
+            response.status === 403 || response.status === 408 || response.status === 429 || response.status >= 500);
         }
         let value: unknown;
         try { value = await response.json(); }
