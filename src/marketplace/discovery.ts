@@ -124,11 +124,21 @@ export function buildProviderManifest(
     },
     pricing: {
       ...provider.price,
+      scope: "LEGACY_LISTED_TESTNET_PRICE_NOT_COLLECTED_BY_PUBLIC_ASSESSMENTS",
+      publicAssessment: {
+        amount: "0",
+        token: "NONE",
+        directCostUsd: "0.00",
+        walletRequired: false,
+        settlement: "NO_PAYMENT",
+      },
       judgeTrial: {
         amount: "0",
         token: "NONE",
         walletRequired: false,
         settlement: "NO_PAYMENT",
+        deprecated: true,
+        replacement: "pricing.publicAssessment",
       },
     },
     verification: {
@@ -142,8 +152,34 @@ export function buildProviderManifest(
       readinessUrl: absolute(origin, "/api/commerce/aacp"),
       freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
       freshCurrentHireUrl: absolute(origin, "/api/benchmark-hires"),
+      assessmentPaths: {
+        callerSuppliedScenario: {
+          url: absolute(origin, provider.endpoint),
+          method: provider.method,
+          evidenceMode: "CALLER_SUPPLIED_OBSERVATIONS",
+          observationTrust: "CALLER_SUPPLIED_NOT_CHAIN_AUTHENTICATED",
+          persistence: "IN_MEMORY_CONFORMANCE",
+        },
+        currentHire: {
+          url: absolute(origin, "/api/benchmark-hires"),
+          method: "POST",
+          evidenceMode: "CURRENT_BLOCK_PINNED",
+          observationTrust: "SERVER_ISSUED_ATTESTATION_AT_ADMISSION",
+          observationsRefetchedDuringExecution: false,
+          persistence: "D1_REQUEST_RESULT_RECEIPT",
+        },
+        ...(provider.service === "YIELD_OPTIMIZATION" ? {} : {
+          historicalHire: {
+            url: absolute(origin, "/api/benchmark-hires"),
+            method: "POST",
+            evidenceMode: "HISTORICAL_FIXTURE",
+            observationTrust: "IMMUTABLE_HISTORICAL_INPUT_NOT_CURRENT_STATE",
+            persistence: "D1_REQUEST_RESULT_RECEIPT",
+          },
+        }),
+      },
       boundary:
-        "The public endpoint supports three frozen historical-fixture hires and four current block-referenced BSC hires. Both are $0 no-wallet analysis paths with server-persisted request and result receipts; neither collects the listed price, independently verifies caller-supplied observations, executes a protocol transaction, or proves external demand.",
+        "Public assessments cost $0.00 and do not collect the legacy listed testnet price. Direct provider jobs evaluate caller-supplied scenarios without authenticating their chain observations. The separate durable hire API supports three frozen historical tasks and four current block-pinned categories; current snapshot attestations are checked at admission, not re-fetched from chain during execution. Durable hires preserve request and result receipts in D1. No assessment moves funds, grants wallet authority, executes a protocol transaction, or proves external demand. Revalidate current state before any financial action.",
     },
   };
 }
@@ -169,6 +205,7 @@ export function buildMarketplaceManifest(
     operatingRecordUrl: absolute(origin, "/api/operations/production"),
     marketplaceDeliveryEvidenceUrl: absolute(origin, "/api/benchmarks/marketplace-provenance"),
     founderAgentAdvantageStatusUrl: absolute(origin, "/api/benchmarks/founder-comparison/status"),
+    realSourceFounderReportUrl: absolute(origin, "/evidence/real-source-founder-2026-09-06/index.html"),
     independentAgentAdvantageStatusUrl: absolute(origin, "/api/benchmarks/status"),
     externalComparisonSnapshotUrl: absolute(origin, EXTERNAL_COMPARISON_SNAPSHOT_ROUTE),
     providerContractPreflightUrl: absolute(origin, PROVIDER_CONTRACT_PREFLIGHT_ROUTE),
@@ -191,6 +228,8 @@ export function buildMarketplaceManifest(
       settlement: "IN_MEMORY_CONFORMANCE",
       aacp: "PRODUCTION_RUNTIME_PENDING",
       judgeTrial: "NO_WALLET_PROVIDER_CALL",
+      publicAssessment: "ZERO_COST_UNSIGNED_PLAN_OR_REFUSAL_NO_PAYMENT",
+      legacyJudgeTrialAlias: "claims.judgeTrial describes the public assessment, not a separate evaluator-only journey.",
       freshHistoricalHire: "D1_PERSISTED_ZERO_COST_HISTORICAL_FIXTURE",
       freshCurrentHire: "D1_PERSISTED_ZERO_COST_CURRENT_BLOCK_PINNED",
       externalComparisons: "FOUR_THIRD_PARTY_EVIDENCE_ONLY_NON_ACTIVATABLE",
@@ -200,6 +239,8 @@ export function buildMarketplaceManifest(
       agentAdvantage: "FOUNDER_REPORT_PUBLISHED_INDEPENDENT_EVALUATION_PENDING",
       agentAdvantageBoundary:
         "The published founder comparison is historical, non-independent and non-blind. Its publication does not establish current-task advantage or a completed independent evaluation; consult the separate status endpoints.",
+      realSourceFounderReportBoundary:
+        "The separately linked real-source report contains three founder-operated paired assessments with AI-assisted preparation and non-blind scoring. Yield uses hypothetical principal. Different human and automated timing boundaries do not establish a controlled speedup, independent demand, or automatic sponsor acceptance.",
       lpProviderSelection: "EXPLICIT_CHOICE_FROM_COMPATIBLE_CURRENT_AUDITION_NO_SILENT_FALLBACK",
     },
   };
@@ -644,7 +685,7 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
       title: "PositionCrew Provider API",
       version: "1.0.0",
       description:
-        "Machine-readable contracts for four bounded BSC capital providers. Three frozen historical tasks expose a separate D1-persisted $0 no-wallet hire and receipt path. Interactive simulations do not become marketplace evidence, and paid settlement or external demand is not claimed.",
+        "Machine-readable contracts for four bounded BSC capital providers. Public assessments cost $0.00 with no wallet or payment. Direct provider jobs evaluate caller-supplied scenarios; the separate D1 hire path preserves four current block-pinned categories and three historical tasks. Current snapshot attestations are checked at admission, without re-fetching chain state during execution. Outputs are unsigned plans or refusals, not capital transactions, paid settlement, or external demand.",
     },
     servers: [{ url: origin }],
     paths,
