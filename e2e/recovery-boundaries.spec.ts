@@ -20,7 +20,7 @@ async function createdChain(now: number, lifetime = 300_000) {
   return {
     schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
     hire: { hireId, service: "LENDING_RESCUE", benchmarkSlug, providerSlug: task.providerSlug,
-      providerId: task.providerId, request, requestHash: await sha256Commitment(request),
+      providerId: "recovery-fixture-provider", request, requestHash: await sha256Commitment(request),
       evidenceMode: "CURRENT_BLOCK_PINNED", createdAt: new Date(now).toISOString(),
       evidence: { evidenceClass: "CURRENT_BLOCK_PINNED", source: { observedAt: new Date(now).toISOString() } } },
     job: { jobId: "recovery-test-job", state: "CREATED", status: "HIRE_RECORDED", error: null },
@@ -61,9 +61,9 @@ test("capital inputs explain why checking is unavailable", async ({ page }) => {
   await nft.fill("-1");
   await expect(nft).toHaveAttribute("aria-describedby", "capital-nft-help");
   await expect(page.locator("#capital-nft-help")).toContainText("positive whole-number NFT ID");
-  await expect(page.getByRole("button", { name: "Check my BSC capital", exact: true })).toBeDisabled();
+  await expect(page.locator(".capital-check-form").getByRole("button", { name: "Check my BSC capital", exact: true })).toBeDisabled();
   await nft.fill("");
-  await expect(page.getByRole("button", { name: "Check my BSC capital", exact: true })).toBeEnabled();
+  await expect(page.locator(".capital-check-form").getByRole("button", { name: "Check my BSC capital", exact: true })).toBeEnabled();
 });
 
 test("capital scan times out even when only the response body stalls", async ({ page }) => {
@@ -71,7 +71,7 @@ test("capital scan times out even when only the response body stalls", async ({ 
   await stallBody(page, "capital");
   await page.goto("/#marketplace");
   await page.locator(".capital-check-form input").first().fill("0x0000000000000000000000000000000000000001");
-  await page.getByRole("button", { name: "Check my BSC capital", exact: true }).click();
+  await page.locator(".capital-check-form").getByRole("button", { name: "Check my BSC capital", exact: true }).click();
   await page.clock.fastForward(12_500);
   await expect(page.getByText("0/4 ready", { exact: true })).toBeVisible();
   await expect(page.getByText("No current jobs could be determined.", { exact: true })).toBeVisible();
