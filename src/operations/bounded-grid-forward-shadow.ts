@@ -611,7 +611,10 @@ export function summarizeShadowGridRuns(
       simulatedNetOutcomeUsd: mature ? fixed(aggregate) : null,
     },
     portfolioCohorts,
-    recentWindows: windows.sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)).slice(0, 10),
+    // Complete retained membership manifest. Each entry points to its committed
+    // snapshot head; verifiers must derive model/epoch from the opening event.
+    cohortWindows: windows,
+    recentWindows: [...windows].sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)).slice(0, 10),
     claimBoundary: [...SHADOW_GRID_PUBLIC_CLAIM_BOUNDARY],
   };
 }
