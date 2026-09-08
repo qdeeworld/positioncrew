@@ -26,6 +26,7 @@ import {
   type YieldOptimizationRequest,
 } from "../contracts/yield-optimization.js";
 import { FIXED_SCALE, formatFixed } from "../core/fixed.js";
+import type { YieldRateObservation } from "../commerce/server-observation-binding.js";
 
 const MAINNET_RPC = "https://bsc-dataseed-public.bnbchain.org";
 const LOG_RPC = "https://bsc-rpc.publicnode.com";
@@ -437,7 +438,7 @@ function rpcBlock(value: unknown, label: string): RpcBlock {
   };
 }
 
-function ethCall(to: Address, data: Hex, blockTag: Hex): RpcCall {
+function ethCall(to: Address, data: Hex, blockTag: Hex | { blockHash: Hex; requireCanonical: true }): RpcCall {
   return { method: "eth_call", params: [{ to, data }, blockTag] };
 }
 
@@ -581,6 +582,8 @@ export interface PancakeGridPriceSample {
 }
 
 export interface VenusYieldProbe {
+  /** Server capture only; public routes expose this inside the signed binding. */
+  yieldRateObservation?: YieldRateObservation;
   schemaVersion: "positioncrew.venus-yield-probe.v1";
   generatedAt: string;
   chainId: 56;
@@ -608,6 +611,7 @@ export interface VenusYieldProbe {
 export interface VenusYieldRequestOptions {
   account?: string;
   capitalUsd?: number;
+  retainYieldRateObservation?: boolean;
 }
 
 export interface PancakePositionProbe {
@@ -1784,6 +1788,14 @@ export async function inspectPancakePosition(
   };
 }
 
+function yieldObservationBlockHash(value: unknown): string {
+  if (!value || typeof value !== "object" || !("hash" in value) ||
+      typeof value.hash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(value.hash)) {
+    throw new Error("The captured Venus block is missing its block hash");
+  }
+  return value.hash;
+}
+
 export async function inspectVenusStableYields(
   options: VenusYieldRequestOptions = {},
 ): Promise<VenusYieldProbe> {
@@ -1801,13 +1813,16 @@ export async function inspectVenusStableYields(
   ]);
   const block = rpcBlock(blockValue, "BNB Smart Chain latest block");
   const blockNumber = BigInt(block.number);
+  const stateBlock: Hex | { blockHash: Hex; requireCanonical: true } = options.retainYieldRateObservation
+    ? { blockHash: yieldObservationBlockHash(blockValue) as Hex, requireCanonical: true }
+    : block.number;
   const priorBlockNumber = blockNumber > 120n ? blockNumber - 120n : 0n;
   const [priorBlockValue, oracleValue] = await rpcBatch(MAINNET_RPC, [
     { method: "eth_getBlockByNumber", params: [toHex(priorBlockNumber), false] },
     ethCall(
       VENUS_COMPTROLLER,
       encodeFunctionData({ abi: COMPTROLLER_ABI, functionName: "oracle" }),
-      block.number,
+      stateBlock,
     ),
   ]);
   const priorBlock = rpcBlock(priorBlockValue, "BNB Smart Chain prior block");
@@ -1831,22 +1846,22 @@ export async function inspectVenusStableYields(
           functionName: "markets",
           args: [market.vToken],
         }),
-        block.number,
+        stateBlock,
       ),
       ethCall(
         market.vToken,
         encodeFunctionData({ abi: VTOKEN_ABI, functionName: "underlying" }),
-        block.number,
+        stateBlock,
       ),
       ethCall(
         market.vToken,
         encodeFunctionData({ abi: VTOKEN_ABI, functionName: "supplyRatePerBlock" }),
-        block.number,
+        stateBlock,
       ),
       ethCall(
         market.vToken,
         encodeFunctionData({ abi: VTOKEN_ABI, functionName: "getCash" }),
-        block.number,
+        stateBlock,
       ),
       ethCall(
         oracle,
@@ -1855,17 +1870,17 @@ export async function inspectVenusStableYields(
           functionName: "getUnderlyingPrice",
           args: [market.vToken],
         }),
-        block.number,
+        stateBlock,
       ),
       ethCall(
         market.underlying,
         encodeFunctionData({ abi: ERC20_ABI, functionName: "symbol" }),
-        block.number,
+        stateBlock,
       ),
       ethCall(
         market.underlying,
         encodeFunctionData({ abi: ERC20_ABI, functionName: "decimals" }),
-        block.number,
+        stateBlock,
       ),
     );
   }
@@ -1877,10 +1892,33 @@ export async function inspectVenusStableYields(
         functionName: "getUnderlyingPrice",
         args: [VENUS_VBNB],
       }),
-      block.number,
+      stateBlock,
     ),
   );
   const marketValues = await rpcBatchChunked(MAINNET_RPC, marketCalls);
+  if (options.retainYieldRateObservation) {
+    // Every retained state call is hash-bound, including across hedged RPCs.
+    // Also recheck both canonical headers after all state calls; a detected
+    // reorganisation or inconsistent header must never be signed.
+    const confirmedValues = await rpcBatch(MAINNET_RPC, [
+      { method: "eth_getBlockByNumber", params: [block.number, false] },
+      { method: "eth_getBlockByNumber", params: [toHex(priorBlockNumber), false] },
+    ]);
+    const identities = [
+      { label: "observed", initialValue: blockValue, initial: block, number: blockNumber },
+      { label: "baseline", initialValue: priorBlockValue, initial: priorBlock, number: priorBlockNumber },
+    ];
+    for (const [index, identity] of identities.entries()) {
+      const confirmedValue = confirmedValues[index];
+      const confirmed = rpcBlock(confirmedValue, `Venus ${identity.label} block confirmation`);
+      if (BigInt(identity.initial.number) !== identity.number ||
+          BigInt(confirmed.number) !== identity.number ||
+          BigInt(confirmed.timestamp) !== BigInt(identity.initial.timestamp) ||
+          yieldObservationBlockHash(confirmedValue).toLowerCase() !== yieldObservationBlockHash(identity.initialValue).toLowerCase()) {
+        throw new Error(`The Venus ${identity.label} block changed during the market read; refresh the capture`);
+      }
+    }
+  }
   let cursor = 0;
   const decodedMarkets = VENUS_STABLE_MARKETS.map((market) => {
     const listing = decodeFunctionResult({
@@ -1930,6 +1968,7 @@ export async function inspectVenusStableYields(
     return {
       ...market,
       baseSupplyApyBps: annualizedYieldBps(supplyRate, secondsPerBlock),
+      supplyRatePerBlock: supplyRate.toString(),
       availableLiquidityUsdFixed,
       availableLiquidityUsd: formatFixed(availableLiquidityUsdFixed, 2),
     };
@@ -2024,6 +2063,25 @@ export async function inspectVenusStableYields(
       availableLiquidityUsd: market.availableLiquidityUsd,
     })),
     yieldRequest,
+    ...(options.retainYieldRateObservation ? {
+      yieldRateObservation: {
+        schemaVersion: "positioncrew.venus-yield-rate-observation.v1" as const,
+        chainId: 56 as const,
+        observedBlock: {
+          blockNumber: blockNumber.toString(),
+          blockHash: yieldObservationBlockHash(blockValue),
+          observedAt,
+        },
+        baselineBlock: {
+          blockNumber: BigInt(priorBlock.number).toString(),
+          blockHash: yieldObservationBlockHash(priorBlockValue),
+          observedAt: new Date(Number(BigInt(priorBlock.timestamp)) * 1_000).toISOString(),
+        },
+        marketRates: decodedMarkets.map((market) => ({
+          market: market.vToken, supplyRatePerBlock: market.supplyRatePerBlock,
+        })),
+      },
+    } : {}),
     source: {
       comptroller: VENUS_COMPTROLLER,
       oracle,

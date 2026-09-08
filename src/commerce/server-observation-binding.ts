@@ -1,12 +1,39 @@
 import { z } from "zod";
 import { PositionCrewRequestSchema, type PositionCrewRequest } from "../contracts/index.js";
 import { canonicalHash, canonicalJson } from "../core/canonical.js";
+import { annualizedYieldBps } from "../telemetry/bsc.js";
 
 const SourceSchema = z.object({
   blockNumber: z.string().regex(/^[1-9]\d*$/),
   observedAt: z.string().datetime({ offset: true }),
   explorerUrl: z.string().url(),
 }).strict();
+
+const UnsignedIntegerSchema = z.string().max(78).regex(/^(0|[1-9]\d*)$/);
+const YieldObservationBlockSchema = z.object({
+  blockNumber: UnsignedIntegerSchema,
+  blockHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+  observedAt: z.string().datetime({ offset: true }),
+}).strict();
+
+export const YieldRateObservationSchema = z.object({
+  schemaVersion: z.literal("positioncrew.venus-yield-rate-observation.v1"),
+  chainId: z.literal(56),
+  observedBlock: YieldObservationBlockSchema,
+  baselineBlock: YieldObservationBlockSchema,
+  marketRates: z.array(z.object({
+    market: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+    supplyRatePerBlock: UnsignedIntegerSchema.refine((value) =>
+      /^(0|[1-9]\d*)$/.test(value) && value.length <= 78 && BigInt(value) < (1n << 256n),
+    ),
+  }).strict()).min(1),
+}).strict();
+
+export type YieldRateObservation = z.infer<typeof YieldRateObservationSchema>;
+declare const verifiedYieldRateObservation: unique symbol;
+export type VerifiedYieldRateObservation = YieldRateObservation & {
+  readonly [verifiedYieldRateObservation]: true;
+};
 
 export const ServerObservationBindingSchema = z.object({
   schemaVersion: z.literal("positioncrew.server-observation-binding.v1"),
@@ -22,10 +49,23 @@ export const ServerObservationBindingSchema = z.object({
   maxDataAgeSeconds: z.number().int().positive().max(3_600),
   maximumSlippageBps: z.number().int().min(0).max(10_000),
   signature: z.string().regex(/^[a-f0-9]{64}$/),
+  yieldRateObservation: YieldRateObservationSchema.optional(),
 }).strict();
 
 export type ServerObservationBinding = z.infer<typeof ServerObservationBindingSchema>;
+export type VerifiedServerObservationBinding = Omit<ServerObservationBinding, "yieldRateObservation"> & {
+  yieldRateObservation?: VerifiedYieldRateObservation;
+};
 type Source = z.infer<typeof SourceSchema>;
+
+const verifiedYieldObservations = new WeakMap<object, {
+  proofHash: string;
+  immutableRequestHash: string;
+  issuedAt: number;
+  expiresAt: number;
+  requestDeadline: number;
+  maxDataAgeSeconds: number;
+}>();
 
 export class SourceObservationBindingError extends Error {
   readonly code = "REFRESH_REQUIRED";
@@ -94,16 +134,95 @@ function checkSource(request: PositionCrewRequest, input: Source, now: Date, all
   return source;
 }
 
+function validateYieldRateObservation(
+  input: unknown,
+  request: PositionCrewRequest,
+): YieldRateObservation {
+  const parsed = YieldRateObservationSchema.safeParse(input);
+  if (!parsed.success || request.service !== "YIELD_OPTIMIZATION" || request.chainId !== 56 || request.sources.length !== 1) {
+    throw new SourceObservationBindingError("The captured Yield rate observation does not match this request. Reload the markets.");
+  }
+  const proof = parsed.data;
+  const block = BigInt(proof.observedBlock.blockNumber);
+  const baseline = BigInt(proof.baselineBlock.blockNumber);
+  const observedAt = Date.parse(proof.observedBlock.observedAt);
+  const baselineAt = Date.parse(proof.baselineBlock.observedAt);
+  const source = request.sources[0]!;
+  if (block === 0n || baseline !== (block > 120n ? block - 120n : 0n) ||
+      !Number.isFinite(observedAt) || !Number.isFinite(baselineAt) || baselineAt >= observedAt ||
+      proof.observedBlock.blockHash.toLowerCase() === proof.baselineBlock.blockHash.toLowerCase() ||
+      source.uri !== `https://bscscan.com/block/${proof.observedBlock.blockNumber}` ||
+      source.observedAt !== proof.observedBlock.observedAt) {
+    throw new SourceObservationBindingError("The captured Yield block evidence does not match this request. Reload the markets.");
+  }
+  const rates = new Map<string, bigint>();
+  for (const rate of proof.marketRates) {
+    const market = rate.market.toLowerCase();
+    if (rates.has(market)) {
+      throw new SourceObservationBindingError("The captured Yield market evidence is inconsistent. Reload the markets.");
+    }
+    rates.set(market, BigInt(rate.supplyRatePerBlock));
+  }
+  const positions = [...request.currentPositions, ...request.opportunities];
+  const requestedMarkets = new Set(positions.map((position) => position.vaultOrMarket.toLowerCase()));
+  if (rates.size !== requestedMarkets.size || [...rates.keys()].some((market) => !requestedMarkets.has(market))) {
+    throw new SourceObservationBindingError("The captured Yield market evidence is incomplete. Reload the markets.");
+  }
+  const secondsPerBlock = Math.max(0.1, (observedAt - baselineAt) / 1000 / 120);
+  for (const position of positions) {
+    const rate = rates.get(position.vaultOrMarket.toLowerCase());
+    if (rate === undefined || position.sourceId !== source.sourceId || position.observedAt !== source.observedAt ||
+        position.grossApyBps !== annualizedYieldBps(rate, secondsPerBlock)) {
+      throw new SourceObservationBindingError("The captured Yield rates do not reproduce the requested markets. Reload the markets.");
+    }
+  }
+  return proof;
+}
+
+/** Only an authenticated, unmodified in-memory witness can replace historical RPC reads. */
+export function assertYieldRateObservationRequestBinding(
+  observation: VerifiedYieldRateObservation,
+  input: PositionCrewRequest,
+  now?: Date,
+): void {
+  const authenticated = verifiedYieldObservations.get(observation);
+  if (!authenticated) {
+    throw new SourceObservationBindingError("The captured Yield observation has not been authenticated. Reload the markets.");
+  }
+  const request = parseRequest(input);
+  validateYieldRateObservation(observation, request);
+  if (canonicalHash(observation) !== authenticated.proofHash ||
+      canonicalHash(immutableProjection(request)) !== authenticated.immutableRequestHash ||
+      Date.parse(request.deadline) > authenticated.requestDeadline ||
+      request.maxDataAgeSeconds > authenticated.maxDataAgeSeconds) {
+    throw new SourceObservationBindingError("The request changed authenticated Yield evidence or extended its validity. Reload the markets.");
+  }
+  if (now !== undefined) {
+    const clock = now.getTime();
+    if (!Number.isFinite(clock) || clock < authenticated.issuedAt || Date.parse(request.requestedAt) > clock) {
+      throw new SourceObservationBindingError("The captured Yield observation is not valid at this time. Reload the markets.");
+    }
+    if (clock >= Math.min(authenticated.expiresAt, Date.parse(request.deadline),
+      Date.parse(observation.observedBlock.observedAt) + request.maxDataAgeSeconds * 1000)) {
+      throw new SourceObservationBindingError("This server observation has expired. Reload the markets before continuing.", "EXPIRED");
+    }
+  }
+}
+
 /** Call only with a request freshly constructed by the server's chain probe. */
 export async function issueServerObservationBinding(
   input: unknown,
   observation: Source,
   secret: string | undefined,
   now: Date,
+  options?: { yieldRateObservation?: YieldRateObservation },
 ): Promise<ServerObservationBinding> {
   const key = await signingKey(secret);
   const request = parseRequest(input);
   const source = checkSource(request, observation, now);
+  const yieldRateObservation = options?.yieldRateObservation === undefined
+    ? undefined
+    : validateYieldRateObservation(options.yieldRateObservation, request);
   const claims = {
     schemaVersion: "positioncrew.server-observation-binding.v1" as const,
     snapshotId: request.requestId,
@@ -117,6 +236,7 @@ export async function issueServerObservationBinding(
     requestDeadline: request.deadline,
     maxDataAgeSeconds: request.maxDataAgeSeconds,
     maximumSlippageBps: request.maxSlippageBps,
+    ...(yieldRateObservation === undefined ? {} : { yieldRateObservation }),
   };
   const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(canonicalJson(claims))));
   return ServerObservationBindingSchema.parse({ ...claims, signature: Array.from(mac, (byte) => byte.toString(16).padStart(2, "0")).join("") });
@@ -128,7 +248,7 @@ export async function verifyServerObservationBinding(
   observation: Source & { binding?: unknown },
   secret: string | undefined,
   now: Date,
-): Promise<ServerObservationBinding> {
+): Promise<VerifiedServerObservationBinding> {
   const key = await signingKey(secret);
   const parsed = ServerObservationBindingSchema.safeParse(observation.binding);
   if (!parsed.success) throw new SourceObservationBindingError();
@@ -153,6 +273,9 @@ export async function verifyServerObservationBinding(
       (request.service === "LP_REBALANCE" && request.maxSlippageBps > binding.maximumSlippageBps)) {
     throw new SourceObservationBindingError("The request changed authenticated observations or exceeded their validity limits. Reload the market or position.");
   }
+  if (binding.yieldRateObservation !== undefined) {
+    validateYieldRateObservation(binding.yieldRateObservation, request);
+  }
   // Only a fully authenticated, matching observation can authorize expired-lease
   // cleanup. Invalid signatures, changed inputs, and missing keys stay INVALID.
   if (now.getTime() >= Math.min(Date.parse(binding.expiresAt), Date.parse(request.deadline),
@@ -162,5 +285,15 @@ export async function verifyServerObservationBinding(
       "EXPIRED",
     );
   }
-  return binding;
+  if (binding.yieldRateObservation !== undefined) {
+    verifiedYieldObservations.set(binding.yieldRateObservation, {
+      proofHash: canonicalHash(binding.yieldRateObservation),
+      immutableRequestHash: binding.immutableRequestHash,
+      issuedAt: Date.parse(binding.issuedAt),
+      expiresAt: Date.parse(binding.expiresAt),
+      requestDeadline: Date.parse(binding.requestDeadline),
+      maxDataAgeSeconds: binding.maxDataAgeSeconds,
+    });
+  }
+  return binding as VerifiedServerObservationBinding;
 }

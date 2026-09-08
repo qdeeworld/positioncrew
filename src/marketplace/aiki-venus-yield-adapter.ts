@@ -7,6 +7,10 @@ import type {
 } from "../contracts/yield-optimization.js";
 import { createYieldOptimizationDeliverable } from "../providers/yield-optimization.js";
 import { annualizedYieldBps } from "../telemetry/bsc.js";
+import {
+  assertYieldRateObservationRequestBinding,
+  type VerifiedYieldRateObservation,
+} from "../commerce/server-observation-binding.js";
 
 export const AIKI_VENUS_YIELD = {
   name: "AiKi Venus Yield Optimiser",
@@ -258,10 +262,35 @@ async function readPinnedSupplyState(
   }
 }
 
+function readAuthenticatedSupplyState(
+  request: YieldOptimizationRequest,
+  observation: VerifiedYieldRateObservation,
+  now: Date,
+): Awaited<ReturnType<typeof readPinnedSupplyState>> {
+  try {
+    assertYieldRateObservationRequestBinding(observation, request, now);
+    const secondsPerBlock = Math.max(0.1,
+      (Date.parse(observation.observedBlock.observedAt) - Date.parse(observation.baselineBlock.observedAt)) / 1000 / 120);
+    const rates = new Map(observation.marketRates.map((market) =>
+      [market.market.toLowerCase(), BigInt(market.supplyRatePerBlock)] as const));
+    return { rates, secondsPerBlock, apyByMarket: new Map([...rates].map(([market, rate]) =>
+      [market, annualizedYieldBps(rate, secondsPerBlock)] as const)) };
+  } catch {
+    throw new YieldComparisonUnavailable("PINNED_STATE_UNAVAILABLE",
+      "PositionCrew could not authenticate a still-valid captured Venus observation for this request. Reload current markets before retrying.");
+  }
+}
+
 export async function auditionAiKiVenusYield(
   request: YieldOptimizationRequest,
   firstParty: YieldOptimizationDeliverable,
-  options: { fetchImpl?: typeof fetch; now?: Date; rpcUrl?: string } = {},
+  options: {
+    fetchImpl?: typeof fetch;
+    now?: Date;
+    rpcUrl?: string;
+    verifiedYieldRateObservation?: VerifiedYieldRateObservation;
+    completionNow?: () => Date;
+  } = {},
 ): Promise<AiKiYieldComparison> {
   const now = options.now ?? new Date();
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -293,14 +322,23 @@ export async function auditionAiKiVenusYield(
   const partialBoundary = "AiKi ranked live Venus supply rates for the same market set. PositionCrew independently binds those rates to the request's pinned block and applies the unchanged allocation and withdrawal principal caps, execution cost and gas caps, liquidity, risk, concentration, expiry, and horizon constraints through a disclosed compatibility adapter.";
 
   try {
+    const started = performance.now();
+    const captured = options.verifiedYieldRateObservation;
+    // Authenticate before invoking a provider. Loose or replayed caller caches
+    // cannot replace independent server evidence, even when their APYs match.
+    const capturedState = captured ? readAuthenticatedSupplyState(request, captured, now) : undefined;
     const markets = request.opportunities.map((candidate) => candidate.vaultOrMarket);
     const url = new URL(AIKI_VENUS_YIELD.endpoint);
     url.searchParams.set("markets", markets.join(","));
     url.searchParams.set("rateOnly", "true");
     const [parsed, pinnedState] = await Promise.all([
       readAiKiYieldAssessment(url, fetchImpl),
-      readPinnedSupplyState(request, fetchImpl, options.rpcUrl ?? DEFAULT_BSC_RPC),
+      capturedState ?? readPinnedSupplyState(request, fetchImpl, options.rpcUrl ?? DEFAULT_BSC_RPC),
     ]);
+    if (captured) {
+      readAuthenticatedSupplyState(request, captured, options.completionNow?.() ??
+        new Date(now.getTime() + Math.max(0, performance.now() - started)));
+    }
     const requestedMarkets = new Set(markets.map((market) => market.toLowerCase()));
     const returnedMarkets = new Set(parsed.assessment.routes.map((route) => route.market.toLowerCase()));
     const exactMarketSet = requestedMarkets.size === returnedMarkets.size && [...requestedMarkets].every((market) => returnedMarkets.has(market));
@@ -357,7 +395,7 @@ export async function auditionAiKiVenusYield(
       parsed.evidence.persisted && normalizedContractPass;
     const checks: AiKiYieldComparison["checks"] = [
       { code: "EXACT_MARKET_SET", status: exactMarketSet ? "PASS" : "FAIL", detail: exactMarketSet ? "AiKi evaluated the same frozen Venus market set." : "AiKi returned a different market set." },
-      { code: "PINNED_RATE_BINDING", status: pinnedRateBinding ? "PASS" : "FAIL", detail: pinnedRateBinding ? "Every provider per-block rate matches an independent Venus read at the request's pinned BSC block." : !exactMarketSet ? "The provider did not return the exact requested market set, so complete pinned-rate agreement cannot be established." : `${mismatchedRateMarkets.length} of ${parsed.assessment.routes.length} provider rates differ from the saved BSC block. Agreement on the best market does not establish agreement on this exact snapshot.` },
+      { code: "PINNED_RATE_BINDING", status: pinnedRateBinding ? "PASS" : "FAIL", detail: pinnedRateBinding ? (captured ? "Every provider per-block rate matches server-authenticated Venus reads retained from the request's pinned BSC block; historical RPC state was not re-fetched." : "Every provider per-block rate matches an independent Venus read at the request's pinned BSC block.") : !exactMarketSet ? "The provider did not return the exact requested market set, so complete pinned-rate agreement cannot be established." : `${mismatchedRateMarkets.length} of ${parsed.assessment.routes.length} provider rates differ from the saved BSC block. Agreement on the best market does not establish agreement on this exact snapshot.` },
       { code: "PINNED_APY_BINDING", status: requestApyBinding ? "PASS" : "FAIL", detail: requestApyBinding ? "Every request APY matches the independently pinned rate annualized with measured BSC block time." : "At least one caller-supplied APY does not match independently annualized pinned state." },
       { code: "SAME_RATE_LEADER", status: sameRateLeader ? "PASS" : "FAIL", detail: sameRateLeader ? "AiKi identified the highest-rate opportunity in the frozen request." : "AiKi's recommended market differs from the frozen request's highest-rate opportunity." },
       { code: "PINNED_RATE_LEADER", status: samePinnedRateLeader ? "PASS" : "FAIL", detail: samePinnedRateLeader ? "The provider recommendation is also the highest-rate market in the independently pinned on-chain state." : "The provider recommendation is not the rate leader in the independently pinned on-chain state." },
@@ -389,7 +427,7 @@ export async function auditionAiKiVenusYield(
       attributable: exactMarketSet,
       persisted: parsed.evidence.persisted,
       checks,
-      boundary: `${partialBoundary} AiKi did not directly accept the native PositionCrew request; no payment, authority grant, supply, withdrawal, or protocol transaction occurred.`,
+      boundary: `${partialBoundary} ${captured ? "Pinned state was authenticated from the original server capture, not a new execution-time RPC read or a trustless state proof. " : ""}AiKi did not directly accept the native PositionCrew request; no payment, authority grant, supply, withdrawal, or protocol transaction occurred.`,
     };
   } catch (error) {
     return {
