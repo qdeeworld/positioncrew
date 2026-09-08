@@ -30,6 +30,16 @@ TLS requests must use the canonical Host. Configure certificate renewal and
 the least required bind capability separately before exposing traffic. This
 loopback unit intentionally grants no bind capability or public web port.
 
+The separate `positioncrew-gateway-public.service` loads its certificate and
+private key through systemd credentials and grants only the low-port bind
+capability. It binds IPv4 port 443, requires the canonical Host (optionally
+with explicit port 443), and bounds TLS handshakes to ten seconds. Install
+`renew-deploy-hook.sh` root-owned in Certbot's deploy-hooks directory to reload
+only this service after a successful renewal of the exact canonical lineage.
+Initial DNS validation can obtain the certificate before a traffic cutover.
+After cutover, configure and test unattended HTTP-01 standalone renewal on
+port 80; the initial manual DNS configuration alone is not auto-renewal.
+
 Before cutover, validate signed Worker integration, separate client quotas,
 forged-envelope refusals, mutation Origin checks, a harmless create/run/poll
 assessment, historical receipt reload, TLS renewal, monitoring and rollback.

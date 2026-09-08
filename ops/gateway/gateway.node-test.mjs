@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createHash, createHmac } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { once } from 'node:events';
@@ -180,4 +185,35 @@ test('fails closed on unsafe startup configuration', () => {
   assert.throws(() => server.listen({ port: 0, host: '0.0.0.0' }));
   assert.throws(() => server.listen(0));
   assert.throws(() => createGatewayServer({ secret: KEY, limits: { bodyBytes: 1000000 } }));
+});
+
+test('serves verified TLS and rejects other Host values before forwarding', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'positioncrew-tls-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const keyPath = join(directory, 'key.pem'); const certPath = join(directory, 'cert.pem');
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+    '-subj', '/CN=positioncrew.dolepee.com', '-addext', 'subjectAltName=DNS:positioncrew.dolepee.com',
+    '-keyout', keyPath, '-out', certPath], { stdio: 'ignore', timeout: 10000 });
+  const cert = readFileSync(certPath); let calls = 0;
+  const origin = http.createServer((_req, res) => { calls++; res.end('verified TLS'); });
+  origin.listen(0, '127.0.0.1'); await once(origin, 'listening');
+  const gateway = createGatewayServer({ secret: KEY, tls: { key: readFileSync(keyPath), cert },
+    testUpstream: `http://127.0.0.1:${origin.address().port}` });
+  gateway.listen({ port: 0, host: '127.0.0.1' }); await once(gateway, 'listening');
+  t.after(async () => {
+    await Promise.all([origin, gateway].map((server) => new Promise((resolve) => {
+      server.close(resolve); server.closeAllConnections();
+    })));
+  });
+  function secureRequest(host) {
+    return new Promise((resolve, reject) => {
+      https.get({ hostname: '127.0.0.1', port: gateway.address().port,
+        servername: 'positioncrew.dolepee.com', ca: cert, headers: { Host: host } }, (res) => {
+        res.resume(); res.once('end', () => resolve(res.statusCode));
+      }).once('error', reject);
+    });
+  }
+  assert.equal(await secureRequest('untrusted.example'), 421); assert.equal(calls, 0);
+  assert.equal(await secureRequest('positioncrew.dolepee.com:443'), 200);
+  assert.equal(await secureRequest('positioncrew.dolepee.com'), 200); assert.equal(calls, 2);
 });

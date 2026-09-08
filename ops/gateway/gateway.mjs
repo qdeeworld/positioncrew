@@ -147,7 +147,9 @@ export function createGatewayServer({ secret, tls, testUpstream, limits: overrid
       if (!METHODS.has(req.method)) throw new Rejection(405, 'METHOD_NOT_ALLOWED');
       const target = checkedTarget(req.url);
       const headers = requestHeaders(req);
-      if (tls && req.headers.host?.toLowerCase() !== 'positioncrew.dolepee.com') throw new Rejection(421, 'INVALID_HOST');
+      if (tls && !['positioncrew.dolepee.com', 'positioncrew.dolepee.com:443'].includes(req.headers.host?.toLowerCase())) {
+        throw new Rejection(421, 'INVALID_HOST');
+      }
       const clientIp = normalizedIp(req.socket.remoteAddress);
       const contentLength = req.headers['content-length'];
       if (contentLength !== undefined && (!/^(?:0|[1-9][0-9]*)$/.test(contentLength)
@@ -190,7 +192,7 @@ export function createGatewayServer({ secret, tls, testUpstream, limits: overrid
   };
   const options = { maxHeaderSize: 16384, requestTimeout: limits.bodyMs,
     headersTimeout: limits.bodyMs, keepAliveTimeout: 5000, requireHostHeader: true };
-  const server = tls ? https.createServer({ ...options, ...tls, minVersion: 'TLSv1.2' }, handler) : http.createServer(options, handler);
+  const server = tls ? https.createServer({ ...options, ...tls, minVersion: 'TLSv1.2', handshakeTimeout: limits.bodyMs }, handler) : http.createServer(options, handler);
   server.maxConnections = limits.concurrency * 2;
   server.maxRequestsPerSocket = 100;
   server.on('checkContinue', (req, res) => { res.writeHead(417, { connection: 'close' }); res.end(); });
