@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentHireErrorMessage, currentRequestNeedsRefresh, isCurrentHireRefreshError } from "../web/src/current-request-expiry.js";
+import { currentHireErrorMessage, currentRequestEvidenceKey, currentRequestNeedsRefresh, isCurrentHireRefreshError, persistedCurrentHireFailureMessage } from "../web/src/current-request-expiry.js";
 
 const now = Date.parse("2026-09-08T03:00:00.000Z");
 const iso = (offset: number) => new Date(now + offset).toISOString();
@@ -43,6 +43,16 @@ describe("current request UI freshness", () => {
 });
 
 describe("refresh error presentation", () => {
+  it("retains persisted refresh codes even when the message does not contain the code", () => {
+    const message = persistedCurrentHireFailureMessage({ code: "REFRESH_REQUIRED", message: "The server snapshot expired after the job claim." });
+    expect(isCurrentHireRefreshError(message)).toBe(true);
+    expect(currentHireErrorMessage(message)).toContain("Refresh the position or market above");
+    expect(currentHireErrorMessage(message)).not.toContain("REFRESH_REQUIRED");
+  });
+  it("preserves unrelated persisted failures and missing-error fallback", () => {
+    expect(persistedCurrentHireFailureMessage({ code: "PROVIDER_TIMEOUT", message: "Provider timed out" })).toBe("Provider timed out");
+    expect(persistedCurrentHireFailureMessage(null)).toBe("Persisted provider job failed");
+  });
   it("turns a truncated API envelope into actionable text", () => {
     const raw = '409 : {"error":"REFRESH_REQUIRED","details":["This server observation has expired. Reload the market';
     expect(isCurrentHireRefreshError(raw)).toBe(true);
@@ -54,5 +64,28 @@ describe("refresh error presentation", () => {
     expect(isCurrentHireRefreshError(null)).toBe(false);
     expect(isCurrentHireRefreshError("Request timed out")).toBe(false);
     expect(currentHireErrorMessage("Request timed out")).toBe("Request timed out");
+  });
+});
+
+describe("current evidence rejection identity", () => {
+  const source = { blockNumber: "120600000", observedAt: iso(-5_000), explorerUrl: "https://bscscan.com/block/120600000",
+    binding: { requestHash: "request-commitment", expiresAt: iso(120_000), signature: "signed-observation" } };
+  it("recognizes the same signed request in a new wrapper and reordered binding", () => {
+    const original = currentRequestEvidenceKey(source);
+    expect(original).not.toBeNull();
+    expect(currentRequestEvidenceKey(structuredClone(source))).toBe(original);
+    expect(currentRequestEvidenceKey({ ...source, binding: { signature: source.binding.signature,
+      expiresAt: source.binding.expiresAt, requestHash: source.binding.requestHash } })).toBe(original);
+  });
+  it("distinguishes newly signed evidence or a different committed request", () => {
+    expect(currentRequestEvidenceKey({ ...source, binding: { ...source.binding, signature: "fresh-signature" } }))
+      .not.toBe(currentRequestEvidenceKey(source));
+    expect(currentRequestEvidenceKey({ ...source, binding: { ...source.binding, requestHash: "different-request" } }))
+      .not.toBe(currentRequestEvidenceKey(source));
+    expect(currentRequestEvidenceKey({ ...source, blockNumber: "120600001" })).not.toBe(currentRequestEvidenceKey(source));
+  });
+  it("does not treat absent evidence as a usable key", () => {
+    expect(currentRequestEvidenceKey(null)).toBeNull();
+    expect(currentRequestEvidenceKey({ ...source, binding: null })).toBeNull();
   });
 });

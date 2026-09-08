@@ -1,3 +1,5 @@
+import { canonicalJson } from "../../src/commerce/fresh-hire-schema.js";
+
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
@@ -24,6 +26,26 @@ export function currentRequestNeedsRefresh(request: unknown, observation: unknow
 
 export function isCurrentHireRefreshError(message: string | null): boolean {
   return message !== null && /\bREFRESH_REQUIRED\b/.test(message);
+}
+
+// The binding contains the signed request commitment. Comparing its contents
+// keeps a rejected probe rejected when the UI reconstructs its wrapper object.
+export function currentRequestEvidenceKey(observation: unknown): string | null {
+  const source = record(observation);
+  const binding = record(source?.binding);
+  if (!source || !binding) return null;
+  return canonicalJson({
+    blockNumber: source.blockNumber,
+    observedAt: source.observedAt,
+    explorerUrl: source.explorerUrl,
+    binding,
+  });
+}
+
+export function persistedCurrentHireFailureMessage(error: unknown): string {
+  const failure = record(error);
+  if (failure?.code === "REFRESH_REQUIRED") return "REFRESH_REQUIRED";
+  return typeof failure?.message === "string" ? failure.message : "Persisted provider job failed";
 }
 
 export function currentHireErrorMessage(message: string): string {

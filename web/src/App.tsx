@@ -4,6 +4,7 @@ import {
   validatedFreshMarketplaceChain,
 } from "./job-history";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isCurrentHireRefreshError, persistedCurrentHireFailureMessage } from "./current-request-expiry";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { PROVIDER_CATALOG } from "../../src/marketplace/catalog.js";
 import type { LpLiveMatchRunRequest } from "../../src/marketplace/lp-live-match-schema.js";
@@ -99,6 +100,9 @@ function receiptIdFromHash(): string | null {
 
 function publicRequestError(error: unknown, fallback: string, phase: "hire" | "receipt" = "hire"): string {
   const message = error instanceof Error ? error.message : fallback;
+  // Keep the admission code until the workspace maps it to readable recovery
+  // text and associates the rejection with the submitted evidence.
+  if (phase === "hire" && isCurrentHireRefreshError(message)) return "REFRESH_REQUIRED";
   if (message.includes("This server observation has expired. Reload the market or position before continuing.")) {
     return "This saved request is no longer current. Reload the position or markets, then compare providers again before starting a new assessment. Existing receipts remain historical evidence.";
   }
@@ -621,7 +625,7 @@ export default function App() {
         }
         if (activeTrace.job.state === "FAILED") {
           unresolvedFreshHire.current = null;
-          throw new Error(activeTrace.job.error?.message ?? "Persisted provider job failed");
+          throw new Error(persistedCurrentHireFailureMessage(activeTrace.job.error));
         }
         if (activeTrace.job.state !== "COMPLETED" || !activeTrace.receipt) {
           throw new Error("Persisted provider job did not complete within 20 seconds");

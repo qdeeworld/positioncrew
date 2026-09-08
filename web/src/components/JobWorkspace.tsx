@@ -1,5 +1,5 @@
 import { RecentJobsPanel } from "./RecentJobsPanel";
-import { currentHireErrorMessage, currentRequestNeedsRefresh, isCurrentHireRefreshError } from "../current-request-expiry";
+import { currentHireErrorMessage, currentRequestEvidenceKey, currentRequestNeedsRefresh, isCurrentHireRefreshError } from "../current-request-expiry";
 import { VenusActivationSandbox } from "./VenusActivationSandbox";
 import { clearCapitalCheckSeed, readCapitalCheckSeed } from "../capital-check";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -2035,7 +2035,7 @@ export function JobWorkspace({
   const [liveRequest, setLiveRequest] = useState<JobRequest | null>(null);
   const [liveObservation, setLiveObservation] = useState<CurrentMarketplaceObservation | null>(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
-  const submittedObservationRef = useRef<CurrentMarketplaceObservation | null>(null);
+  const submittedObservationRef = useRef<string | null>(null);
   const liveRequestRef = useRef<JobRequest | null>(null);
   const selectedServiceRef = useRef(service);
   const resultPanelRef = useRef<HTMLDivElement | null>(null);
@@ -2124,13 +2124,14 @@ export function JobWorkspace({
     liveObservation.explorerUrl.trim() &&
     liveObservation.binding,
   );
-  const currentRequestServerRejected = isCurrentHireRefreshError(jobError) && liveObservation !== null &&
-    submittedObservationRef.current === liveObservation;
+  const currentEvidenceKey = currentRequestEvidenceKey(liveObservation);
+  const currentRequestServerRejected = isCurrentHireRefreshError(jobError) && currentEvidenceKey !== null &&
+    submittedObservationRef.current === currentEvidenceKey;
   const currentRequestExpired = inputMode === "interactive" && Boolean(liveRequest && liveObservation) &&
     (currentRequestNeedsRefresh(liveRequest, liveObservation, clockNow) || currentRequestServerRejected);
   const currentHireReady = currentRequestLoaded && !currentRequestExpired;
-  const shownJobError = isCurrentHireRefreshError(jobError) && liveObservation && submittedObservationRef.current &&
-    submittedObservationRef.current !== liveObservation ? null : jobError;
+  const shownJobError = isCurrentHireRefreshError(jobError) && currentEvidenceKey && submittedObservationRef.current &&
+    submittedObservationRef.current !== currentEvidenceKey ? null : jobError;
   const lpEvidence = marketplaceTrace?.hire.evidence;
   const lpChoiceFresh = lpEvidence?.evidenceClass === "CURRENT_BLOCK_PINNED" && Boolean(marketplaceTrace) &&
     !currentRequestNeedsRefresh(marketplaceTrace!.hire.request, { ...lpEvidence.source, binding: lpEvidence.observationBinding }, clockNow) &&
@@ -2172,7 +2173,7 @@ export function JobWorkspace({
     const mode: JobRequestMode = inputMode === "locked"
       ? "FROZEN_FIXTURE"
       : "CALLER_SUPPLIED_OBSERVATIONS";
-    submittedObservationRef.current = inputMode === "interactive" ? liveObservation : null;
+    submittedObservationRef.current = inputMode === "interactive" ? currentRequestEvidenceKey(liveObservation) : null;
     await onRun(
       next as Record<string, unknown>,
       mode,
@@ -2191,7 +2192,7 @@ export function JobWorkspace({
       setClockNow(Date.now());
       return;
     }
-    submittedObservationRef.current = liveObservation;
+    submittedObservationRef.current = currentRequestEvidenceKey(liveObservation);
     await onRun(marketplaceTrace.hire.request, "CALLER_SUPPLIED_OBSERVATIONS", {
       ...evidence.source,
       binding: evidence.observationBinding,
