@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { freshMarketplaceTaskForService, sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
+import { runFrozenFixture } from "../src/api/fixture-jobs.js";
 
 const hireId = "19b75690-385e-4a6c-8461-ea86f96b9c21";
 const historyKey = "positioncrew.recent-jobs.v1";
@@ -120,3 +121,142 @@ test("saved run body timeout returns to status recovery instead of creating anot
   await panel.getByRole("button", { name: "Retry status" }).click();
   await expect(panel.getByRole("button", { name: "Resume run" })).toBeEnabled();
 });
+
+async function savedLpRefusal(code: string, detail: string, waitMilliseconds: number) {
+  // Synthetic UI recovery fixture, not an external hire or financial proof.
+  // The factory supplies a complete request/result shape; the saved refusal
+  // exercises the real Jobs -> SummaryResult integration without an RPC call.
+  const response = await runFrozenFixture("LP_REBALANCE");
+  if (response.result.request.service !== "LP_REBALANCE" || response.result.deliverable.service !== "LP_REBALANCE") {
+    throw new Error("LP recovery fixture must contain an LP request and deliverable");
+  }
+  const request = response.result.request;
+  const completedAt = request.deadline;
+  const startedAt = new Date(Date.parse(completedAt) - waitMilliseconds).toISOString();
+  const createdAt = new Date(Date.parse(startedAt) - 10_000).toISOString();
+  const observedAt = request.sources[0]?.observedAt ?? request.requestedAt;
+  const requestHash = await sha256Commitment(request);
+  const evidenceHash = await sha256Commitment({ fixture: "expired-lp-refusal", code });
+  const receiptId = "6ae49465-4e1d-4dc5-a614-7cda85e4a821";
+  const jobId = "c472a690-385e-4a6c-8461-ea86f96b9c21";
+  const endpoint = "https://erc8004.heyanon.ai/mcp/v3pools";
+  const selection = {
+    schemaVersion: "positioncrew.lp-live-match-provider-selection.v1" as const,
+    selectedProvider: "HEYANON" as const,
+    providerId: "erc8004:56:45650",
+    providerName: "V3 Pools powered by HeyAnon",
+    identity: { protocol: "ERC-8004" as const, network: "BSC_MAINNET" as const, chainId: 56 as const,
+      agentId: "45650", owner: "0xda977767452c5dd021624511f14df67b6c9c2c1b" },
+    endpoint,
+    adapterId: "positioncrew:mcp:heyanon-v3pools:lp-job:v1",
+    auditionHash: evidenceHash,
+    selectedAt: startedAt,
+  };
+  response.evidenceMode = "CURRENT_BLOCK_PINNED";
+  response.benchmarkLock = null;
+  response.generatedAt = completedAt;
+  response.claimBoundary = ["Synthetic saved-result UI fixture; no marketplace call, payment, or chain transaction."];
+  response.result.deliverable = {
+    ...response.result.deliverable,
+    status: "REFUSED_INCONSISTENT_DATA",
+    decision: "NONE",
+    summary: "The selected LP provider could not safely complete this exact job; no fallback provider was used.",
+    generatedAt: completedAt,
+    expiresAt: request.deadline,
+    proposedRange: null,
+    actionSteps: [],
+    estimatedRebalanceCostUsd: "0",
+    expectedGrossFeesUsd: "0",
+    expectedNetBenefitUsd: "0",
+    breakEvenHours: null,
+    invalidationConditions: ["Create a new block-pinned audition before trying another provider."],
+    limitations: [detail, "No approval, signature, payment, or liquidity transaction occurred."],
+  };
+  const deliverableHash = await sha256Commitment(response.result.deliverable);
+  response.liveMatchExecution = {
+    schemaVersion: "positioncrew.lp-live-match-execution.v1",
+    outcome: "REFUSED",
+    selection,
+    invocation: { startedAt, completedAt, endpoint, latencyMilliseconds: waitMilliseconds,
+      rawResponseHash: null, normalizedResponseHash: deliverableHash,
+      checks: [{ code, status: "FAIL", detail }] },
+    source: { hireId, jobId, requestHash, evidenceHash, blockNumber: "1", observedAt,
+      explorerUrl: "https://bscscan.com/block/1" },
+    commerce: { directCostUsd: "0.00", payment: "NONE", settlement: "NONE", walletRequired: false },
+    claimBoundary: ["UI recovery fixture only; the selected provider was not invoked."],
+  };
+  response.receipt = { ...response.receipt, mode: "SESSION_EMBEDDED", path: `/api/benchmark-receipts/${receiptId}` };
+  const [benchmarkSlug, task] = freshMarketplaceTaskForService("LP_REBALANCE")!;
+  return {
+    schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
+    hire: { hireId, service: "LP_REBALANCE", benchmarkSlug, providerSlug: task.providerSlug,
+      providerId: selection.providerId, request, requestHash, evidenceHash,
+      evidenceMode: "CURRENT_BLOCK_PINNED", createdAt,
+      evidence: { evidenceClass: "CURRENT_BLOCK_PINNED", source: {
+        observedAt, blockNumber: "1", explorerUrl: "https://bscscan.com/block/1",
+      } } },
+    job: { jobId, state: "COMPLETED", status: "COMPLETED", createdAt, startedAt, completedAt,
+      apiDurationMilliseconds: waitMilliseconds, error: null,
+      providerSelection: selection, providerSelectionHash: await sha256Commitment(selection) },
+    receipt: { receiptId, publicUrl: `/api/benchmark-receipts/${receiptId}`, createdAt: completedAt,
+      responseHash: await sha256Commitment(response), deliverableHash,
+      evaluationHash: response.result.evaluation.evaluationHash, response },
+  };
+}
+
+for (const scenario of [
+  {
+    name: "bounded delivery deadline",
+    code: "LP_DELIVERY_DEADLINE",
+    detail: "PositionCrew's LP delivery deadline expired after 2500 ms; the external invocation did not complete.",
+    waitMilliseconds: 2_500,
+    visibleReason: "The job's bounded delivery wait timed out after 2.5 seconds.",
+  },
+  {
+    name: "historical 8-second MCP timeout",
+    code: "HEYANON_MCP_LOCAL_TIMEOUT",
+    detail: "[HEYANON_MCP_LOCAL_TIMEOUT] HeyAnon MCP getCurrentPoolPrice FETCH: the local 8000 ms deadline expired.",
+    waitMilliseconds: 8_000,
+    visibleReason: "Waiting for the selected provider's pool-price check timed out after 8 seconds.",
+  },
+]) {
+  test(`expired saved LP ${scenario.name} retains its cause alongside expiry after reload`, async ({ page }) => {
+    const chain = await savedLpRefusal(scenario.code, scenario.detail, scenario.waitMilliseconds);
+    await page.clock.install({ time: new Date(Date.parse(chain.hire.request.deadline) + 60_000) });
+    await page.addInitScript(({ key, id, rememberedAt }) => {
+      localStorage.setItem(key, JSON.stringify({ schemaVersion: key, entries: [{
+        hireId: id, service: "LP_REBALANCE", rememberedAt,
+      }] }));
+    }, { key: historyKey, id: hireId, rememberedAt: chain.hire.createdAt });
+    let savedReads = 0;
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method()) && request.url().includes("/api/benchmark-hires")) {
+        mutations.push(`${request.method()} ${request.url()}`);
+      }
+    });
+    await page.route(`**/api/benchmark-hires/${hireId}`, (route) => {
+      savedReads += 1;
+      return route.fulfill({ json: chain });
+    });
+    await page.goto("/#jobs");
+
+    for (const reopen of [false, true]) {
+      if (reopen) await page.reload();
+      const panel = page.getByTestId("recent-jobs-device");
+      await panel.getByRole("button", { name: "Open result", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Refresh evidence before acting", exact: true })).toBeVisible();
+      await expect(page.getByText("This result has expired.", { exact: true })).toBeVisible();
+      const failure = page.getByRole("region", { name: "Selected provider failure" });
+      await expect(failure).toBeVisible();
+      await expect(failure.getByRole("heading", { name: "Why this hire was refused" })).toBeVisible();
+      await expect(failure).toContainText(scenario.visibleReason);
+      await expect(failure).toContainText("No fallback provider was used. No payment or liquidity transaction occurred.");
+      await expect(page.getByRole("heading", { name: "Request conditions and recovery", exact: true })).toBeVisible();
+      await expect(failure.locator("svg.lucide-check")).toHaveCount(0);
+    }
+
+    expect(savedReads).toBeGreaterThanOrEqual(2);
+    expect(mutations).toEqual([]);
+  });
+}
