@@ -2,19 +2,17 @@
 Description=PositionCrew bounded HTTPS access gateway
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/letsencrypt/live/positioncrew.dolepee.com/fullchain.pem
+ConditionPathExists=/etc/positioncrew-gateway/fullchain.pem
 
 [Service]
 Type=simple
-DynamicUser=yes
+User=pc-gateway
+Group=pc-gateway
 WorkingDirectory=/opt/positioncrew-gateway
 ExecStart=/usr/bin/node /opt/positioncrew-gateway/gateway.mjs
-LoadCredential=gateway-key:/etc/positioncrew-gateway/key
-LoadCredential=tls-key:/etc/letsencrypt/live/positioncrew.dolepee.com/privkey.pem
-LoadCredential=tls-cert:/etc/letsencrypt/live/positioncrew.dolepee.com/fullchain.pem
-Environment=GATEWAY_KEY_FILE=%d/gateway-key
-Environment=GATEWAY_TLS_KEY_FILE=%d/tls-key
-Environment=GATEWAY_TLS_CERT_FILE=%d/tls-cert
+Environment=GATEWAY_KEY_FILE=/etc/positioncrew-gateway/key
+Environment=GATEWAY_TLS_KEY_FILE=/etc/positioncrew-gateway/privkey.pem
+Environment=GATEWAY_TLS_CERT_FILE=/etc/positioncrew-gateway/fullchain.pem
 Environment=GATEWAY_HOST=0.0.0.0
 Environment=GATEWAY_PORT=443
 Restart=on-failure

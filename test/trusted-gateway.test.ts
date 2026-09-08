@@ -288,4 +288,38 @@ describe('Worker public gateway boundary', () => {
     expect(response.headers.has('Access-Control-Allow-Origin')).toBe(false);
     expect(await response.json()).not.toMatchObject({ error: 'INVALID_GATEWAY_REQUEST' });
   });
+
+  it('uses verified clients for actual hire quota keys and ignores spoofed forwarding headers', async () => {
+    const rateKeys: unknown[] = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...values: unknown[]) {
+            if (sql.startsWith('INSERT INTO fresh_marketplace_rate_limits')) rateKeys.push(values[0]);
+            return this;
+          },
+          async first() { return null; },
+          async run() { return { success: true, meta: { changes: 0 } }; },
+        };
+      },
+      // Deny admission after recording the actual Worker-generated quota key.
+      // No provider, job or receipt is created by this boundary test.
+      async batch() { return Array.from({ length: 4 }, () => ({ success: true, meta: { changes: 0 } })); },
+    };
+    for (const [index, ip] of ['192.0.2.1', '198.51.100.2', '192.0.2.1'].entries()) {
+      const request = signedRequest({ path: '/api/benchmark-hires', ip,
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        headers: { 'CF-Connecting-IP': `203.0.113.${index + 1}`, 'X-Forwarded-For': `203.0.113.${index + 2}` },
+        body: JSON.stringify({ schemaVersion: 'positioncrew.fresh-marketplace-hire-request.v1',
+          idempotencyKey: `44444444-4444-4444-8444-${String(index).padStart(12, '0')}`,
+          benchmarkSlug: 'lending-rescue', providerSlug: 'lending-rescue' }),
+      });
+      const response = await worker.fetch(request, { ...environment(), DB: db }, context);
+      expect(response.status).toBe(429);
+    }
+    expect(rateKeys).toHaveLength(3);
+    expect(rateKeys.every((key) => typeof key === 'string' && /^sha256:[a-f0-9]{64}$/.test(key))).toBe(true);
+    expect(rateKeys[0]).not.toBe(rateKeys[1]);
+    expect(rateKeys[0]).toBe(rateKeys[2]);
+  });
 });

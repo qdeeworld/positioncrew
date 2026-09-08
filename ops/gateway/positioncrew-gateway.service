@@ -5,11 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-DynamicUser=yes
+User=pc-gateway
+Group=pc-gateway
 WorkingDirectory=/opt/positioncrew-gateway
 ExecStart=/usr/bin/node /opt/positioncrew-gateway/gateway.mjs
-LoadCredential=gateway-key:/etc/positioncrew-gateway/key
-Environment=GATEWAY_KEY_FILE=%d/gateway-key
+Environment=GATEWAY_KEY_FILE=/etc/positioncrew-gateway/key
 Environment=GATEWAY_HOST=127.0.0.1
 Environment=GATEWAY_PORT=18741
 Restart=on-failure
