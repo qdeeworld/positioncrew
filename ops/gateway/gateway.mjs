@@ -24,7 +24,7 @@ function normalizedIp(value) {
   return ip.toLowerCase();
 }
 
-function checkedTarget(raw) {
+export function checkedTarget(raw) {
   if (!raw || !raw.startsWith('/') || raw.startsWith('//') || /[\\#\x00-\x20\x7f]/.test(raw)
     || /%(?![\da-f]{2})/i.test(raw)) throw new Rejection(400, 'INVALID_TARGET');
   const path = raw.split('?')[0];

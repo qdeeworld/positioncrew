@@ -47,8 +47,18 @@ that host-wide drop-in; verify the effective unit properties and process
 `NoNewPrivs` after startup. Do not edit the global override. The account
 has no access to the existing runtime accounts or their secrets.
 Initial DNS validation can obtain the certificate before a traffic cutover.
-After cutover, configure and test unattended HTTP-01 standalone renewal on
-port 80; the initial manual DNS configuration alone is not auto-renewal.
+The separate `positioncrew-http-redirect.service` preserves plain-HTTP links
+with a fixed canonical HTTPS redirect and serves only bounded regular public
+ACME token files from `/var/lib/positioncrew-acme/.well-known/acme-challenge`.
+Create that directory root-owned, mode 755. Create a separate `pc-redirect`
+system account with no login, home or supplementary groups; do not add it to
+`pc-gateway`. The HTTP unit cannot access either the gateway configuration or
+the Certbot directory, and needs no HMAC or TLS key. Install the same gateway-only
+hardening drop-in for this unit. Verify that its effective user and groups differ
+from the TLS service and that it cannot read either secret. It accepts GET/HEAD only and never proxies an
+HTTP mutation. After cutover, configure and test unattended HTTP-01 webroot
+renewal with webroot `/var/lib/positioncrew-acme`; initial manual DNS issuance
+alone is not auto-renewal. Renewal does not stop the HTTP or HTTPS listener.
 
 Before cutover, validate signed Worker integration, separate client quotas,
 forged-envelope refusals, mutation Origin checks, a harmless create/run/poll
