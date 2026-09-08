@@ -1,6 +1,6 @@
 import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { TrustedGatewayRequestError, verifyTrustedGatewayRequest } from '../src/api/trusted-gateway';
+import { TrustedGatewayRequestError, verifyTrustedGatewayRequest } from '../src/api/trusted-gateway.js';
 import worker from '../worker/index.js';
 
 const SECRET = 'a1'.repeat(32);
