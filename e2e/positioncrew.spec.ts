@@ -21,6 +21,57 @@ async function verifyBrowserHireObservation(body: Record<string, unknown>) {
 
 const TRANSIENT_REQUEST_ERROR = /socket hang up|ECONNRESET|ECONNREFUSED|fetch failed/i;
 
+test("the current Yield composer disables expired evidence before another hire", async ({ page }) => {
+  await installDeterministicLiveProbeRoutes(page);
+  await page.goto("/#jobs");
+  await page.getByRole("combobox", { name: "Job", exact: true }).selectOption("YIELD_OPTIMIZATION");
+  const hire = page.getByRole("button", { name: "Hire and run current request", exact: true });
+  await expect(hire).toBeEnabled();
+  await page.clock.setFixedTime(new Date(Date.now() + 10 * 60_000));
+  await expect(page.getByTestId("current-request-refresh-required")).toContainText("Use Refresh above");
+  await expect(hire).toBeDisabled();
+});
+
+test("a server refresh refusal is readable and a newly loaded request recovers", async ({ page }) => {
+  await installDeterministicLiveProbeRoutes(page);
+  let creations = 0;
+  await page.route("**/api/benchmark-hires", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    creations += 1;
+    await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({
+      schemaVersion: "positioncrew.api-error.v1", error: "REFRESH_REQUIRED", details: ["The server observation expired."],
+    }) });
+  });
+  await page.goto("/#jobs");
+  await page.getByRole("combobox", { name: "Job", exact: true }).selectOption("YIELD_OPTIMIZATION");
+  const hire = page.getByRole("button", { name: "Hire and run current request", exact: true });
+  await expect(hire).toBeEnabled();
+  await hire.click();
+  await expect(page.getByRole("alert")).toContainText("Refresh the position or market above");
+  await expect(page.getByRole("alert")).not.toContainText("409");
+  await expect(page.getByRole("button", { name: "Retry current hire", exact: true })).toBeDisabled();
+  await expect(hire).toBeDisabled();
+  await page.locator(".job-composer").getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(hire).toBeEnabled();
+  await expect(page.getByTestId("current-request-refresh-required")).toHaveCount(0);
+  await expect(page.getByText("This hire did not finish.", { exact: true })).toHaveCount(0);
+  expect(creations).toBe(1);
+});
+
+test("the current LP composer requires a fresh position after expiry", async ({ page }) => {
+  await installDeterministicLiveProbeRoutes(page);
+  await page.goto("/#jobs");
+  await page.getByRole("combobox", { name: "Job", exact: true }).selectOption("LP_REBALANCE");
+  await page.locator(".job-composer input").first().fill("1456267");
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
+  await page.getByRole("button", { name: "Use live position", exact: true }).click();
+  const compare = page.getByRole("button", { name: "Compare live providers", exact: true });
+  await expect(compare).toBeEnabled();
+  await page.clock.setFixedTime(new Date(Date.now() + 10 * 60_000));
+  await expect(page.getByTestId("current-request-refresh-required")).toContainText("Use Inspect above");
+  await expect(compare).toBeDisabled();
+});
+
 async function getWithTransportRetry(request: APIRequestContext, url: string) {
   try {
     return await request.get(url);
@@ -32,6 +83,62 @@ async function getWithTransportRetry(request: APIRequestContext, url: string) {
     return request.get(url);
   }
 }
+
+test("reusing the same LP probe cannot clear a server refresh rejection", async ({ page }) => {
+  await installDeterministicLiveProbeRoutes(page);
+  let creations = 0;
+  await page.route("**/api/benchmark-hires", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    creations += 1;
+    await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({
+      schemaVersion: "positioncrew.api-error.v1", error: "REFRESH_REQUIRED", details: ["The observation signing key was rotated."],
+    }) });
+  });
+  await page.goto("/#jobs");
+  await page.getByRole("combobox", { name: "Job", exact: true }).selectOption("LP_REBALANCE");
+  await page.locator(".job-composer input").first().fill("1456267");
+  await page.getByRole("button", { name: "Inspect", exact: true }).click();
+  const usePosition = page.getByRole("button", { name: "Use live position", exact: true });
+  await usePosition.click();
+  const compare = page.getByRole("button", { name: "Compare live providers", exact: true });
+  await compare.click();
+  await expect(compare).toBeDisabled();
+  await expect(page.getByRole("alert")).toContainText("Refresh the position or market above");
+  await usePosition.click();
+  await expect(compare).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Retry current hire", exact: true })).toBeDisabled();
+  await expect(page.getByTestId("current-request-refresh-required")).toBeVisible();
+  expect(creations).toBe(1);
+});
+
+test("a persisted refresh failure survives polling and clears only with fresh evidence", async ({ page }) => {
+  const mockedHire = await installCurrentLendingHireRoutes(page, {
+    failedCode: "REFRESH_REQUIRED",
+    failedMessage: "This server observation has expired. Reload the market or position before continuing.",
+  });
+  // The server rejection must win even while the client's clock considers the
+  // original observation fresh.
+  await page.clock.setFixedTime(new Date(Date.now() - 60_000));
+  await page.goto("/#jobs");
+  await page.locator(".job-composer input").first().fill(mockedHire.account);
+  await page.getByRole("button", { name: "Load position", exact: true }).click();
+  const hire = page.getByRole("button", { name: "Check eligibility and hire", exact: true });
+  await expect(hire).toBeEnabled();
+  await hire.click();
+  await expect(page.getByRole("alert")).toContainText("Refresh the position or market above");
+  await expect(page.getByRole("alert")).not.toContainText("REFRESH_REQUIRED");
+  await expect(hire).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Retry current hire", exact: true })).toBeDisabled();
+  expect(mockedHire.runCount).toBe(1);
+  expect(mockedHire.createBodies).toHaveLength(1);
+
+  await installCurrentLendingHireRoutes(page);
+  await page.getByRole("button", { name: "Load position", exact: true }).click();
+  await expect(hire).toBeEnabled();
+  await expect(page.getByTestId("current-request-refresh-required")).toHaveCount(0);
+  await expect(page.getByText("This hire did not finish.", { exact: true })).toHaveCount(0);
+  expect(mockedHire.createBodies).toHaveLength(1);
+});
 
 const lendingFixture = JSON.parse(
   readFileSync(
@@ -473,6 +580,7 @@ async function installCurrentLendingHireRoutes(
     staleRunning?: boolean;
     getDelayMs?: number;
     failedMessage?: string;
+    failedCode?: string;
     earlyActionDeadline?: "recommendation" | "alternative";
   } = {},
 ) {
@@ -591,7 +699,7 @@ async function installCurrentLendingHireRoutes(
       startedAt: state === "CREATED" ? null : now.toISOString(),
       completedAt: state === "COMPLETED" ? now.toISOString() : null,
       apiDurationMilliseconds: state === "COMPLETED" ? 43 : null,
-      error: state === "FAILED" ? { code: "PROVIDER_TIMEOUT", message: options.failedMessage ?? "Provider run failed." } : null,
+      error: state === "FAILED" ? { code: options.failedCode ?? "PROVIDER_TIMEOUT", message: options.failedMessage ?? "Provider run failed." } : null,
     },
     receipt: state === "COMPLETED" ? {
       receiptId,
