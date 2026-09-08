@@ -1,6 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { freshMarketplaceTaskForService, sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
-import { runFrozenFixture } from "../src/api/fixture-jobs.js";
+import { runCurrentBlockPinnedProviderDeliverable, runFrozenFixture } from "../src/api/fixture-jobs.js";
+import { createLpLiveMatchAudition, selectLpLiveMatchProvider } from "../src/marketplace/lp-live-match.js";
+import { LpLiveMatchAuditionSchema, LpLiveMatchExecutionSchema } from "../src/marketplace/lp-live-match-schema.js";
+import { isFreshMarketplaceChainForReference } from "../web/src/job-history.js";
 
 const hireId = "19b75690-385e-4a6c-8461-ea86f96b9c21";
 const historyKey = "positioncrew.recent-jobs.v1";
@@ -124,40 +127,57 @@ test("saved run body timeout returns to status recovery instead of creating anot
 
 async function savedLpRefusal(code: string, detail: string, waitMilliseconds: number) {
   // Synthetic UI recovery fixture, not an external hire or financial proof.
-  // The factory supplies a complete request/result shape; the saved refusal
-  // exercises the real Jobs -> SummaryResult integration without an RPC call.
-  const response = await runFrozenFixture("LP_REBALANCE");
-  if (response.result.request.service !== "LP_REBALANCE" || response.result.deliverable.service !== "LP_REBALANCE") {
+  // Reuse the audition/selection and sealed-deliverable APIs used by the main
+  // browser suite, then require the real public hydration validator to accept it.
+  const baseline = await runFrozenFixture("LP_REBALANCE");
+  if (baseline.result.request.service !== "LP_REBALANCE" || baseline.result.deliverable.service !== "LP_REBALANCE") {
     throw new Error("LP recovery fixture must contain an LP request and deliverable");
   }
-  const request = response.result.request;
-  const completedAt = request.deadline;
+  const request = { ...baseline.result.request, requestId: "pancake-position-1455700-1" };
+  const completedAt = baseline.generatedAt;
   const startedAt = new Date(Date.parse(completedAt) - waitMilliseconds).toISOString();
   const createdAt = new Date(Date.parse(startedAt) - 10_000).toISOString();
   const observedAt = request.sources[0]?.observedAt ?? request.requestedAt;
   const requestHash = await sha256Commitment(request);
-  const evidenceHash = await sha256Commitment({ fixture: "expired-lp-refusal", code });
+  const source = { observedAt, blockNumber: "1", explorerUrl: "https://bscscan.com/block/1" };
   const receiptId = "6ae49465-4e1d-4dc5-a614-7cda85e4a821";
   const jobId = "c472a690-385e-4a6c-8461-ea86f96b9c21";
-  const endpoint = "https://erc8004.heyanon.ai/mcp/v3pools";
-  const selection = {
-    schemaVersion: "positioncrew.lp-live-match-provider-selection.v1" as const,
-    selectedProvider: "HEYANON" as const,
-    providerId: "erc8004:56:45650",
-    providerName: "V3 Pools powered by HeyAnon",
-    identity: { protocol: "ERC-8004" as const, network: "BSC_MAINNET" as const, chainId: 56 as const,
-      agentId: "45650", owner: "0xda977767452c5dd021624511f14df67b6c9c2c1b" },
-    endpoint,
-    adapterId: "positioncrew:mcp:heyanon-v3pools:lp-job:v1",
-    auditionHash: evidenceHash,
-    selectedAt: startedAt,
+  const initialAudition = (await createLpLiveMatchAudition(request, source, requestHash, new Date(createdAt), {
+    fetchImpl: async () => { throw new Error("UI fixture: no real provider or RPC call"); },
+  })).audition;
+  const stubOutputHash = await sha256Commitment({ fixture: "synthetic eligible external assessment", requestHash });
+  // Model an earlier successful audition, followed by the recorded delivery
+  // failure. This stub is test data, not evidence that a real provider answered.
+  const audition = LpLiveMatchAuditionSchema.parse({
+    ...initialAudition,
+    candidates: initialAudition.candidates.map((candidate) => candidate.providerKey === "HEYANON" ? {
+      ...candidate,
+      status: "COMPATIBLE",
+      selectable: true,
+      rawResponseHash: stubOutputHash,
+      normalizedResponseHash: stubOutputHash,
+      checks: [{ code: "UI_FIXTURE_AUDITION", status: "PASS", detail: "Synthetic eligible audition for saved-result UI recovery only." }],
+    } : candidate),
+  });
+  const evidence = {
+    schemaVersion: "positioncrew.current-block-pinned-evidence.v1",
+    evidenceClass: "CURRENT_BLOCK_PINNED",
+    chainId: 56,
+    source,
+    freshnessAtCreation: "FRESH",
+    evaluatedAt: createdAt,
+    maxDataAgeSeconds: request.maxDataAgeSeconds,
+    lpLiveMatchAudition: audition,
   };
-  response.evidenceMode = "CURRENT_BLOCK_PINNED";
-  response.benchmarkLock = null;
-  response.generatedAt = completedAt;
-  response.claimBoundary = ["Synthetic saved-result UI fixture; no marketplace call, payment, or chain transaction."];
-  response.result.deliverable = {
-    ...response.result.deliverable,
+  const evidenceHash = await sha256Commitment(evidence);
+  const selection = selectLpLiveMatchProvider(audition, {
+    schemaVersion: "positioncrew.lp-live-match-selection-request.v1",
+    selectedProvider: "HEYANON",
+    auditionHash: evidenceHash,
+  }, evidenceHash, new Date(startedAt));
+  const response = await runCurrentBlockPinnedProviderDeliverable(request, {
+    ...baseline.result.deliverable,
+    requestId: request.requestId,
     status: "REFUSED_INCONSISTENT_DATA",
     decision: "NONE",
     summary: "The selected LP provider could not safely complete this exact job; no fallback provider was used.",
@@ -169,32 +189,35 @@ async function savedLpRefusal(code: string, detail: string, waitMilliseconds: nu
     expectedGrossFeesUsd: "0",
     expectedNetBenefitUsd: "0",
     breakEvenHours: null,
+    inventoryExposure: { token0Bps: request.position.token0ShareBps, token1Bps: request.position.token1ShareBps },
     invalidationConditions: ["Create a new block-pinned audition before trying another provider."],
     limitations: [detail, "No approval, signature, payment, or liquidity transaction occurred."],
-  };
-  const deliverableHash = await sha256Commitment(response.result.deliverable);
-  response.liveMatchExecution = {
+  }, new Date(completedAt), { providerId: selection.providerId });
+  const deliverableHash = response.result.job.deliverable?.deliverableHash;
+  if (!deliverableHash) throw new Error("Sealed LP recovery result has no deliverable commitment");
+  response.liveMatchExecution = LpLiveMatchExecutionSchema.parse({
     schemaVersion: "positioncrew.lp-live-match-execution.v1",
     outcome: "REFUSED",
     selection,
-    invocation: { startedAt, completedAt, endpoint, latencyMilliseconds: waitMilliseconds,
+    invocation: { startedAt, completedAt, endpoint: selection.endpoint, latencyMilliseconds: waitMilliseconds,
       rawResponseHash: null, normalizedResponseHash: deliverableHash,
       checks: [{ code, status: "FAIL", detail }] },
-    source: { hireId, jobId, requestHash, evidenceHash, blockNumber: "1", observedAt,
-      explorerUrl: "https://bscscan.com/block/1" },
+    source: { hireId, jobId, requestHash, evidenceHash, ...source },
     commerce: { directCostUsd: "0.00", payment: "NONE", settlement: "NONE", walletRequired: false },
-    claimBoundary: ["UI recovery fixture only; the selected provider was not invoked."],
-  };
+    claimBoundary: [
+      "UI recovery fixture only; the selected provider was not invoked.",
+      "The saved request, audition and selected provider remain bound together.",
+      "No payment, provider substitution or chain transaction occurred.",
+    ],
+  });
   response.receipt = { ...response.receipt, mode: "SESSION_EMBEDDED", path: `/api/benchmark-receipts/${receiptId}` };
   const [benchmarkSlug, task] = freshMarketplaceTaskForService("LP_REBALANCE")!;
-  return {
+  const chain = {
     schemaVersion: "positioncrew.fresh-marketplace-chain.v1",
     hire: { hireId, service: "LP_REBALANCE", benchmarkSlug, providerSlug: task.providerSlug,
       providerId: selection.providerId, request, requestHash, evidenceHash,
       evidenceMode: "CURRENT_BLOCK_PINNED", createdAt,
-      evidence: { evidenceClass: "CURRENT_BLOCK_PINNED", source: {
-        observedAt, blockNumber: "1", explorerUrl: "https://bscscan.com/block/1",
-      } } },
+      evidence },
     job: { jobId, state: "COMPLETED", status: "COMPLETED", createdAt, startedAt, completedAt,
       apiDurationMilliseconds: waitMilliseconds, error: null,
       providerSelection: selection, providerSelectionHash: await sha256Commitment(selection) },
@@ -202,6 +225,10 @@ async function savedLpRefusal(code: string, detail: string, waitMilliseconds: nu
       responseHash: await sha256Commitment(response), deliverableHash,
       evaluationHash: response.result.evaluation.evaluationHash, response },
   };
+  expect(await isFreshMarketplaceChainForReference(chain, {
+    hireId, service: "LP_REBALANCE", rememberedAt: createdAt,
+  }), "Saved LP refusal fixture must pass the unchanged public hydration validator").toBe(true);
+  return chain;
 }
 
 for (const scenario of [
