@@ -18,7 +18,7 @@ const markets = [
 type BlockHeader = { number: string; timestamp: string; hash?: string };
 type RpcCall = { id: number; method: string; params: unknown[] };
 type Mutation = (header: BlockHeader, baseline: boolean, afterState: boolean) => BlockHeader | null;
-function installRpc(mutate: Mutation = (header) => header) {
+function installRpc(mutate: Mutation = (header) => header, retained = true, rejectState?: "noncanonical" | "unsupported") {
   const calls: RpcCall[] = [];
   let stateCalls = 0;
   const headerChecks: Array<{ baseline: boolean; stateCalls: number }> = [];
@@ -36,7 +36,11 @@ function installRpc(mutate: Mutation = (header) => header) {
       } else if (call.method === "eth_gasPrice") result = toHex(50_000_000n);
       else if (call.method === "eth_call") {
         stateCalls += 1;
-        expect(call.params[1]).toBe(toHex(BLOCK));
+        expect(call.params[1]).toEqual(retained ? { blockHash: OBSERVED_HASH, requireCanonical: true } : toHex(BLOCK));
+        if (rejectState) return { jsonrpc: "2.0", id: call.id, error: {
+          code: rejectState === "noncanonical" ? -32000 : -32602,
+          message: rejectState === "noncanonical" ? "block is not canonical" : "block hash selector is unsupported",
+        } };
         const input = call.params[0] as { to: string; data: string };
         const selector = input.data.slice(0, 10);
         const market = markets.find((entry) => entry[1].toLowerCase() === input.to.toLowerCase());
@@ -71,6 +75,9 @@ describe("retained Yield capture block consistency", () => {
     expect(result.yieldRateObservation?.marketRates).toHaveLength(4);
     const stateCount = rpc.calls.filter((call) => call.method === "eth_call").length;
     expect(stateCount).toBe(30);
+    for (const call of rpc.calls.filter((call) => call.method === "eth_call")) {
+      expect(call.params[1]).toEqual({ blockHash: OBSERVED_HASH, requireCanonical: true });
+    }
     expect(rpc.headerChecks.slice(-2)).toEqual([
       { baseline: false, stateCalls: stateCount }, { baseline: true, stateCalls: stateCount },
     ]);
@@ -116,9 +123,19 @@ describe("retained Yield capture block consistency", () => {
   });
 
   it("leaves the legacy non-retained capture path unchanged", async () => {
-    const rpc = installRpc();
+    const rpc = installRpc((header) => header, false);
     const result = await inspectVenusStableYields();
     expect(result).not.toHaveProperty("yieldRateObservation");
     expect(rpc.headerChecks).toHaveLength(2);
+  });
+
+  it.each(["noncanonical", "unsupported"] as const)("never downgrades a %s hash-bound state read to a numeric tag", async (failure) => {
+    const rpc = installRpc((header) => header, true, failure);
+    await expect(inspectVenusStableYields({ retainYieldRateObservation: true })).rejects.toThrow(
+      failure === "noncanonical" ? "not canonical" : "unsupported",
+    );
+    const stateCalls = rpc.calls.filter((call) => call.method === "eth_call");
+    expect(stateCalls.length).toBeGreaterThan(0);
+    for (const call of stateCalls) expect(call.params[1]).toEqual({ blockHash: OBSERVED_HASH, requireCanonical: true });
   });
 });
