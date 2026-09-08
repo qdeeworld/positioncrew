@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pc-gateway
-Group=pc-gateway
+User=pc-redirect
+Group=pc-redirect
 WorkingDirectory=/opt/positioncrew-gateway
 ExecStart=/usr/bin/node /opt/positioncrew-gateway/http-redirect.mjs
 Environment=REDIRECT_HOST=0.0.0.0
@@ -21,6 +21,7 @@ UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
+InaccessiblePaths=/etc/positioncrew-gateway /etc/letsencrypt
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

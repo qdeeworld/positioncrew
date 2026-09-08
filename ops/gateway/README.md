@@ -50,8 +50,12 @@ Initial DNS validation can obtain the certificate before a traffic cutover.
 The separate `positioncrew-http-redirect.service` preserves plain-HTTP links
 with a fixed canonical HTTPS redirect and serves only bounded regular public
 ACME token files from `/var/lib/positioncrew-acme/.well-known/acme-challenge`.
-Create that directory root-owned, mode 755, and install the same gateway-only
-hardening drop-in for this unit. It accepts GET/HEAD only and never proxies an
+Create that directory root-owned, mode 755. Create a separate `pc-redirect`
+system account with no login, home or supplementary groups; do not add it to
+`pc-gateway`. The HTTP unit cannot access either the gateway configuration or
+the Certbot directory, and needs no HMAC or TLS key. Install the same gateway-only
+hardening drop-in for this unit. Verify that its effective user and groups differ
+from the TLS service and that it cannot read either secret. It accepts GET/HEAD only and never proxies an
 HTTP mutation. After cutover, configure and test unattended HTTP-01 webroot
 renewal with webroot `/var/lib/positioncrew-acme`; initial manual DNS issuance
 alone is not auto-renewal. Renewal does not stop the HTTP or HTTPS listener.
