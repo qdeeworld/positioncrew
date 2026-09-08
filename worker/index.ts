@@ -1526,6 +1526,10 @@ async function createFreshMarketplaceHire(
           const firstParty = createYieldOptimizationDeliverable(parsed.request, new Date(createdAt));
           const comparison = await auditionAiKiVenusYield(parsed.request, firstParty, {
             now: new Date(createdAt),
+            completionNow: () => new Date(),
+            ...(observationBinding?.yieldRateObservation ? {
+              verifiedYieldRateObservation: observationBinding.yieldRateObservation,
+            } : {}),
           });
           return {
             schemaVersion: "positioncrew.external-yield-comparison-summary.v1" as const,
@@ -2700,10 +2704,11 @@ async function api(
 
     if (url.pathname === "/api/markets/venus/stable-yields") {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
-      const probe = await inspectVenusStableYields();
+      const { yieldRateObservation, ...probe } = await inspectVenusStableYields({ retainYieldRateObservation: true });
       const observationBinding = await issueServerObservationBinding(probe.yieldRequest, {
         blockNumber: probe.source.blockNumber, observedAt: probe.source.blockTimestamp, explorerUrl: probe.source.explorerUrl,
-      }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date());
+      }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date(),
+      yieldRateObservation === undefined ? undefined : { yieldRateObservation });
       return json({ ...probe, observationBinding });
     }
 

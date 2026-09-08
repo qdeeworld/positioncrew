@@ -26,6 +26,7 @@ import {
   type YieldOptimizationRequest,
 } from "../contracts/yield-optimization.js";
 import { FIXED_SCALE, formatFixed } from "../core/fixed.js";
+import type { YieldRateObservation } from "../commerce/server-observation-binding.js";
 
 const MAINNET_RPC = "https://bsc-dataseed-public.bnbchain.org";
 const LOG_RPC = "https://bsc-rpc.publicnode.com";
@@ -581,6 +582,8 @@ export interface PancakeGridPriceSample {
 }
 
 export interface VenusYieldProbe {
+  /** Server capture only; public routes expose this inside the signed binding. */
+  yieldRateObservation?: YieldRateObservation;
   schemaVersion: "positioncrew.venus-yield-probe.v1";
   generatedAt: string;
   chainId: 56;
@@ -608,6 +611,7 @@ export interface VenusYieldProbe {
 export interface VenusYieldRequestOptions {
   account?: string;
   capitalUsd?: number;
+  retainYieldRateObservation?: boolean;
 }
 
 export interface PancakePositionProbe {
@@ -1784,6 +1788,14 @@ export async function inspectPancakePosition(
   };
 }
 
+function yieldObservationBlockHash(value: unknown): string {
+  if (!value || typeof value !== "object" || !("hash" in value) ||
+      typeof value.hash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(value.hash)) {
+    throw new Error("The captured Venus block is missing its block hash");
+  }
+  return value.hash;
+}
+
 export async function inspectVenusStableYields(
   options: VenusYieldRequestOptions = {},
 ): Promise<VenusYieldProbe> {
@@ -1930,6 +1942,7 @@ export async function inspectVenusStableYields(
     return {
       ...market,
       baseSupplyApyBps: annualizedYieldBps(supplyRate, secondsPerBlock),
+      supplyRatePerBlock: supplyRate.toString(),
       availableLiquidityUsdFixed,
       availableLiquidityUsd: formatFixed(availableLiquidityUsdFixed, 2),
     };
@@ -2024,6 +2037,25 @@ export async function inspectVenusStableYields(
       availableLiquidityUsd: market.availableLiquidityUsd,
     })),
     yieldRequest,
+    ...(options.retainYieldRateObservation ? {
+      yieldRateObservation: {
+        schemaVersion: "positioncrew.venus-yield-rate-observation.v1" as const,
+        chainId: 56 as const,
+        observedBlock: {
+          blockNumber: blockNumber.toString(),
+          blockHash: yieldObservationBlockHash(blockValue),
+          observedAt,
+        },
+        baselineBlock: {
+          blockNumber: BigInt(priorBlock.number).toString(),
+          blockHash: yieldObservationBlockHash(priorBlockValue),
+          observedAt: new Date(Number(BigInt(priorBlock.timestamp)) * 1_000).toISOString(),
+        },
+        marketRates: decodedMarkets.map((market) => ({
+          market: market.vToken, supplyRatePerBlock: market.supplyRatePerBlock,
+        })),
+      },
+    } : {}),
     source: {
       comptroller: VENUS_COMPTROLLER,
       oracle,
