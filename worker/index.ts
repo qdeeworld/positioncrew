@@ -1,4 +1,5 @@
 import { ZodError } from "zod";
+import { verifyTrustedGatewayRequest, TrustedGatewayRequestError } from "../src/api/trusted-gateway.js";
 import agentCaptureManifest from "../benchmarks/agent-capture-commitments-2026-08-12.json" with { type: "json" };
 import erc8183Job489Deliverable from "../evidence/erc8183-job-489.deliverable.json" with { type: "json" };
 import erc8183TestnetLedger from "../evidence/erc8183-jobs.testnet.json" with { type: "json" };
@@ -167,6 +168,7 @@ interface Env {
   ALTANA_VENUS_SESSION?: string;
   BSC_LOG_RPC_URL?: string;
   SOURCE_OBSERVATION_HMAC_KEY?: string;
+  TRUSTED_GATEWAY_HMAC_KEY?: string;
 }
 
 interface WorkerExecutionContext {
@@ -2780,6 +2782,14 @@ function withSecurityHeaders(response: Response): Response {
 
 export default {
   async fetch(request: Request, env: Env, context: WorkerExecutionContext): Promise<Response> {
+    try {
+      request = await verifyTrustedGatewayRequest(request, env.TRUSTED_GATEWAY_HMAC_KEY);
+    } catch (error) {
+      if (!(error instanceof TrustedGatewayRequestError)) throw error;
+      return withSecurityHeaders(withApiCors(apiError(403, "INVALID_GATEWAY_REQUEST", [
+        "Trusted gateway authentication failed.",
+      ]), request));
+    }
     const url = new URL(request.url);
     if (
       url.pathname.startsWith("/api/") ||

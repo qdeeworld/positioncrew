@@ -36,6 +36,7 @@ jobs:
           npm run typecheck
           npm test
           node --test ops/positioncrew-health-monitor.test.mjs
+          npm run test:gateway
       - name: Build production bundle
         run: npm run build
       - name: D1-backed lifecycle integrations
