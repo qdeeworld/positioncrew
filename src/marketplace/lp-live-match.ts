@@ -16,7 +16,7 @@ import { canonicalHash } from "../core/canonical.js";
 import { evaluateFinancialInvariants } from "../evaluators/financial-invariants.js";
 import { HEYANON_V3_POOLS } from "./heyanon-v3pools-adapter.js";
 import { auditionHeyAnonV3LpJob, HeyAnonMcpCallError } from "./heyanon-v3pools-lp-job-adapter.js";
-import { BscPositionVerificationError } from "./bsc-verification-rpc.js";
+import { BscPositionVerificationError, BscVerificationCancelledError } from "./bsc-verification-rpc.js";
 import {
   LpLiveMatchAuditionSchema,
   LpLiveMatchExecutionSchema,
@@ -398,11 +398,12 @@ async function boundedExternalInvocation<T>(
   try {
     return await Promise.race([
       operation.catch((error: unknown) => {
-        // A cooperative MCP rejection may win the race against our timer.
-        // Restore only this deadline's provenance, never a local MCP timeout
-        // or an unrelated cancellation/transport/verification failure.
-        if (error instanceof HeyAnonMcpCallError &&
-            error.failureKind === "CALLER_CANCELLED" &&
+        // A prerequisite or MCP cancellation may beat the race timer. Restore
+        // only this deadline's typed cancellation, never an independent RPC
+        // failure, attempt timeout, local MCP timeout, or unrelated abort.
+        const callerCancelled = error instanceof BscVerificationCancelledError ||
+          (error instanceof HeyAnonMcpCallError && error.failureKind === "CALLER_CANCELLED");
+        if (callerCancelled &&
             callerSignal.aborted && callerSignal.reason === deadlineError) {
           throw deadlineError;
         }

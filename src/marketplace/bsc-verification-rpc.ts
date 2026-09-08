@@ -16,6 +16,13 @@ export class BscVerificationRpcError extends BscPositionVerificationError {
   }
 }
 
+export class BscVerificationCancelledError extends BscVerificationRpcError {
+  constructor() {
+    super("Caller cancelled verification");
+    this.name = "BscVerificationCancelledError";
+  }
+}
+
 class AttemptError extends Error {
   constructor(message: string, readonly retryable: boolean) {
     super(message);
@@ -45,16 +52,22 @@ export function createBscVerificationRpc(
 
   async function attempt(url: string, method: ReadMethod, params: unknown[], milliseconds: number): Promise<string> {
     const controller = new AbortController();
-    const callerAborted = () => controller.abort(options.signal?.reason);
+    let callerCancelled = false;
+    const callerAborted = () => {
+      // Preserve the first cancellation cause. A later caller abort must not
+      // relabel an attempt timeout that has already won this race.
+      if (controller.signal.aborted) return;
+      callerCancelled = true;
+      controller.abort(options.signal?.reason);
+    };
     options.signal?.addEventListener("abort", callerAborted, { once: true });
     if (options.signal?.aborted) callerAborted();
     const timer = setTimeout(() => controller.abort(new Error("RPC attempt timed out")), milliseconds);
     let onAbort: (() => void) | undefined;
     const aborted = new Promise<never>((_resolve, reject) => {
-      onAbort = () => reject(new AttemptError(
-        options.signal?.aborted ? "Caller cancelled verification" : "RPC attempt timed out",
-        !options.signal?.aborted,
-      ));
+      onAbort = () => reject(callerCancelled
+        ? new BscVerificationCancelledError()
+        : new AttemptError("RPC attempt timed out", true));
       controller.signal.addEventListener("abort", onAbort, { once: true });
       if (controller.signal.aborted) onAbort();
     });
@@ -121,7 +134,7 @@ export function createBscVerificationRpc(
       const failures: string[] = [];
       const ordered = preferred ? [preferred, ...candidates.filter((candidate) => candidate !== preferred)] : [];
       for (const candidate of ordered) {
-        if (options.signal?.aborted) throw new BscVerificationRpcError("Caller cancelled verification");
+        if (options.signal?.aborted) throw new BscVerificationCancelledError();
         const remaining = deadline - Date.now();
         if (remaining <= 0) throw new BscVerificationRpcError("Overall verification deadline exceeded");
         try {

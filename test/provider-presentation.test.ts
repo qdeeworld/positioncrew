@@ -66,6 +66,70 @@ describe("selected provider failure presentation", () => {
   });
 });
 
+describe("selected LP delivery deadline presentation", () => {
+  it.each([
+    [20_000, "20"],
+    [2_500, "2.5"],
+    [1, "0.001"],
+  ])("preserves the recorded %i ms bounded wait", (milliseconds, seconds) => {
+    const result = selectedProviderFailureMessage({
+      outcome: "REFUSED", invocation: { checks: [{
+        code: "LP_DELIVERY_DEADLINE", status: "FAIL",
+        detail: `PositionCrew's LP delivery deadline expired after ${milliseconds} ms; the external invocation did not complete.`,
+      }] },
+    });
+    expect(result).toBe(`The job's bounded delivery wait timed out after ${seconds} seconds. This wait is limited by the delivery time budget and the remaining lifetime of your request and saved market data. Refresh the comparison and try again.`);
+    expect(result).not.toContain("pool-price");
+    expect(result).not.toContain("request expired");
+  });
+
+  it.each(["0", "-1", "20001", "2.5", "1e3", "NaN", "Infinity", ""])(
+    "does not invent a duration from malformed budget %s",
+    (milliseconds) => {
+      const result = selectedProviderFailureMessage({
+        outcome: "REFUSED", invocation: { checks: [{
+          code: "LP_DELIVERY_DEADLINE", status: "FAIL",
+          detail: `PositionCrew's LP delivery deadline expired after ${milliseconds} ms; the external invocation did not complete.`,
+        }] },
+      });
+      expect(result).toContain("The job's bounded delivery wait timed out.");
+      expect(result).not.toContain("seconds");
+    },
+  );
+
+  it("does not extract a duration from an unknown diagnostic format", () => {
+    const result = selectedProviderFailureMessage({
+      outcome: "REFUSED", invocation: { checks: [{
+        code: "LP_DELIVERY_DEADLINE", status: "FAIL",
+        detail: "Provider URL https://private.invalid/?budget=20000; timeout 20000 ms",
+      }] },
+    });
+    expect(result).toContain("The job's bounded delivery wait timed out.");
+    expect(result).not.toContain("20000");
+    expect(result).not.toContain("private.invalid");
+  });
+
+  it("explains the known deadline without a number when its detail is absent", () => {
+    const result = selectedProviderFailureMessage({
+      outcome: "REFUSED", invocation: { checks: [{ code: "LP_DELIVERY_DEADLINE", status: "FAIL" }] },
+    });
+    expect(result).toContain("The job's bounded delivery wait timed out.");
+    expect(result).toContain("remaining lifetime of your request and saved market data");
+    expect(result).not.toContain("seconds");
+  });
+
+  it("does not classify an unknown check as this controlled delivery deadline", () => {
+    const result = selectedProviderFailureMessage({
+      outcome: "REFUSED", invocation: { checks: [{
+        code: "UNKNOWN_FAILURE", status: "FAIL",
+        detail: "PositionCrew's LP delivery deadline expired after 20000 ms; the external invocation did not complete.",
+      }] },
+    });
+    expect(result).toContain("Open the receipt for the recorded failure");
+    expect(result).not.toContain("20 seconds");
+  });
+});
+
 describe("provider registration network labels", () => {
   it("keeps the actual testnet registration separate from mainnet observations", () => {
     expect(identityNetworkLabel("https://testnet.bscscan.com/token/0x123?a=1811")).toBe("BSC testnet");

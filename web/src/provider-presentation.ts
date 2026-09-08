@@ -17,6 +17,15 @@ function timeoutMessage(detail: string): string {
   return `Waiting for the selected provider's ${operation} timed out${elapsed}. Refresh the comparison and try again.`;
 }
 
+function deliveryDeadlineMessage(detail: string): string {
+  const milliseconds = /^PositionCrew's LP delivery deadline expired after ([1-9]\d{0,4}) ms; the external invocation did not complete\.$/.exec(detail)?.[1];
+  const budget = milliseconds === undefined ? null : Number(milliseconds);
+  const elapsed = budget !== null && budget <= 20_000
+    ? ` after ${budget / 1_000} seconds`
+    : "";
+  return `The job's bounded delivery wait timed out${elapsed}. This wait is limited by the delivery time budget and the remaining lifetime of your request and saved market data. Refresh the comparison and try again.`;
+}
+
 export function selectedProviderFailureMessage(
   execution: SelectedProviderExecution | null | undefined,
   limitations: readonly string[] = [],
@@ -30,6 +39,7 @@ export function selectedProviderFailureMessage(
   ) ?? "";
   const code = failedCheck?.code ?? (/\[([A-Z_]+)\]/.exec(detail)?.[1] ?? "");
 
+  if (code === "LP_DELIVERY_DEADLINE") return deliveryDeadlineMessage(detail);
   if (code === "HEYANON_MCP_LOCAL_TIMEOUT") return timeoutMessage(detail);
   if (code === "AUDITION_RESULT_STABLE" ||
       (!failedCheck && detail === "The external provider response changed after the buyer selected it.")) {
