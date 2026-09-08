@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { currentHireExpired } from "../recent-job-expiry";
 import { ExternalLink, LoaderCircle, Play, RefreshCw, Trash2 } from "lucide-react";
 import {
   clearRecentJobReferences,
@@ -51,30 +52,27 @@ function formatTime(value: string): string {
     : "Time unavailable";
 }
 
-async function retrieveChain(reference: RecentJobReference): Promise<FreshMarketplaceChain> {
+async function retrieveChain(reference: RecentJobReference, run?: { body: unknown }): Promise<FreshMarketplaceChain> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), RECOVERY_REQUEST_TIMEOUT_MS);
-  let response: Response;
   try {
-    response = await fetch(`/api/benchmark-hires/${encodeURIComponent(reference.hireId)}`, {
+    const response = await fetch(`/api/benchmark-hires/${encodeURIComponent(reference.hireId)}${run ? "/jobs" : ""}`, {
       cache: "no-store",
       signal: controller.signal,
+      ...(run ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(run.body) } : {}),
     });
+    if (!response.ok) throw new Error(`${run ? "Run request returned" : "Server returned"} ${response.status}`);
+    const payload: unknown = await response.json();
+    if (!(await isFreshMarketplaceChainForReference(payload, reference))) {
+      throw new Error(`${run ? "Run response" : "Server receipt"} did not match this device reference`);
+    }
+    return payload as FreshMarketplaceChain;
   } catch (requestError) {
-    if (controller.signal.aborted) throw new Error("Server status request timed out");
+    if (controller.signal.aborted) throw new Error(run ? "Run request timed out; check this saved job's status before retrying." : "Server status request timed out");
     throw requestError;
   } finally {
     window.clearTimeout(timeout);
   }
-  if (!response.ok) {
-    throw new Error(`Server returned ${response.status}`);
-  }
-
-  const payload: unknown = await response.json();
-  if (!(await isFreshMarketplaceChainForReference(payload, reference))) {
-    throw new Error("Server receipt did not match this device reference");
-  }
-  return payload as FreshMarketplaceChain;
 }
 
 function stateCopy(item: RecentJobItem): { label: string; detail: string } {
@@ -116,9 +114,18 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
   const suppressedIds = useRef(new Set<string>());
   const trackedIds = useRef(new Set<string>());
   const [items, setItems] = useState<RecentJobItem[]>([]);
+  const [now, setNow] = useState(Date.now);
   const [initializing, setInitializing] = useState(true);
   const [storageAvailable, setStorageAvailable] = useState(true);
   const [corruptCount, setCorruptCount] = useState(0);
+
+  useEffect(() => {
+    if (!items.some((item) => item.phase === "READY" && item.chain?.job.state === "CREATED")) return;
+    const tick = () => setNow(Date.now());
+    const timer = window.setInterval(tick, 1_000);
+    window.addEventListener("focus", tick);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", tick); };
+  }, [items]);
 
   const updateItem = useCallback((reference: RecentJobReference, patch: Partial<RecentJobItem>) => {
     if (!mounted.current || suppressedIds.current.has(reference.hireId)) {
@@ -149,7 +156,7 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
     let current = initial;
     for (let attempt = 0; attempt < POLL_LIMIT; attempt += 1) {
       const shouldWait = current.job.state === "RUNNING" || (includeCreated && current.job.state === "CREATED");
-      if (!shouldWait) {
+      if (!shouldWait || currentHireExpired(current)) {
         return current;
       }
       await wait(POLL_DELAY_MS);
@@ -242,35 +249,16 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
   }, [hydrate, refresh, updateItem]);
 
   const resume = async (item: RecentJobItem, selectedProvider?: LpLiveMatchRunRequest["selectedProvider"]) => {
+    if (currentHireExpired(item.chain)) { setNow(Date.now()); return; }
     updateItem(item.reference, { busy: true, error: null });
     try {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), RECOVERY_REQUEST_TIMEOUT_MS);
-      let response: Response;
-      try {
-        const selected = item.chain?.job.providerSelection;
-        const evidence = item.chain?.hire.evidence;
-        const lpRequest = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" && evidence.lpLiveMatchAudition
-          ? { schemaVersion: "positioncrew.lp-live-match-selection-request.v1", selectedProvider: selected?.selectedProvider ?? selectedProvider, auditionHash: item.chain?.hire.evidenceHash }
-          : undefined;
-        if (lpRequest && !lpRequest.selectedProvider) throw new Error("Choose an eligible LP provider before running this saved job.");
-        response = await fetch(`/api/benchmark-hires/${encodeURIComponent(item.reference.hireId)}/jobs`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(lpRequest ?? {}),
-          signal: controller.signal,
-        });
-      } finally {
-        window.clearTimeout(timeout);
-      }
-      if (!response.ok) {
-        throw new Error(`Run request returned ${response.status}`);
-      }
-      const payload: unknown = await response.json();
-      if (!(await isFreshMarketplaceChainForReference(payload, item.reference))) {
-        throw new Error("Run response did not match this device reference");
-      }
-      const chain = payload as FreshMarketplaceChain;
+      const selected = item.chain?.job.providerSelection;
+      const evidence = item.chain?.hire.evidence;
+      const lpRequest = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" && evidence.lpLiveMatchAudition
+        ? { schemaVersion: "positioncrew.lp-live-match-selection-request.v1", selectedProvider: selected?.selectedProvider ?? selectedProvider, auditionHash: item.chain?.hire.evidenceHash }
+        : undefined;
+      if (lpRequest && !lpRequest.selectedProvider) throw new Error("Choose an eligible LP provider before running this saved job.");
+      const chain = await retrieveChain(item.reference, { body: lpRequest ?? {} });
       updateItem(item.reference, { phase: "READY", chain, busy: true, error: null });
       const settled = await followJob(item.reference, chain, true);
       updateItem(item.reference, { phase: "READY", chain: settled, busy: false, error: null });
@@ -357,7 +345,10 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
           </thead>
           <tbody>
             {items.map((item) => {
-              const copy = stateCopy(item);
+              const expired = item.phase === "READY" && currentHireExpired(item.chain, now);
+              const copy = expired
+                ? { label: "Expired", detail: "Choose this service and load current evidence in the request panel before creating a new assessment. This saved job is unchanged." }
+                : stateCopy(item);
               const chain = item.chain;
               const receipt = item.phase === "READY" && chain?.job.state === "COMPLETED" ? chain.receipt : null;
               const deliverable = receipt?.response.result.deliverable ?? null;
@@ -388,12 +379,12 @@ export function RecentJobsPanel({ onOpenJob }: { onOpenJob: (job: SessionJob) =>
                         </>
                       )}
                       {item.phase === "READY" && chain?.job.state === "CREATED" && lpAudition && lpAudition.candidates.map((candidate) => (
-                        <button key={candidate.providerKey} type="button" onClick={() => void resume(item, candidate.providerKey)} disabled={item.busy || !candidate.selectable}>
+                        <button key={candidate.providerKey} type="button" onClick={() => void resume(item, candidate.providerKey)} disabled={item.busy || expired || !candidate.selectable}>
                           Run with {candidate.providerKey === "HEYANON" ? "HeyAnon" : "PositionCrew"}
                         </button>
                       ))}
                       {item.phase === "READY" && ((chain?.job.state === "CREATED" && !lpAudition) || chain?.job.state === "RUNNING") && (
-                        <button type="button" onClick={() => void resume(item)} disabled={item.busy}>
+                        <button type="button" onClick={() => void resume(item)} disabled={item.busy || expired}>
                           <Play size={16} aria-hidden="true" /> {chain.job.state === "RUNNING" ? "Recover run" : "Resume run"}
                         </button>
                       )}

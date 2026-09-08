@@ -49,6 +49,109 @@ const JsonRpcBlockResponseSchema = z.object({
 const VTOKEN_ABI = parseAbi(["function supplyRatePerBlock() view returns (uint256)"]);
 const DEFAULT_BSC_RPC = "https://bsc-dataseed.binance.org";
 
+class YieldComparisonUnavailable extends Error {
+  constructor(
+    readonly code: "PINNED_STATE_UNAVAILABLE" | "EXTERNAL_ASSESSMENT_UNAVAILABLE",
+    message: string,
+  ) {
+    super(message);
+    this.name = "YieldComparisonUnavailable";
+  }
+}
+
+function hasErrorEnvelope(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && "error" in value;
+}
+
+async function readPinnedRpcResponse<T>(
+  fetchImpl: typeof fetch,
+  rpcUrl: string,
+  body: Record<string, unknown>,
+  schema: z.ZodType<T>,
+  blockNumber: bigint,
+): Promise<T> {
+  const context = `PositionCrew could not independently verify Venus data at BSC block ${blockNumber}`;
+  try {
+    const response = await fetchImpl(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(2_500),
+    });
+    if (!response.ok) {
+      throw new YieldComparisonUnavailable(
+        "PINNED_STATE_UNAVAILABLE",
+        `${context}: the verification endpoint returned HTTP ${response.status}. Reload current markets before retrying.`,
+      );
+    }
+    const payload: unknown = await response.json();
+    if (hasErrorEnvelope(payload)) {
+      const error = payload.error;
+      const code = error !== null && typeof error === "object" && "code" in error &&
+        typeof error.code === "number" && Number.isSafeInteger(error.code)
+        ? ` (RPC ${error.code})`
+        : "";
+      throw new YieldComparisonUnavailable(
+        "PINNED_STATE_UNAVAILABLE",
+        `${context}: the verification endpoint rejected the read${code}. Reload current markets before retrying.`,
+      );
+    }
+    const parsed = schema.safeParse(payload);
+    if (!parsed.success) {
+      throw new YieldComparisonUnavailable(
+        "PINNED_STATE_UNAVAILABLE",
+        `${context}: the verification endpoint returned incomplete or unsupported evidence. Reload current markets before retrying.`,
+      );
+    }
+    return parsed.data;
+  } catch (error) {
+    if (error instanceof YieldComparisonUnavailable) throw error;
+    throw new YieldComparisonUnavailable(
+      "PINNED_STATE_UNAVAILABLE",
+      `${context}: its verification request did not complete with usable evidence. Reload current markets before retrying.`,
+    );
+  }
+}
+
+async function readAiKiYieldAssessment(
+  url: URL,
+  fetchImpl: typeof fetch,
+): Promise<z.infer<typeof AiKiYieldResponseSchema>> {
+  try {
+    const response = await fetchImpl(url, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(2_500),
+    });
+    if (!response.ok) {
+      throw new YieldComparisonUnavailable(
+        "EXTERNAL_ASSESSMENT_UNAVAILABLE",
+        `AiKi's yield assessment endpoint returned HTTP ${response.status}. No comparable external result was admitted.`,
+      );
+    }
+    const payload: unknown = await response.json();
+    if (hasErrorEnvelope(payload)) {
+      throw new YieldComparisonUnavailable(
+        "EXTERNAL_ASSESSMENT_UNAVAILABLE",
+        "AiKi reported that its yield assessment could not be completed. Reload current markets before retrying.",
+      );
+    }
+    const parsed = AiKiYieldResponseSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new YieldComparisonUnavailable(
+        "EXTERNAL_ASSESSMENT_UNAVAILABLE",
+        "AiKi returned an incomplete or unsupported yield assessment. No comparable external result was admitted.",
+      );
+    }
+    return parsed.data;
+  } catch (error) {
+    if (error instanceof YieldComparisonUnavailable) throw error;
+    throw new YieldComparisonUnavailable(
+      "EXTERNAL_ASSESSMENT_UNAVAILABLE",
+      "AiKi's yield assessment did not complete with a usable response within the comparison attempt. Reload current markets before retrying.",
+    );
+  }
+}
+
 export type AiKiYieldComparison = {
   provider: typeof AIKI_VENUS_YIELD;
   evaluatedAt: string;
@@ -87,62 +190,72 @@ async function readPinnedSupplyState(
   request: YieldOptimizationRequest,
   fetchImpl: typeof fetch,
   rpcUrl: string,
-): Promise<{ rates: Map<string, bigint>; secondsPerBlock: number }> {
-  const blockNumber = pinnedBlock(request);
-  const priorBlockNumber = blockNumber > 120n ? blockNumber - 120n : 0n;
-  const blockTag = `0x${blockNumber.toString(16)}`;
-  const data = encodeFunctionData({ abi: VTOKEN_ABI, functionName: "supplyRatePerBlock" });
-  const markets = [...new Map(
-    [...request.currentPositions, ...request.opportunities].map((position) =>
-      [position.vaultOrMarket.toLowerCase(), position.vaultOrMarket] as const
-    ),
-  ).values()];
-  const rateEntriesPromise = Promise.all(markets.map(async (market, index) => {
-    const response = await fetchImpl(rpcUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: index + 1,
-        method: "eth_call",
-        params: [{ to: market, data }, blockTag],
-      }),
-      signal: AbortSignal.timeout(2_500),
-    });
-    if (!response.ok) throw new Error(`Pinned Venus rate query returned HTTP ${response.status}`);
-    const payload = JsonRpcResponseSchema.parse(await response.json());
-    const rate = decodeFunctionResult({
-      abi: VTOKEN_ABI,
-      functionName: "supplyRatePerBlock",
-      data: payload.result as `0x${string}`,
-    });
-    return [market.toLowerCase(), rate] as const;
-  }));
-  const readBlock = async (number: bigint, id: number) => {
-    const response = await fetchImpl(rpcUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        method: "eth_getBlockByNumber",
-        params: [`0x${number.toString(16)}`, false],
-      }),
-      signal: AbortSignal.timeout(2_500),
-    });
-    if (!response.ok) throw new Error(`Pinned BSC block query returned HTTP ${response.status}`);
-    return JsonRpcBlockResponseSchema.parse(await response.json()).result;
-  };
-  const [entries, block, priorBlock] = await Promise.all([
-    rateEntriesPromise,
-    readBlock(blockNumber, 10_001),
-    readBlock(priorBlockNumber, 10_002),
-  ]);
-  const secondsPerBlock = Math.max(
-    0.1,
-    Number(BigInt(block.timestamp) - BigInt(priorBlock.timestamp)) / 120,
-  );
-  return { rates: new Map(entries), secondsPerBlock };
+): Promise<{ rates: Map<string, bigint>; secondsPerBlock: number; apyByMarket: Map<string, number> }> {
+  try {
+    const blockNumber = pinnedBlock(request);
+    const priorBlockNumber = blockNumber > 120n ? blockNumber - 120n : 0n;
+    const blockTag = `0x${blockNumber.toString(16)}`;
+    const data = encodeFunctionData({ abi: VTOKEN_ABI, functionName: "supplyRatePerBlock" });
+    const markets = [...new Map(
+      [...request.currentPositions, ...request.opportunities].map((position) =>
+        [position.vaultOrMarket.toLowerCase(), position.vaultOrMarket] as const
+      ),
+    ).values()];
+    const rateEntriesPromise = Promise.all(markets.map(async (market, index) => {
+      const payload = await readPinnedRpcResponse(
+        fetchImpl,
+        rpcUrl,
+        {
+          jsonrpc: "2.0",
+          id: index + 1,
+          method: "eth_call",
+          params: [{ to: market, data }, blockTag],
+        },
+        JsonRpcResponseSchema,
+        blockNumber,
+      );
+      const rate = decodeFunctionResult({
+        abi: VTOKEN_ABI,
+        functionName: "supplyRatePerBlock",
+        data: payload.result as `0x${string}`,
+      });
+      return [market.toLowerCase(), rate] as const;
+    }));
+    const readBlock = async (number: bigint, id: number) => {
+      const payload = await readPinnedRpcResponse(
+        fetchImpl,
+        rpcUrl,
+        {
+          jsonrpc: "2.0",
+          id,
+          method: "eth_getBlockByNumber",
+          params: [`0x${number.toString(16)}`, false],
+        },
+        JsonRpcBlockResponseSchema,
+        number,
+      );
+      return payload.result;
+    };
+    const [entries, block, priorBlock] = await Promise.all([
+      rateEntriesPromise,
+      readBlock(blockNumber, 10_001),
+      readBlock(priorBlockNumber, 10_002),
+    ]);
+    const secondsPerBlock = Math.max(
+      0.1,
+      Number(BigInt(block.timestamp) - BigInt(priorBlock.timestamp)) / 120,
+    );
+    const apyByMarket = new Map(entries.map(([market, rate]) =>
+      [market, annualizedYieldBps(rate, secondsPerBlock)] as const
+    ));
+    return { rates: new Map(entries), secondsPerBlock, apyByMarket };
+  } catch (error) {
+    if (error instanceof YieldComparisonUnavailable) throw error;
+    throw new YieldComparisonUnavailable(
+      "PINNED_STATE_UNAVAILABLE",
+      "PositionCrew could not independently verify the request's pinned Venus state: supply-rate decoding or annualization did not produce usable evidence. Reload current markets before retrying.",
+    );
+  }
 }
 
 export async function auditionAiKiVenusYield(
@@ -184,15 +297,10 @@ export async function auditionAiKiVenusYield(
     const url = new URL(AIKI_VENUS_YIELD.endpoint);
     url.searchParams.set("markets", markets.join(","));
     url.searchParams.set("rateOnly", "true");
-    const [response, pinnedState] = await Promise.all([
-      fetchImpl(url, {
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(2_500),
-      }),
+    const [parsed, pinnedState] = await Promise.all([
+      readAiKiYieldAssessment(url, fetchImpl),
       readPinnedSupplyState(request, fetchImpl, options.rpcUrl ?? DEFAULT_BSC_RPC),
     ]);
-    if (!response.ok) throw new Error(`AiKi Yield returned HTTP ${response.status}`);
-    const parsed = AiKiYieldResponseSchema.parse(await response.json());
     const requestedMarkets = new Set(markets.map((market) => market.toLowerCase()));
     const returnedMarkets = new Set(parsed.assessment.routes.map((route) => route.market.toLowerCase()));
     const exactMarketSet = requestedMarkets.size === returnedMarkets.size && [...requestedMarkets].every((market) => returnedMarkets.has(market));
@@ -203,9 +311,7 @@ export async function auditionAiKiVenusYield(
       pinnedState.rates.get(route.market.toLowerCase()) !== BigInt(route.supplyRatePerBlock)
     );
     const pinnedRateBinding = exactMarketSet && mismatchedRateMarkets.length === 0;
-    const pinnedApyByMarket = new Map([...pinnedState.rates].map(([market, rate]) =>
-      [market, annualizedYieldBps(rate, pinnedState.secondsPerBlock)] as const
-    ));
+    const pinnedApyByMarket = pinnedState.apyByMarket;
     const requestApyBinding = [...request.currentPositions, ...request.opportunities].every((position) =>
       pinnedApyByMarket.get(position.vaultOrMarket.toLowerCase()) === position.grossApyBps
     );
@@ -296,8 +402,18 @@ export async function auditionAiKiVenusYield(
       rateDifferenceBps: null,
       attributable: false,
       persisted: false,
-      checks: [{ code: "CALLABLE_RESULT", status: "FAIL", detail: error instanceof Error ? error.message : "AiKi Yield was unavailable." }],
-      boundary: `${partialBoundary} The external provider was unavailable, so no external result or selection claim is made.`,
+      checks: [{
+        code: error instanceof YieldComparisonUnavailable ? error.code : "CALLABLE_RESULT",
+        status: "FAIL",
+        detail: error instanceof YieldComparisonUnavailable
+          ? error.message
+          : "The external yield comparison could not be completed safely. Reload current markets before retrying.",
+      }],
+      boundary: "This comparison requires AiKi's rate-only assessment and PositionCrew's independent verification of the same BSC snapshot. " +
+        (error instanceof YieldComparisonUnavailable && error.code === "PINNED_STATE_UNAVAILABLE"
+          ? "PositionCrew's independent verification was unavailable; this does not establish that AiKi was offline. "
+          : "A verified external assessment was not available. ") +
+        "No admitted external result, provider selection, payment, authority grant, supply, withdrawal, or protocol transaction is claimed.",
     };
   }
 }

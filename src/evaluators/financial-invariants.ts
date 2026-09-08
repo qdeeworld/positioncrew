@@ -73,6 +73,13 @@ function lpCurrentUptimeBps(request: LpRebalanceRequest): number {
 }
 
 function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): FinancialInvariantCheck[] {
+  const inputDomainValid = Number.isSafeInteger(request.position.lowerTick) && Number.isSafeInteger(request.position.upperTick)
+    && Number.isSafeInteger(request.marketState.currentTick) && request.position.lowerTick >= -887_272
+    && request.position.upperTick <= 887_272 && request.position.lowerTick < request.position.upperTick
+    && request.marketState.currentTick >= -887_272 && request.marketState.currentTick <= 887_272;
+  const inputDomainCheck = check("lp-input-tick-domain", inputDomainValid,
+    "Observed position ticks are ordered and the position and current ticks lie inside the V3 domain [-887272, 887272]; impossible input cannot support an admitted action or HOLD.");
+  if (!inputDomainValid) return [inputDomainCheck];
   const exposure = output.inventoryExposure;
   const currentUptime = lpCurrentUptimeBps(request);
   if (output.status !== "ACTIONABLE") {
@@ -83,6 +90,7 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
     const currentFees = ((daily * horizon / FIXED_SCALE) * BigInt(currentUptime)) / 10_000n;
     const gross = parseFixed(output.expectedGrossFeesUsd);
     return [
+    inputDomainCheck,
     check("lp-refusal-feasibility", output.status !== "REFUSED_CONSTRAINTS" || lpConstraintRefusalJustified(request),
       "A constraint refusal requires a request-proven blocker for every admitted range; an unproven strategy decline is HOLD, not certified infeasibility."),
     check("lp-inactive-payload", output.actionSteps.length === 0 && output.proposedRange === null
@@ -101,6 +109,7 @@ function lpChecks(request: LpRebalanceRequest, output: LpRebalanceDeliverable): 
     ];
   }
   const result = [
+    inputDomainCheck,
     check("lp-action-decision", ["SHIFT", "WIDEN", "NARROW", "EXIT"].includes(output.decision), "An actionable LP result changes or exits the position."),
     check("lp-cost-limits", parseFixed(request.constraints.estimatedGasUsd) <= parseFixed(request.maxGasUsd)
       && parseFixed(output.estimatedRebalanceCostUsd) <= parseFixed(request.maxActionUsd)
@@ -235,6 +244,8 @@ function gridChecks(request: BoundedGridRequest, output: BoundedGridDeliverable)
       && request.marketState.realizedVolatilityBps <= request.constraints.maximumVolatilityBps, "Midpoint, liquidity, and volatility satisfy policy."),
     check("grid-funded-capital", initialBaseCost + buyReservations <= parseFixed(request.constraints.capitalUsd)
       && initialBaseCost + buyReservations <= parseFixed(request.maxActionUsd), "Initial sell inventory and every buy reservation fit capital and action limits together."),
+    check("grid-capital-cost-reserve", lossBound <= parseFixed(request.constraints.capitalUsd),
+      "Initial sell inventory, every buy reservation, and all modeled fees, slippage, and gas fit total capital without depending on future sell receipts. The separate action ceiling continues to bound funded order principal."),
     check("grid-accumulated-inventory", inventoryBound <= parseFixed(output.maximumInventoryUsd)
       && parseFixed(output.maximumInventoryUsd) <= parseFixed(request.constraints.maximumInventoryUsd),
       "Initial base plus every buy fill, marked at the upper boundary, fits reported and requested inventory bounds."),

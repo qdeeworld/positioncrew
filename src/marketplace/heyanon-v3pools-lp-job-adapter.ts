@@ -54,6 +54,7 @@ const McpResponseSchema = z.object({
   jsonrpc: z.literal("2.0"),
   id: z.union([z.string(), z.number()]),
   result: z.object({
+    isError: z.boolean().optional(),
     content: z.array(z.object({ type: z.literal("text"), text: z.string() }).passthrough()).min(1),
   }).passthrough(),
 }).passthrough();
@@ -79,7 +80,7 @@ export interface HeyAnonV3LpJobAssessment {
   recommendation: ExternalRange;
   normalizedDeliverable: LpRebalanceDeliverable;
   checks: Array<{ code: string; status: "PASS" | "FAIL"; detail: string }>;
-  attributableResult: true;
+  attributableResult: boolean;
   status: "INCOMPATIBLE_CONSTRAINTS" | "ELIGIBLE_WITH_ADAPTER";
   eligibleForLpRebalance: boolean;
   invocation: {
@@ -168,6 +169,10 @@ async function callTool(
     if (!response.ok) throw new Error(`HeyAnon V3 MCP returned HTTP ${response.status}`);
     const raw = await guarded("RESPONSE_BODY", () => response.text());
     const mcp = McpResponseSchema.parse(parseEventStream(raw));
+    if (mcp.id !== name) throw new Error(`HeyAnon V3 MCP response ID does not match ${name}`);
+    if ("error" in mcp || mcp.result.isError === true) {
+      throw new Error(`HeyAnon V3 MCP reported a tool error for ${name}`);
+    }
     const content = mcp.result.content.find((item) => item.type === "text");
     if (!content) throw new Error(`HeyAnon V3 MCP returned no ${name} result`);
     return JSON.parse(content.text) as unknown;
@@ -455,6 +460,24 @@ export async function auditionHeyAnonV3LpJob(
     pinnedPosition.liquidity === request.position.liquidity;
   const poolBinding = pinnedPool === request.pool.toLowerCase();
   const tickSpacingBinding = pinnedTickSpacing === request.constraints.tickSpacing;
+  const token0Symbol = request.token0.symbol.trim().toLowerCase();
+  const token1Symbol = request.token1.symbol.trim().toLowerCase();
+  const providerTokenPairBinding =
+    priceEnvelope.data.token0Symbol.trim().toLowerCase() === token0Symbol &&
+    priceEnvelope.data.token1Symbol.trim().toLowerCase() === token1Symbol;
+  // Compare decimal text exactly. Harmless zero padding must not throw, and
+  // extra nonzero precision must remain a retained binding failure, not round
+  // into the pinned fee or discard the provider's response as unavailable.
+  const [providerFeeWhole = "", providerFeeFraction = ""] = priceEnvelope.data.fee.slice(0, -1).split(".");
+  const providerFeeBinding =
+    providerFeeWhole.replace(/^0+(?=\d)/, "") === String(Math.floor(feeTier / 10_000)) &&
+    providerFeeFraction.replace(/0+$/, "") === String(feeTier % 10_000).padStart(4, "0").replace(/0+$/, "");
+  // HeyAnon's range label uses token1/token0, matching its raw tick-price range.
+  // Case and surrounding whitespace are formatting, not token aliases.
+  const providerRangeSymbols = rangeEnvelope.data.pool.split("/").map((symbol) => symbol.trim().toLowerCase());
+  const providerRangePoolBinding = providerRangeSymbols.length === 2 &&
+    providerRangeSymbols[0] === token1Symbol && providerRangeSymbols[1] === token0Symbol;
+  const providerMarketBinding = providerTokenPairBinding && providerFeeBinding && providerRangePoolBinding;
   const priceBps = relativeDifferenceBps(
     Number(priceEnvelope.data.poolPrice),
     Number(request.marketState.token1PriceUsd) / Number(request.marketState.token0PriceUsd),
@@ -483,6 +506,27 @@ export async function auditionHeyAnonV3LpJob(
         : `The request tick spacing does not match fee tier ${feeTier}.`,
     },
     {
+      code: "PROVIDER_TOKEN_PAIR_BINDING",
+      status: providerTokenPairBinding ? "PASS" as const : "FAIL" as const,
+      detail: providerTokenPairBinding
+        ? "The provider price response declares the requested token symbols in their original order."
+        : "The provider price response declares a different token pair or token order.",
+    },
+    {
+      code: "PROVIDER_FEE_TIER_BINDING",
+      status: providerFeeBinding ? "PASS" as const : "FAIL" as const,
+      detail: providerFeeBinding
+        ? `The provider fee declaration exactly matches the pinned NFT fee tier ${feeTier}.`
+        : "The provider fee declaration does not match the pinned NFT fee tier.",
+    },
+    {
+      code: "PROVIDER_RANGE_POOL_BINDING",
+      status: providerRangePoolBinding ? "PASS" as const : "FAIL" as const,
+      detail: providerRangePoolBinding
+        ? "The provider range label declares the requested token1/token0 market."
+        : "The provider range label declares a different market or price orientation.",
+    },
+    {
       code: "CURRENT_PRICE_COHERENCE",
       status: pricePass ? "PASS" as const : "FAIL" as const,
       detail: pricePass
@@ -491,8 +535,10 @@ export async function auditionHeyAnonV3LpJob(
     },
     {
       code: "ATTRIBUTABLE_RANGE_RECOMMENDATION",
-      status: "PASS" as const,
-      detail: `The listed provider returned the ${shortcut} preset chosen from the buyer's unchanged width bounds for the exact pool and fee tier.`,
+      status: providerMarketBinding ? "PASS" as const : "FAIL" as const,
+      detail: providerMarketBinding
+        ? `The listed provider returned the ${shortcut} preset with market declarations matching the request and pinned fee tier.`
+        : "The endpoint returned a range, but contradictory market declarations prevent attributing it to this exact job.",
     },
     {
       code: "RANGE_CONTAINS_CURRENT_TICK",
@@ -557,7 +603,7 @@ export async function auditionHeyAnonV3LpJob(
     },
     normalizedDeliverable,
     checks,
-    attributableResult: true,
+    attributableResult: providerMarketBinding,
     status: eligible ? "ELIGIBLE_WITH_ADAPTER" : "INCOMPATIBLE_CONSTRAINTS",
     eligibleForLpRebalance: eligible,
     invocation: {
@@ -590,8 +636,12 @@ export async function auditionHeyAnonV3LpJob(
       }),
     },
     claimBoundary: [
-      "The external agent produced the attributable range recommendation; PositionCrew supplied the pinned position and market economics.",
-      "The compatibility adapter aligned ticks, evaluated buyer constraints, and normalized the result without changing the external range thesis.",
+      providerMarketBinding
+        ? "The external agent produced the attributable range recommendation; PositionCrew supplied the pinned position and market economics."
+        : "The external endpoint response is retained by its raw-response hash, but its market declarations contradict this job; no exact-job recommendation is attributed.",
+      providerMarketBinding
+        ? "The compatibility adapter aligned ticks, evaluated buyer constraints, and normalized the result without changing the external range thesis."
+        : "Normalized calculations use PositionCrew's pinned inputs and do not make the contradictory external response compatible or selectable.",
       "No approval, payment, signature, liquidity movement, or protocol transaction occurred.",
     ],
   };

@@ -62,10 +62,27 @@ describe("financial risk presentation", () => {
   });
 
   it("does not claim AiKi inspected markets when unavailable", () => {
-    const copy = yieldComparisonDescription({ ...comparison, outcome: "UNAVAILABLE" });
-    expect(copy).toContain("AiKi was unavailable");
+    const copy = yieldComparisonDescription({ ...comparison, outcome: "UNAVAILABLE",
+      checks: [{ code: "EXTERNAL_ASSESSMENT_UNAVAILABLE", status: "FAIL", detail: "External assessment failed" }],
+    });
+    expect(copy).toContain("AiKi's external assessment was unavailable");
     expect(copy).not.toContain("Both providers");
     expect(copy).not.toContain("supplied");
+  });
+
+  it("attributes pinned-state verification failure to PositionCrew, not AiKi", () => {
+    const copy = yieldComparisonDescription({ ...comparison, outcome: "UNAVAILABLE",
+      checks: [{ code: "PINNED_STATE_UNAVAILABLE", status: "FAIL", detail: "Pinned rate decode failed" }],
+    });
+    expect(copy).toContain("PositionCrew could not verify the pinned BSC rates");
+    expect(copy).toContain("does not establish that AiKi was offline");
+    expect(copy).not.toContain("AiKi was unavailable");
+  });
+
+  it("does not invent provider-outage attribution for missing or legacy failures", () => {
+    expect(yieldComparisonDescription(undefined)).toContain("No external rate assessment was recorded");
+    expect(yieldComparisonDescription({ ...comparison, outcome: "UNAVAILABLE", checks: [] }))
+      .toContain("does not establish that AiKi was unavailable");
   });
 
   it.each([

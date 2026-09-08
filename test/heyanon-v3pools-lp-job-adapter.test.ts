@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { LpRebalanceRequestSchema } from "../src/contracts/lp-rebalance.js";
 import { HeyAnonMcpCallError, auditionHeyAnonV3LpJob } from "../src/marketplace/heyanon-v3pools-lp-job-adapter.js";
-import { createLpLiveMatchAudition } from "../src/marketplace/lp-live-match.js";
+import { createLpLiveMatchAudition, executeLpLiveMatchProvider, selectLpLiveMatchProvider } from "../src/marketplace/lp-live-match.js";
 import { canonicalHash } from "../src/core/canonical.js";
 
 const positionId = "7284554";
@@ -84,10 +84,10 @@ function positionResponse(): string {
   ].join("")}`;
 }
 
-function mcp(content: unknown): Response {
+function mcp(content: { project: string; operation: string; data: unknown }): Response {
   return new Response(JSON.stringify({
     jsonrpc: "2.0",
-    id: 1,
+    id: content.operation,
     result: { content: [{ type: "text", text: JSON.stringify(content) }] },
   }), { status: 200 });
 }
@@ -160,6 +160,60 @@ const fetchImpl: typeof fetch = async (input, init) => {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
 };
 
+const marketMismatchCases = [
+  ["wrong-pool", "PROVIDER_RANGE_POOL_BINDING"],
+  ["reversed-pool", "PROVIDER_RANGE_POOL_BINDING"],
+  ["wrong-symbols", "PROVIDER_TOKEN_PAIR_BINDING"],
+  ["reversed-symbols", "PROVIDER_TOKEN_PAIR_BINDING"],
+  ["wrong-fee", "PROVIDER_FEE_TIER_BINDING"],
+  ["fractional-fee", "PROVIDER_FEE_TIER_BINDING"],
+  ["overprecision-fee", "PROVIDER_FEE_TIER_BINDING"],
+  ["large-integer-fee", "PROVIDER_FEE_TIER_BINDING"],
+] as const;
+const envelopeMismatchCases = ["wrong-id", "tool-error", "conflicting-error"] as const;
+type ResponseVariant = typeof marketMismatchCases[number][0] |
+  typeof envelopeMismatchCases[number] | "case-formatting" | "explicit-success" | "zero-padded-fee";
+
+function mutatedProviderFetch(variant: ResponseVariant): typeof fetch {
+  return async (input, init) => {
+    const response = await fetchImpl(input, init);
+    if (!String(input).includes("heyanon.ai")) return response;
+    const envelope = await response.json() as {
+      id: string;
+      result: { isError?: boolean; content: Array<{ type: string; text: string }> };
+      error?: unknown;
+    };
+    const content = envelope.result.content[0]!;
+    const payload = JSON.parse(content.text) as { operation: string; data: Record<string, unknown> };
+    if (variant === "wrong-id") envelope.id = "another-request";
+    if (variant === "tool-error") envelope.result.isError = true;
+    if (variant === "conflicting-error") envelope.error = { code: -32603, message: "Provider error" };
+    if (variant === "explicit-success") envelope.result.isError = false;
+    if (payload.operation === "getCurrentPoolPrice") {
+      if (variant === "wrong-symbols") Object.assign(payload.data, { token0Symbol: "doge", token1Symbol: "shib" });
+      if (variant === "reversed-symbols") Object.assign(payload.data, { token0Symbol: "wbnb", token1Symbol: "usdt" });
+      if (variant === "wrong-fee") payload.data.fee = "1%";
+      if (variant === "fractional-fee") payload.data.fee = "0.01000001%";
+      if (variant === "overprecision-fee") payload.data.fee = "0.0100000000000000001%";
+      if (variant === "large-integer-fee") payload.data.fee = `${"9".repeat(512)}%`;
+      if (variant === "zero-padded-fee") payload.data.fee = "000.0100000000000000000%";
+      if (variant === "case-formatting") Object.assign(payload.data, { token0Symbol: " UsDt ", token1Symbol: " WbNb ", fee: "0.0100%" });
+    } else {
+      if (variant === "wrong-pool") payload.data.pool = "doge/shib";
+      if (variant === "reversed-pool") payload.data.pool = "usdt/wbnb";
+      if (variant === "case-formatting") payload.data.pool = " WBNB / USDT ";
+    }
+    content.text = JSON.stringify(payload);
+    return new Response(JSON.stringify(envelope), { status: 200 });
+  };
+}
+
+function compatibleRequest() {
+  return LpRebalanceRequestSchema.parse({ ...request,
+    constraints: { ...request.constraints, minimumWidthTicks: 500, maximumWidthTicks: 3_000 },
+  });
+}
+
 function pendingUntilAbort<T>(signal: AbortSignal): Promise<T> {
   return new Promise((_resolve, reject) => {
     const aborted = () => reject(new DOMException("private abort detail", "AbortError"));
@@ -169,6 +223,99 @@ function pendingUntilAbort<T>(signal: AbortSignal): Promise<T> {
 }
 
 describe("HeyAnon V3 Pools exact LP job adapter", () => {
+  it("accepts equivalent overprecision fees while retaining the raw response", async () => {
+    const result = await auditionHeyAnonV3LpJob(compatibleRequest(), positionId, {
+      fetchImpl: mutatedProviderFetch("zero-padded-fee"), now: new Date("2026-08-30T12:00:30.000Z"),
+    });
+    expect(result.checks.find((check) => check.code === "PROVIDER_FEE_TIER_BINDING")?.status).toBe("PASS");
+    expect(result.attributableResult).toBe(true);
+    expect(result.eligibleForLpRebalance).toBe(true);
+    expect(result.invocation.rawResponseHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it.each(marketMismatchCases)("rejects %s despite otherwise coherent financial values", async (variant, checkCode) => {
+    const result = await auditionHeyAnonV3LpJob(compatibleRequest(), positionId, {
+      fetchImpl: mutatedProviderFetch(variant), now: new Date("2026-08-30T12:00:30.000Z"),
+    });
+    expect(result.status).toBe("INCOMPATIBLE_CONSTRAINTS");
+    expect(result.eligibleForLpRebalance).toBe(false);
+    expect(result.attributableResult).toBe(false);
+    expect(result.claimBoundary.join(" ")).toContain("no exact-job recommendation is attributed");
+    expect(result.claimBoundary.join(" ")).not.toContain("produced the attributable range recommendation");
+    expect(result.checks.find((check) => check.code === checkCode)?.status).toBe("FAIL");
+    expect(result.checks.find((check) => check.code === "ATTRIBUTABLE_RANGE_RECOMMENDATION")?.status).toBe("FAIL");
+    expect(result.invocation.rawResponseHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it.each(envelopeMismatchCases)("rejects %s before accepting MCP financial content", async (variant) => {
+    await expect(auditionHeyAnonV3LpJob(compatibleRequest(), positionId, {
+      fetchImpl: mutatedProviderFetch(variant), now: new Date("2026-08-30T12:00:30.000Z"),
+    })).rejects.toThrow(variant === "wrong-id" ? "response ID does not match" : "reported a tool error");
+  });
+
+  it.each(["case-formatting", "explicit-success"] as const)("retains compatible %s responses", async (variant) => {
+    const result = await auditionHeyAnonV3LpJob(compatibleRequest(), positionId, {
+      fetchImpl: mutatedProviderFetch(variant), now: new Date("2026-08-30T12:00:30.000Z"),
+    });
+    expect(result.status).toBe("ELIGIBLE_WITH_ADAPTER");
+    expect(result.eligibleForLpRebalance).toBe(true);
+    expect(result.attributableResult).toBe(true);
+    expect(result.claimBoundary.join(" ")).toContain("produced the attributable range recommendation");
+    expect(result.checks.every((check) => check.status === "PASS")).toBe(true);
+  });
+
+  it.each([...marketMismatchCases.map(([variant]) => variant), ...envelopeMismatchCases])(
+    "never makes a %s response selectable in a public audition", async (variant) => {
+      const input = compatibleRequest();
+      const result = await createLpLiveMatchAudition(input, {
+        blockNumber: "118955550", observedAt: "2026-08-30T11:59:00.000Z", explorerUrl: "https://bscscan.com/block/118955550",
+      }, canonicalHash(input), new Date("2026-08-30T12:00:30.000Z"), { fetchImpl: mutatedProviderFetch(variant) });
+      expect(result.audition.candidates.find((candidate) => candidate.providerKey === "HEYANON")?.selectable).toBe(false);
+      expect(result.externalProviderComparison.eligibleForLiveMatch).toBe(false);
+      expect(result.externalProviderComparison.attributableResult).toBe(false);
+      if (marketMismatchCases.some(([marketVariant]) => marketVariant === variant)) {
+        expect(result.externalProviderComparison.boundary).toContain("no exact-job recommendation is attributed");
+        expect(result.audition.candidates.find((candidate) => candidate.providerKey === "HEYANON")?.rawResponseHash)
+          .toMatch(/^sha256:[a-f0-9]{64}$/);
+      }
+    },
+  );
+
+  it.each([...marketMismatchCases.map(([variant]) => variant), ...envelopeMismatchCases])(
+    "refuses fresh %s delivery after a genuinely compatible audition", async (variant) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const now = new Date("2026-08-30T12:00:30.000Z");
+        vi.setSystemTime(now);
+        const input = compatibleRequest();
+        const source = { blockNumber: "118955550", observedAt: "2026-08-30T11:59:00.000Z", explorerUrl: "https://bscscan.com/block/118955550" };
+        const requestHash = canonicalHash(input);
+        const { audition } = await createLpLiveMatchAudition(input, source, requestHash, now, { fetchImpl });
+        expect(audition.candidates.find((candidate) => candidate.providerKey === "HEYANON")?.selectable).toBe(true);
+        const evidenceHash = canonicalHash({ lpLiveMatchAudition: audition });
+        const selection = selectLpLiveMatchProvider(audition, {
+          schemaVersion: "positioncrew.lp-live-match-selection-request.v1", selectedProvider: "HEYANON", auditionHash: evidenceHash,
+        }, evidenceHash, now);
+        const response = await executeLpLiveMatchProvider({
+          hireId: "11111111-1111-4111-8111-111111111111", jobId: "22222222-2222-4222-8222-222222222222",
+          requestHash, evidenceHash, source, request: input, audition, selection, now,
+          fetchImpl: mutatedProviderFetch(variant),
+        });
+        expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+        expect(response.liveMatchExecution?.selection.selectedProvider).toBe("HEYANON");
+        expect(response.result.job.providerId).toBe("erc8004:56:45650");
+        expect(response.result.deliverable.decision).toBe("NONE");
+        if (marketMismatchCases.some(([marketVariant]) => marketVariant === variant)) {
+          expect(response.liveMatchExecution?.invocation.rawResponseHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+          expect(response.liveMatchExecution?.invocation.checks.find((check) =>
+            check.code === "ATTRIBUTABLE_RANGE_RECOMMENDATION")?.status).toBe("FAIL");
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it.each(["FETCH", "RESPONSE_BODY"] as const)("cancels both MCP %s operations through their actual fetch signals", async (phase) => {
     const caller = new AbortController();
     const reason = new Error("private cancellation reason");
@@ -484,6 +631,7 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
   it("preserves an attributable recommendation while rejecting a range outside buyer limits", async () => {
     const result = await auditionHeyAnonV3LpJob(request, positionId, { fetchImpl });
     expect(result.attributableResult).toBe(true);
+    expect(result.claimBoundary.join(" ")).toContain("produced the attributable range recommendation");
     expect(result.checks.find((check) => check.code === "EXACT_POSITION_BINDING")?.status).toBe("PASS");
     expect(result.checks.find((check) => check.code === "RANGE_WIDTH_POLICY")?.status).toBe("FAIL");
     expect(result.status).toBe("INCOMPATIBLE_CONSTRAINTS");
@@ -529,6 +677,7 @@ describe("HeyAnon V3 Pools exact LP job adapter", () => {
       now: new Date("2026-08-30T12:03:00.000Z"),
     });
     expect(result.normalizedDeliverable.status).toBe("REFUSED_EXPIRED");
+    expect(result.attributableResult).toBe(true);
     expect(result.checks.find((check) => check.code === "NORMALIZED_EVIDENCE_GATE")?.status).toBe("FAIL");
     expect(result.eligibleForLpRebalance).toBe(false);
   });
