@@ -111,9 +111,10 @@ export class HeyAnonMcpCallError extends Error {
     readonly toolName: HeyAnonMcpToolName,
     readonly phase: HeyAnonMcpCallPhase,
     readonly failureKind: HeyAnonMcpFailureKind,
+    readonly timeoutMilliseconds = 8_000,
   ) {
     const detail = {
-      LOCAL_TIMEOUT: "the local 8000 ms deadline expired",
+      LOCAL_TIMEOUT: `the local ${timeoutMilliseconds} ms deadline expired`,
       CALLER_CANCELLED: "the caller cancelled the operation; provider availability was not established",
       UNATTRIBUTED_ABORT: "the operation aborted without a recorded local or caller signal",
       TRANSPORT_FAILURE: "transport failed; provider availability was not established",
@@ -130,8 +131,9 @@ async function callTool(
   args: Record<string, unknown>,
   fetchImpl: typeof fetch,
   callerSignal?: AbortSignal,
+  timeoutMilliseconds = 8_000,
 ): Promise<unknown> {
-  const signal = AbortSignal.timeout(8_000);
+  const signal = AbortSignal.timeout(timeoutMilliseconds);
   let abortKind: "LOCAL_TIMEOUT" | "CALLER_CANCELLED" | undefined =
     callerSignal?.aborted ? "CALLER_CANCELLED" : undefined;
   const localAborted = () => { abortKind ??= "LOCAL_TIMEOUT"; };
@@ -148,7 +150,7 @@ async function callTool(
       const unattributedAbort = error instanceof Error &&
         (error.name === "AbortError" || error.name === "TimeoutError");
       throw new HeyAnonMcpCallError(name, phase,
-        abortKind ?? (unattributedAbort ? "UNATTRIBUTED_ABORT" : "TRANSPORT_FAILURE"));
+        abortKind ?? (unattributedAbort ? "UNATTRIBUTED_ABORT" : "TRANSPORT_FAILURE"), timeoutMilliseconds);
     }
   };
   try {
@@ -376,11 +378,18 @@ function normalizeExternalRange(
 export async function auditionHeyAnonV3LpJob(
   input: LpRebalanceRequest,
   positionId: string,
-  options: { fetchImpl?: typeof fetch; now?: Date; rpcUrl?: string; signal?: AbortSignal } = {},
+  options: { fetchImpl?: typeof fetch; now?: Date; rpcUrl?: string; signal?: AbortSignal; mcpTimeoutMilliseconds?: number } = {},
 ): Promise<HeyAnonV3LpJobAssessment> {
   const invocationStartedAt = new Date().toISOString();
   const invocationStartedPerformance = performance.now();
   const request = LpRebalanceRequestSchema.parse(input);
+  // A selected, persisted job can spend longer on its fresh read than a
+  // discovery audition. This internal transport budget does not extend
+  // financial expiry or introduce retries, cached delivery, or fallback.
+  const mcpTimeoutMilliseconds = options.mcpTimeoutMilliseconds ?? 8_000;
+  if (!Number.isSafeInteger(mcpTimeoutMilliseconds) || mcpTimeoutMilliseconds < 1 || mcpTimeoutMilliseconds > 15_000) {
+    throw new Error("HeyAnon MCP timeout must be between 1 and 15000 milliseconds");
+  }
   const rawFetch = options.fetchImpl ?? fetch;
   const callerSignal = options.signal;
   const fetchImpl: typeof fetch = callerSignal
@@ -433,10 +442,10 @@ export async function auditionHeyAnonV3LpJob(
     throw new HeyAnonMcpCallError("getCurrentPoolPrice", "FETCH", "CALLER_CANCELLED");
   }
   const [priceEnvelope, rangeEnvelope] = await Promise.all([
-    callTool("getCurrentPoolPrice", args, rawFetch, callerSignal).then((value) =>
+    callTool("getCurrentPoolPrice", args, rawFetch, callerSignal, mcpTimeoutMilliseconds).then((value) =>
       PoolPriceEnvelopeSchema.parse(value)
     ),
-    callTool("getPredefinedPriceRanges", { ...args, shortcut }, rawFetch, callerSignal).then(
+    callTool("getPredefinedPriceRanges", { ...args, shortcut }, rawFetch, callerSignal, mcpTimeoutMilliseconds).then(
       (value) => RangeEnvelopeSchema.parse(value),
     ),
   ]);

@@ -1,4 +1,5 @@
 import { RecentJobsPanel } from "./RecentJobsPanel";
+import { ProviderFailureSummary } from "./ProviderFailureSummary";
 import { currentHireErrorMessage, currentRequestEvidenceKey, currentRequestNeedsRefresh, isCurrentHireRefreshError } from "../current-request-expiry";
 import { VenusActivationSandbox } from "./VenusActivationSandbox";
 import { clearCapitalCheckSeed, readCapitalCheckSeed } from "../capital-check";
@@ -1251,11 +1252,12 @@ function SummaryResult({
   }, [resultExpiry]);
   const expired = response.evidenceMode !== "FROZEN_BSC_TEST_FIXTURE"
     && (resultExpiry === null || isResultExpired(resultExpiry, Math.max(resultClock, Date.now())));
+  const recordedMeaning = resultMeaning(deliverable);
   const meaning = expired ? {
     tone: "hold" as const,
     title: "This result has expired.",
     body: "Reload the market or position in the request panel, then run a new free check before acting. The saved receipt remains available.",
-  } : resultMeaning(deliverable);
+  } : recordedMeaning;
   const MeaningIcon = meaning.tone === "refused" ? AlertTriangle : meaning.tone === "action" ? CheckCircle2 : ShieldCheck;
   const metrics = metricsFor(deliverable);
   const details = actionDetails(deliverable);
@@ -1389,11 +1391,12 @@ function SummaryResult({
           </dl>
         </section>
         <section>
-          <h3>{meaning.tone === "action" ? "Execution guards" : meaning.tone === "refused" ? "Provider reasons" : "Evidence and invalidation"}</h3>
+          <h3>{meaning.tone === "action" ? "Execution guards" : recordedMeaning.tone === "refused" ? "Request conditions and recovery" : "Evidence and invalidation"}</h3>
           <ul className="guard-list">
-            {conditions.map((condition) => <li key={condition}><Check size={14} /><span>{condition}</span></li>)}
+            {conditions.map((condition) => <li key={condition}>{recordedMeaning.tone === "refused" ? <AlertTriangle size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}<span>{condition}</span></li>)}
           </ul>
         </section>
+        {recordedMeaning.tone === "refused" && <ProviderFailureSummary execution={response.liveMatchExecution} limitations={deliverable.limitations ?? []} />}
       </div>
       {!expired && deliverable.service === "LENDING_RESCUE" && deliverable.alternatives?.[0] && (
         <div className="alternative-action">

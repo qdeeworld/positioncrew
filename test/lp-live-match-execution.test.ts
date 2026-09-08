@@ -8,7 +8,7 @@ import { auditionHeyAnonV3LpJob, HeyAnonMcpCallError } from "../src/marketplace/
 import { validatedFreshMarketplaceChain } from "../web/src/job-history.js";
 import { FixtureJobResponseSchema } from "../src/api/fixture-response-schema.js";
 import { sha256Commitment } from "../src/commerce/fresh-hire-schema.js";
-import { BscPositionVerificationError, BscVerificationRpcError } from "../src/marketplace/bsc-verification-rpc.js";
+import { BscPositionVerificationError, BscVerificationRpcError, createBscVerificationRpc } from "../src/marketplace/bsc-verification-rpc.js";
 
 vi.mock("../src/marketplace/heyanon-v3pools-lp-job-adapter.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/marketplace/heyanon-v3pools-lp-job-adapter.js")>(),
@@ -49,6 +49,107 @@ async function prepared() {
 beforeEach(() => mockAudition.mockReset());
 
 describe("selected external LP execution", () => {
+  it.each(["FETCH", "RESPONSE_BODY"])("retains the selected-job deadline during real verification %s cancellation", async (phase) => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      input.request.deadline = new Date(input.now.getTime() + 1_000).toISOString();
+      let reads = 0;
+      mockAudition.mockImplementationOnce(async (_request, _position, options) => {
+        const fetchImpl: typeof fetch = async () => {
+          reads += 1;
+          if (phase === "FETCH") return new Promise<Response>(() => {});
+          const response = new Response("");
+          response.json = () => new Promise<unknown>(() => {});
+          return response;
+        };
+        const rpc = createBscVerificationRpc("https://bsc-rpc.publicnode.com", fetchImpl, { signal: options!.signal! });
+        await rpc.request("eth_blockNumber", []);
+        throw new Error("An expired prerequisite must not reach the provider");
+      });
+      const pending = executeLpLiveMatchProvider(input);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const response = await pending;
+      expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+      expect(response.liveMatchExecution?.invocation.checks[0]?.code).toBe("LP_DELIVERY_DEADLINE");
+      expect(response.liveMatchExecution?.invocation.checks[0]?.detail).toContain("after 1000 ms");
+      expect(response.liveMatchExecution?.invocation.rawResponseHash).toBeNull();
+      expect(response.result.job.providerId).toBe("erc8004:56:45650");
+      expect(reads).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not relabel an independent verification error just because the delivery timer also fired", async () => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      input.request.deadline = new Date(input.now.getTime() + 1_000).toISOString();
+      mockAudition.mockImplementationOnce(async (_request, _position, options) => new Promise((_resolve, reject) => {
+        options!.signal!.addEventListener("abort", () => reject(new BscVerificationRpcError("HTTP 403")), { once: true });
+      }));
+      const pending = executeLpLiveMatchProvider(input);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const response = await pending;
+      expect(response.liveMatchExecution?.invocation.checks[0]?.code).toBe("BSC_POSITION_VERIFICATION");
+      expect(response.liveMatchExecution?.invocation.checks[0]?.detail).toContain("HTTP 403");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("allows a slower fresh delivery within the bounded selected-job budget without another invocation", async () => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      mockAudition.mockImplementationOnce(async (_request, _position, options) => {
+        expect(options?.mcpTimeoutMilliseconds).toBe(15_000);
+        await new Promise<void>((resolve) => setTimeout(resolve, 14_000));
+        return input.assessment;
+      });
+      const pending = executeLpLiveMatchProvider(input);
+      await vi.advanceTimersByTimeAsync(14_000);
+      const response = await pending;
+      expect(response.liveMatchExecution?.outcome).toBe("DELIVERED");
+      expect(response.result.job.providerId).toBe("erc8004:56:45650");
+      expect(mockAudition).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["request deadline", "source freshness"])("never extends the %s to accommodate a slow provider", async (limit) => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      const remaining = limit === "request deadline" ? 2_500 : 1_000;
+      if (limit === "request deadline") input.request.deadline = new Date(input.now.getTime() + remaining).toISOString();
+      else {
+        input.request.maxDataAgeSeconds = 30;
+        input.request.marketState.observedAt = new Date(input.now.getTime() - 29_000).toISOString();
+      }
+      mockAudition.mockImplementationOnce(async (_request, _position, options) => {
+        expect(options?.mcpTimeoutMilliseconds).toBe(remaining);
+        return new Promise((_resolve, reject) => {
+          const aborted = () => reject(new HeyAnonMcpCallError("getCurrentPoolPrice", "FETCH", "CALLER_CANCELLED"));
+          options!.signal!.addEventListener("abort", aborted, { once: true });
+          if (options!.signal!.aborted) aborted();
+        });
+      });
+      const pending = executeLpLiveMatchProvider(input);
+      await vi.advanceTimersByTimeAsync(remaining);
+      const response = await pending;
+      expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+      expect(response.liveMatchExecution?.invocation.checks[0]?.code).toBe("LP_DELIVERY_DEADLINE");
+      expect(response.liveMatchExecution?.invocation.checks[0]?.detail).toContain(`after ${remaining} ms`);
+      expect(response.result.job.providerId).toBe("erc8004:56:45650");
+      expect(mockAudition).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     { phase: "FETCH", kind: "CALLER_CANCELLED", expected: "LP_DELIVERY_DEADLINE" },
     { phase: "RESPONSE_BODY", kind: "CALLER_CANCELLED", expected: "LP_DELIVERY_DEADLINE" },
@@ -59,9 +160,9 @@ describe("selected external LP execution", () => {
     try {
       const input = await prepared();
       mockAudition.mockImplementationOnce(async (_request, _positionId, options) => {
-        // Three seconds of prerequisites leave less than the MCP's own
-        // eight-second budget before the ten-second delivery deadline.
-        await new Promise<void>((resolve) => setTimeout(resolve, 3_000));
+        // Six seconds of prerequisites leave less than the MCP's own
+        // fifteen-second budget before the twenty-second delivery deadline.
+        await new Promise<void>((resolve) => setTimeout(resolve, 6_000));
         return new Promise<Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>>((_resolve, reject) => {
           const aborted = () => reject(new HeyAnonMcpCallError("getPredefinedPriceRanges", phase, kind));
           options!.signal!.addEventListener("abort", aborted, { once: true });
@@ -69,7 +170,7 @@ describe("selected external LP execution", () => {
         });
       });
       const pending = executeLpLiveMatchProvider(input);
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(20_000);
       const response = await pending;
       expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
       expect(response.result.deliverable.decision).toBe("NONE");
@@ -78,7 +179,7 @@ describe("selected external LP execution", () => {
       expect(response.liveMatchExecution?.invocation.checks[0]?.code).toBe(expected);
       if (kind === "CALLER_CANCELLED") {
         expect(response.liveMatchExecution?.invocation.checks[0]?.detail)
-          .toContain("PositionCrew's LP delivery deadline expired after 10000 ms");
+          .toContain("PositionCrew's LP delivery deadline expired after 20000 ms");
       }
       expect(mockAudition).toHaveBeenCalledTimes(2);
     } finally {

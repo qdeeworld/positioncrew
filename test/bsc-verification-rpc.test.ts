@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bscReadRpcFallbacks } from "../src/telemetry/bsc.js";
-import { createBscVerificationRpc } from "../src/marketplace/bsc-verification-rpc.js";
+import { BscVerificationCancelledError, BscVerificationRpcError, createBscVerificationRpc } from "../src/marketplace/bsc-verification-rpc.js";
 
 const primary = "https://bsc-rpc.publicnode.com";
 const pinnedCall = [{ to: "0x0000000000000000000000000000000000000001", data: "0x12345678" }, "0x7170000"];
@@ -9,6 +9,32 @@ const response = (result: string) => new Response(JSON.stringify({ jsonrpc: "2.0
 afterEach(() => { vi.useRealTimers(); });
 
 describe("bounded BSC verification transport", () => {
+  it("retains typed cancellation when the caller is already cancelled without invoking an endpoint", async () => {
+    const caller = new AbortController();
+    caller.abort(new Error("private caller reason"));
+    const fetchImpl = vi.fn<typeof fetch>();
+    const pending = createBscVerificationRpc(primary, fetchImpl, { signal: caller.signal }).request("eth_blockNumber", []);
+    await expect(pending).rejects.toBeInstanceOf(BscVerificationCancelledError);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not relabel a local attempt timeout when it triggers a later caller abort", async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      init!.signal!.addEventListener("abort", () => caller.abort(new Error("later caller cancellation")), { once: true });
+      return new Promise<Response>(() => {});
+    };
+    const pending = createBscVerificationRpc(primary, fetchImpl, {
+      signal: caller.signal, timeoutMs: 30, attemptTimeoutMs: 10,
+    }).request("eth_blockNumber", []).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(10);
+    const error = await pending;
+    expect(error).toBeInstanceOf(BscVerificationRpcError);
+    expect(error).not.toBeInstanceOf(BscVerificationCancelledError);
+    expect((error as Error).message).toContain("RPC attempt timed out");
+  });
+
   it("falls back after 429 without changing the method or pinned block", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
@@ -99,7 +125,7 @@ describe("bounded BSC verification transport", () => {
       return new Promise<Response>(() => {});
     };
     const pending = createBscVerificationRpc(primary, fetchImpl, { signal: caller.signal }).request("eth_blockNumber", []);
-    const rejected = expect(pending).rejects.toThrow("Caller cancelled verification");
+    const rejected = expect(pending).rejects.toBeInstanceOf(BscVerificationCancelledError);
     caller.abort();
     await rejected;
     expect(calls).toBe(1);
