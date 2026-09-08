@@ -1,4 +1,5 @@
 import { RecentJobsPanel } from "./RecentJobsPanel";
+import { currentHireErrorMessage, currentRequestNeedsRefresh, isCurrentHireRefreshError } from "../current-request-expiry";
 import { VenusActivationSandbox } from "./VenusActivationSandbox";
 import { clearCapitalCheckSeed, readCapitalCheckSeed } from "../capital-check";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -698,27 +699,32 @@ function LpExternalProviderComparisonPanel({
   loading,
   onChoose,
   requestMatches,
+  requestFresh,
 }: {
   trace: FreshMarketplaceChain | null;
   loading: boolean;
   onChoose: (provider: LpLiveMatchRunRequest["selectedProvider"]) => void;
   requestMatches: boolean;
+  requestFresh: boolean;
 }) {
   const evidence = trace?.hire.evidence;
   const audition = evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" ? evidence.lpLiveMatchAudition : undefined;
   if (audition && trace) {
     const selection = trace.job.providerSelection;
     const execution = trace.receipt?.response.liveMatchExecution;
+    const expiredChoice = trace.job.state === "CREATED" && !requestFresh;
     return (
       <section className="provider-audition-panel" aria-labelledby="lp-choice-title" data-testid="lp-live-match-choice">
         <div className="provider-audition-heading">
           <div>
             <span className="section-kicker">Your provider choice</span>
-            <h3 id="lp-choice-title">{selection ? `${selection.providerName} selected` : "Choose who runs this LP check"}</h3>
+            <h3 id="lp-choice-title">{selection ? `${selection.providerName} selected` : expiredChoice ? "Refresh this LP comparison" : "Choose who runs this LP check"}</h3>
             <p>Each provider was checked against the saved position and limits from block {audition.source.blockNumber}. Choosing an eligible provider starts a fresh assessment of that saved request.</p>
           </div>
         </div>
-        {trace.job.state === "CREATED" && !requestMatches && <p role="status">Your inputs changed. Compare live providers again before choosing.</p>}
+        {expiredChoice
+          ? <p role="status">This saved comparison has expired. Inspect the position again, use the fresh position, and compare providers before choosing. The earlier comparison remains recorded.</p>
+          : trace.job.state === "CREATED" && !requestMatches && <p role="status">Your inputs changed. Compare live providers again before choosing.</p>}
         <div className="provider-audition-grid">
           {audition.candidates.map((candidate) => {
             const selected = selection?.selectedProvider === candidate.providerKey;
@@ -727,7 +733,7 @@ function LpExternalProviderComparisonPanel({
               <article key={candidate.providerKey} className={`provider-audition-candidate ${selected ? "selected" : eligible ? "" : "ineligible"}`}>
                 <div className="provider-audition-candidate-head">
                   <div><span>{candidate.providerKey === "HEYANON" ? "External provider" : "PositionCrew provider"}</span><h4>{candidate.name}</h4></div>
-                  <strong>{selected ? "Selected by you" : eligible ? "Eligible" : candidate.status === "UNAVAILABLE" ? "Unavailable" : "Not eligible"}</strong>
+                  <strong>{selected ? "Selected by you" : eligible ? expiredChoice ? "Expired eligibility" : "Eligible" : candidate.status === "UNAVAILABLE" ? "Unavailable" : "Not eligible"}</strong>
                 </div>
                 <p>{candidate.providerKey === "HEYANON" ? "HeyAnon supplies the range assessment. PositionCrew adapts it and checks your limits." : "PositionCrew evaluates the position directly against your limits."}</p>
                 <div className="provider-audition-facts">
@@ -739,7 +745,7 @@ function LpExternalProviderComparisonPanel({
                   <p>ERC-8004 #{candidate.identity.agentId} · {candidate.identity.network === "BSC_MAINNET" ? "BSC mainnet identity" : "BSC testnet identity"}</p>
                   <ul className="provider-audition-checks">{candidate.checks.map((check) => <li key={check.code} className={check.status.toLowerCase()}><span>{check.status}</span><p>{check.detail}</p></li>)}</ul>
                 </details>
-                {trace.job.state === "CREATED" && <button className="primary-action lp-provider-choice" type="button" disabled={loading || !eligible || !requestMatches} onClick={() => onChoose(candidate.providerKey)}>Choose {candidate.providerKey === "HEYANON" ? "HeyAnon" : "PositionCrew"}</button>}
+                {trace.job.state === "CREATED" && <button className="primary-action lp-provider-choice" type="button" disabled={loading || !eligible || !requestMatches || !requestFresh} onClick={() => onChoose(candidate.providerKey)}>Choose {candidate.providerKey === "HEYANON" ? "HeyAnon" : "PositionCrew"}</button>}
               </article>
             );
           })}
@@ -2028,6 +2034,8 @@ export function JobWorkspace({
   const [inputMode, setInputMode] = useState<WorkspaceInputMode>("interactive");
   const [liveRequest, setLiveRequest] = useState<JobRequest | null>(null);
   const [liveObservation, setLiveObservation] = useState<CurrentMarketplaceObservation | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const submittedObservationRef = useRef<CurrentMarketplaceObservation | null>(null);
   const liveRequestRef = useRef<JobRequest | null>(null);
   const selectedServiceRef = useRef(service);
   const resultPanelRef = useRef<HTMLDivElement | null>(null);
@@ -2088,6 +2096,18 @@ export function JobWorkspace({
     window.requestAnimationFrame(() => resultPanelRef.current?.focus());
   }, [activeJob]);
 
+  useEffect(() => {
+    const updateClock = () => setClockNow(Date.now());
+    const timer = window.setInterval(updateClock, 1_000);
+    window.addEventListener("focus", updateClock);
+    document.addEventListener("visibilitychange", updateClock);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", updateClock);
+      document.removeEventListener("visibilitychange", updateClock);
+    };
+  }, []);
+
   const draftRequest = useMemo(
     () => inputRequest ? applyDraft(inputRequest, draft, Boolean(liveRequest)) : null,
     [inputRequest, draft, liveRequest],
@@ -2096,7 +2116,7 @@ export function JobWorkspace({
     () => inputMode === "interactive" && Boolean(inputRequest && draftRequest && JSON.stringify(inputRequest) !== JSON.stringify(draftRequest)),
     [inputMode, inputRequest, draftRequest],
   );
-  const currentHireReady = inputMode === "interactive" && Boolean(
+  const currentRequestLoaded = inputMode === "interactive" && Boolean(
     provider &&
     liveRequest &&
     liveObservation?.blockNumber.trim() &&
@@ -2104,8 +2124,30 @@ export function JobWorkspace({
     liveObservation.explorerUrl.trim() &&
     liveObservation.binding,
   );
+  const currentRequestServerRejected = isCurrentHireRefreshError(jobError) && liveObservation !== null &&
+    submittedObservationRef.current === liveObservation;
+  const currentRequestExpired = inputMode === "interactive" && Boolean(liveRequest && liveObservation) &&
+    (currentRequestNeedsRefresh(liveRequest, liveObservation, clockNow) || currentRequestServerRejected);
+  const currentHireReady = currentRequestLoaded && !currentRequestExpired;
+  const shownJobError = isCurrentHireRefreshError(jobError) && liveObservation && submittedObservationRef.current &&
+    submittedObservationRef.current !== liveObservation ? null : jobError;
+  const lpEvidence = marketplaceTrace?.hire.evidence;
+  const lpChoiceFresh = lpEvidence?.evidenceClass === "CURRENT_BLOCK_PINNED" && Boolean(marketplaceTrace) &&
+    !currentRequestNeedsRefresh(marketplaceTrace!.hire.request, { ...lpEvidence.source, binding: lpEvidence.observationBinding }, clockNow) &&
+    !currentRequestServerRejected;
+  const lpRequestMatches = Boolean(
+    service === "LP_REBALANCE" && inputMode === "interactive" && draftRequest && marketplaceTrace &&
+    canonicalJson(draftRequest) === canonicalJson(marketplaceTrace.hire.request) &&
+    lpEvidence?.evidenceClass === "CURRENT_BLOCK_PINNED" &&
+    canonicalJson(liveObservation && { blockNumber: liveObservation.blockNumber, observedAt: liveObservation.observedAt, explorerUrl: liveObservation.explorerUrl }) === canonicalJson(lpEvidence.source),
+  );
+  const refreshInstruction = service === "LENDING_RESCUE"
+    ? "Use Load position above to refresh the account, then check eligibility and hire again."
+    : service === "LP_REBALANCE"
+      ? "Use Inspect above, then Use live position, and compare providers again."
+      : "Use Refresh above to load current market evidence, then hire again.";
   const historicalHireReady = inputMode === "locked" && service !== "YIELD_OPTIMIZATION" && Boolean(fixture);
-  const liveMarketPending = inputMode === "interactive" && !currentHireReady;
+  const liveMarketPending = inputMode === "interactive" && !currentRequestLoaded;
   const inputsDisabled = loading || inputMode === "locked" || !currentHireReady || service === "LENDING_RESCUE";
   const draftErrors = useMemo(() => draftValidationErrors(service, draft), [service, draft]);
 
@@ -2117,6 +2159,10 @@ export function JobWorkspace({
     if (loading || draftErrors.length > 0) return;
     if (!inputRequest || !draftRequest) return;
     if (inputMode === "interactive" && (!liveRequest || !liveObservation)) return;
+    if (inputMode === "interactive" && (!currentHireReady || currentRequestNeedsRefresh(liveRequest, liveObservation))) {
+      setClockNow(Date.now());
+      return;
+    }
     if (inputMode === "locked" && !historicalHireReady) return;
     const next = inputMode === "locked"
       ? structuredClone(inputRequest)
@@ -2126,6 +2172,7 @@ export function JobWorkspace({
     const mode: JobRequestMode = inputMode === "locked"
       ? "FROZEN_FIXTURE"
       : "CALLER_SUPPLIED_OBSERVATIONS";
+    submittedObservationRef.current = inputMode === "interactive" ? liveObservation : null;
     await onRun(
       next as Record<string, unknown>,
       mode,
@@ -2138,6 +2185,13 @@ export function JobWorkspace({
     const evidence = marketplaceTrace.hire.evidence;
     const auditionHash = marketplaceTrace.hire.evidenceHash;
     if (evidence?.evidenceClass !== "CURRENT_BLOCK_PINNED" || !evidence.lpLiveMatchAudition || !auditionHash) return;
+    if (!currentHireReady || !lpRequestMatches || currentRequestNeedsRefresh(marketplaceTrace.hire.request, {
+      ...evidence.source, binding: evidence.observationBinding,
+    })) {
+      setClockNow(Date.now());
+      return;
+    }
+    submittedObservationRef.current = liveObservation;
     await onRun(marketplaceTrace.hire.request, "CALLER_SUPPLIED_OBSERVATIONS", {
       ...evidence.source,
       binding: evidence.observationBinding,
@@ -2325,21 +2379,22 @@ export function JobWorkspace({
                 ? "Current-clock scenario with custom bounds. Inputs and timestamps are caller-controlled; this is not benchmark evidence or live wallet execution."
                 : "Current-clock simulation seeded from the August 12 fixture. Observation timestamps are rebased for the scenario; values are not fetched live."}</span>
           </div>
-          {jobError && (
+          {currentRequestExpired && (
+            <div className="job-run-error" role="status" data-testid="current-request-refresh-required">
+              <AlertTriangle size={15} aria-hidden="true" />
+              <span><strong>Refresh required.</strong><small>{refreshInstruction} Saved jobs and receipts are not changed.</small></span>
+            </div>
+          )}
+          {shownJobError && (
             <div className="job-run-error" role="alert">
               <AlertTriangle size={16} aria-hidden="true" />
-              <span><strong>This hire did not finish.</strong><small>{jobError}</small></span>
+              <span><strong>This hire did not finish.</strong><small>{currentHireErrorMessage(shownJobError)}</small></span>
               <button type="button" onClick={() => void submitJob()} disabled={loading || draftErrors.length > 0 || (inputMode === "interactive" ? !currentHireReady : !historicalHireReady) || (service === "LENDING_RESCUE" && !draft.allowRepay && !draft.allowCollateral)}><RefreshCw size={14} aria-hidden="true" /> Retry current hire</button>
             </div>
           )}
           <LendingProviderAuditionPanel trace={marketplaceTrace} />
           <LendingExternalProviderComparisonPanel trace={marketplaceTrace} />
-          <LpExternalProviderComparisonPanel trace={marketplaceTrace} loading={loading} onChoose={(choice) => void chooseLpProvider(choice)} requestMatches={Boolean(
-            service === "LP_REBALANCE" && inputMode === "interactive" && draftRequest && marketplaceTrace &&
-            canonicalJson(draftRequest) === canonicalJson(marketplaceTrace.hire.request) &&
-            marketplaceTrace.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" &&
-            canonicalJson(liveObservation && { blockNumber: liveObservation.blockNumber, observedAt: liveObservation.observedAt, explorerUrl: liveObservation.explorerUrl }) === canonicalJson(marketplaceTrace.hire.evidence.source)
-          )} />
+          <LpExternalProviderComparisonPanel trace={marketplaceTrace} loading={loading} onChoose={(choice) => void chooseLpProvider(choice)} requestMatches={lpRequestMatches} requestFresh={lpChoiceFresh} />
           <GridAndYieldExternalComparisonPanel trace={marketplaceTrace} />
           {marketplaceTrace && (
             <div className="request-boundary" role="status" aria-live="polite">
@@ -2351,7 +2406,7 @@ export function JobWorkspace({
                     ? <CheckCircle2 size={15} aria-hidden="true" />
                     : <LoaderCircle className="spin" size={15} aria-hidden="true" />}
               <span>
-                <strong>{marketplaceTrace.job.state === "CREATED" && marketplaceTrace.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" && marketplaceTrace.hire.evidence.lpLiveMatchAudition ? "CHOOSE A PROVIDER ABOVE" : marketplaceTrace.job.status.replaceAll("_", " ")}</strong>
+                <strong>{marketplaceTrace.job.state === "CREATED" && marketplaceTrace.hire.evidence?.evidenceClass === "CURRENT_BLOCK_PINNED" && marketplaceTrace.hire.evidence.lpLiveMatchAudition ? lpChoiceFresh ? "CHOOSE A PROVIDER ABOVE" : "REFRESH REQUIRED" : marketplaceTrace.job.status.replaceAll("_", " ")}</strong>
                 {" · Hire "}{shortHash(marketplaceTrace.hire.hireId, 14)}
                 {marketplaceTrace.receipt && <>{" · "}<a href={`#jobs/receipt/${marketplaceTrace.receipt.receiptId}`}>Readable receipt <ExternalLink size={11} /></a>{" · "}<a href={marketplaceTrace.receipt.publicUrl} target="_blank" rel="noreferrer">Public receipt <ExternalLink size={11} /></a></>}
               </span>
