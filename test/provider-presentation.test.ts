@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { identityNetworkLabel, selectedProviderFailureMessage } from "../web/src/provider-presentation";
+import { identityNetworkLabel, selectedProviderFailureMessage } from "../web/src/provider-presentation.js";
 
 describe("selected provider failure presentation", () => {
   it("explains the recorded pool-price timeout instead of generic recovery conditions", () => {
