@@ -167,10 +167,12 @@ const marketMismatchCases = [
   ["reversed-symbols", "PROVIDER_TOKEN_PAIR_BINDING"],
   ["wrong-fee", "PROVIDER_FEE_TIER_BINDING"],
   ["fractional-fee", "PROVIDER_FEE_TIER_BINDING"],
+  ["overprecision-fee", "PROVIDER_FEE_TIER_BINDING"],
+  ["large-integer-fee", "PROVIDER_FEE_TIER_BINDING"],
 ] as const;
 const envelopeMismatchCases = ["wrong-id", "tool-error", "conflicting-error"] as const;
 type ResponseVariant = typeof marketMismatchCases[number][0] |
-  typeof envelopeMismatchCases[number] | "case-formatting" | "explicit-success";
+  typeof envelopeMismatchCases[number] | "case-formatting" | "explicit-success" | "zero-padded-fee";
 
 function mutatedProviderFetch(variant: ResponseVariant): typeof fetch {
   return async (input, init) => {
@@ -192,6 +194,9 @@ function mutatedProviderFetch(variant: ResponseVariant): typeof fetch {
       if (variant === "reversed-symbols") Object.assign(payload.data, { token0Symbol: "wbnb", token1Symbol: "usdt" });
       if (variant === "wrong-fee") payload.data.fee = "1%";
       if (variant === "fractional-fee") payload.data.fee = "0.01000001%";
+      if (variant === "overprecision-fee") payload.data.fee = "0.0100000000000000001%";
+      if (variant === "large-integer-fee") payload.data.fee = `${"9".repeat(512)}%`;
+      if (variant === "zero-padded-fee") payload.data.fee = "000.0100000000000000000%";
       if (variant === "case-formatting") Object.assign(payload.data, { token0Symbol: " UsDt ", token1Symbol: " WbNb ", fee: "0.0100%" });
     } else {
       if (variant === "wrong-pool") payload.data.pool = "doge/shib";
@@ -218,6 +223,16 @@ function pendingUntilAbort<T>(signal: AbortSignal): Promise<T> {
 }
 
 describe("HeyAnon V3 Pools exact LP job adapter", () => {
+  it("accepts equivalent overprecision fees while retaining the raw response", async () => {
+    const result = await auditionHeyAnonV3LpJob(compatibleRequest(), positionId, {
+      fetchImpl: mutatedProviderFetch("zero-padded-fee"), now: new Date("2026-08-30T12:00:30.000Z"),
+    });
+    expect(result.checks.find((check) => check.code === "PROVIDER_FEE_TIER_BINDING")?.status).toBe("PASS");
+    expect(result.attributableResult).toBe(true);
+    expect(result.eligibleForLpRebalance).toBe(true);
+    expect(result.invocation.rawResponseHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
   it.each(marketMismatchCases)("rejects %s despite otherwise coherent financial values", async (variant, checkCode) => {
     const result = await auditionHeyAnonV3LpJob(compatibleRequest(), positionId, {
       fetchImpl: mutatedProviderFetch(variant), now: new Date("2026-08-30T12:00:30.000Z"),

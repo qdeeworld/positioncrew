@@ -38,8 +38,17 @@ export function yieldComparisonDescription(
   comparison: CurrentBlockPinnedMarketplaceEvidence["externalYieldComparison"],
 ): string {
   const inspected = `PositionCrew evaluated ${comparison?.marketCount ?? 0} Venus markets.`;
-  if (!comparison || comparison.outcome === "UNAVAILABLE") {
-    return `${inspected} AiKi was unavailable, so no external rate result was obtained.`;
+  if (!comparison) {
+    return `${inspected} No external rate assessment was recorded.`;
+  }
+  if (comparison.outcome === "UNAVAILABLE") {
+    if (comparison.checks.some((check) => check.code === "PINNED_STATE_UNAVAILABLE" && check.status === "FAIL")) {
+      return `${inspected} PositionCrew could not verify the pinned BSC rates, so no external result could be admitted. This does not establish that AiKi was offline.`;
+    }
+    if (comparison.checks.some((check) => check.code === "EXTERNAL_ASSESSMENT_UNAVAILABLE" && check.status === "FAIL")) {
+      return `${inspected} AiKi's external assessment was unavailable, so no verified external rate result was obtained.`;
+    }
+    return `${inspected} No verified external rate assessment was obtained. The recorded failure does not establish that AiKi was unavailable.`;
   }
   if (!comparison.attributable || !comparison.persisted || !comparison.externalRecommendedMarket?.trim() ||
       typeof comparison.externalSimpleAnnualRateBps !== "number" || !Number.isFinite(comparison.externalSimpleAnnualRateBps)) {

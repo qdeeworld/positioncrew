@@ -465,10 +465,13 @@ export async function auditionHeyAnonV3LpJob(
   const providerTokenPairBinding =
     priceEnvelope.data.token0Symbol.trim().toLowerCase() === token0Symbol &&
     priceEnvelope.data.token1Symbol.trim().toLowerCase() === token1Symbol;
-  // The provider publishes percent fees; compare exact fixed-point units rather
-  // than rounding a contradictory declaration into the NFT's fee tier.
-  const providerFeeBinding = parseFixed(priceEnvelope.data.fee.slice(0, -1)) * 10_000n ===
-    BigInt(feeTier) * FIXED_SCALE;
+  // Compare decimal text exactly. Harmless zero padding must not throw, and
+  // extra nonzero precision must remain a retained binding failure, not round
+  // into the pinned fee or discard the provider's response as unavailable.
+  const [providerFeeWhole = "", providerFeeFraction = ""] = priceEnvelope.data.fee.slice(0, -1).split(".");
+  const providerFeeBinding =
+    providerFeeWhole.replace(/^0+(?=\d)/, "") === String(Math.floor(feeTier / 10_000)) &&
+    providerFeeFraction.replace(/0+$/, "") === String(feeTier % 10_000).padStart(4, "0").replace(/0+$/, "");
   // HeyAnon's range label uses token1/token0, matching its raw tick-price range.
   // Case and surrounding whitespace are formatting, not token aliases.
   const providerRangeSymbols = rangeEnvelope.data.pool.split("/").map((symbol) => symbol.trim().toLowerCase());
