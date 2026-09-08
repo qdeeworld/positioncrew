@@ -1,4 +1,5 @@
 import { RecentJobsPanel } from "./RecentJobsPanel";
+import { ProviderFailureSummary } from "./ProviderFailureSummary";
 import { currentHireErrorMessage, currentRequestEvidenceKey, currentRequestNeedsRefresh, isCurrentHireRefreshError } from "../current-request-expiry";
 import { VenusActivationSandbox } from "./VenusActivationSandbox";
 import { clearCapitalCheckSeed, readCapitalCheckSeed } from "../capital-check";
@@ -1389,11 +1390,12 @@ function SummaryResult({
           </dl>
         </section>
         <section>
-          <h3>{meaning.tone === "action" ? "Execution guards" : meaning.tone === "refused" ? "Provider reasons" : "Evidence and invalidation"}</h3>
-          <ul className="guard-list">
-            {conditions.map((condition) => <li key={condition}><Check size={14} /><span>{condition}</span></li>)}
-          </ul>
-        </section>
+                  <h3>{meaning.tone === "action" ? "Execution guards" : meaning.tone === "refused" ? "Request conditions and recovery" : "Evidence and invalidation"}</h3>
+                  <ul className="guard-list">
+                    {conditions.map((condition) => <li key={condition}>{meaning.tone === "refused" ? <AlertTriangle size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}<span>{condition}</span></li>)}
+                  </ul>
+                </section>
+                {meaning.tone === "refused" && <ProviderFailureSummary execution={response.liveMatchExecution} limitations={deliverable.limitations} />}
       </div>
       {!expired && deliverable.service === "LENDING_RESCUE" && deliverable.alternatives?.[0] && (
         <div className="alternative-action">

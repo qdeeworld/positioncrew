@@ -103,6 +103,19 @@ function candidateChecks(
   }));
 }
 
+function selectedDeliveryBudget(request: LpRebalanceRequest): number {
+  const freshnessDeadline = Math.min(
+    Date.parse(request.deadline),
+    ...[request.marketState.observedAt, ...request.sources.map((source) => source.observedAt)]
+      .map((observedAt) => Date.parse(observedAt) + request.maxDataAgeSeconds * 1_000),
+  );
+  const remaining = Math.min(20_000, freshnessDeadline - Date.now());
+  if (!Number.isFinite(remaining) || remaining <= 0) {
+    throw new Error("No fresh LP evidence lifetime remains for the selected-provider invocation");
+  }
+  return remaining;
+}
+
 export async function createLpLiveMatchAudition(
   input: LpRebalanceRequest,
   source: { blockNumber: string; observedAt: string; explorerUrl: string },
@@ -510,8 +523,9 @@ export async function executeLpLiveMatchProvider(input: {
       }
       requireFreshCompletion(request);
       const controller = new AbortController();
-      const deadlineError = new LpExternalDeadlineError("delivery", 10_000);
-      const timeout = setTimeout(() => controller.abort(deadlineError), 10_000);
+      const budgetMilliseconds = selectedDeliveryBudget(request);
+      const deadlineError = new LpExternalDeadlineError("delivery", budgetMilliseconds);
+      const timeout = setTimeout(() => controller.abort(deadlineError), budgetMilliseconds);
       let assessment: Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>;
       try {
         assessment = await boundedExternalInvocation(
@@ -520,8 +534,9 @@ export async function executeLpLiveMatchProvider(input: {
             ...(input.rpcUrl ? { rpcUrl: input.rpcUrl } : {}),
             signal: controller.signal,
             now: new Date(),
+            mcpTimeoutMilliseconds: Math.min(15_000, budgetMilliseconds),
           }),
-          10_000,
+          budgetMilliseconds,
           deadlineError,
           controller.signal,
         );

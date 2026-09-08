@@ -223,6 +223,51 @@ function pendingUntilAbort<T>(signal: AbortSignal): Promise<T> {
 }
 
 describe("HeyAnon V3 Pools exact LP job adapter", () => {
+  it("accepts a nine-second price read when the selected job supplies a fifteen-second budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-30T12:00:30.000Z"));
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), milliseconds);
+      return controller.signal;
+    });
+    let priceCalls = 0;
+    const slowFetch: typeof fetch = async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as { params?: { name?: string } };
+      if (String(input).includes("heyanon.ai") && body.params?.name === "getCurrentPoolPrice") {
+        priceCalls += 1;
+        await new Promise<void>((resolve, reject) => {
+          const signal = init!.signal!;
+          const timer = setTimeout(() => { signal.removeEventListener("abort", aborted); resolve(); }, 9_000);
+          const aborted = () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); };
+          signal.addEventListener("abort", aborted, { once: true });
+          if (signal.aborted) aborted();
+        });
+      }
+      return fetchImpl(input, init);
+    };
+    try {
+      const pending = auditionHeyAnonV3LpJob(compatibleRequest(), positionId, {
+        fetchImpl: slowFetch, now: new Date(), mcpTimeoutMilliseconds: 15_000,
+      });
+      await vi.advanceTimersByTimeAsync(9_000);
+      const result = await pending;
+      expect(result.eligibleForLpRebalance).toBe(true);
+      expect(timeoutSpy).toHaveBeenCalledWith(15_000);
+      expect(priceCalls).toBe(1);
+    } finally {
+      vi.clearAllTimers();
+      timeoutSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports the actual configured local timeout budget", () => {
+    const error = new HeyAnonMcpCallError("getCurrentPoolPrice", "FETCH", "LOCAL_TIMEOUT", 15_000);
+    expect(error.message).toContain("local 15000 ms deadline");
+    expect(error.code).toBe("HEYANON_MCP_LOCAL_TIMEOUT");
+  });
+
   it("accepts equivalent overprecision fees while retaining the raw response", async () => {
     const result = await auditionHeyAnonV3LpJob(compatibleRequest(), positionId, {
       fetchImpl: mutatedProviderFetch("zero-padded-fee"), now: new Date("2026-08-30T12:00:30.000Z"),

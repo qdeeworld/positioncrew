@@ -49,6 +49,57 @@ async function prepared() {
 beforeEach(() => mockAudition.mockReset());
 
 describe("selected external LP execution", () => {
+  it("allows a slower fresh delivery within the bounded selected-job budget without another invocation", async () => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      mockAudition.mockImplementationOnce(async (_request, _position, options) => {
+        expect(options?.mcpTimeoutMilliseconds).toBe(15_000);
+        await new Promise<void>((resolve) => setTimeout(resolve, 14_000));
+        return input.assessment;
+      });
+      const pending = executeLpLiveMatchProvider(input);
+      await vi.advanceTimersByTimeAsync(14_000);
+      const response = await pending;
+      expect(response.liveMatchExecution?.outcome).toBe("DELIVERED");
+      expect(response.result.job.providerId).toBe("erc8004:56:45650");
+      expect(mockAudition).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["request deadline", "source freshness"])("never extends the %s to accommodate a slow provider", async (limit) => {
+    vi.useFakeTimers();
+    try {
+      const input = await prepared();
+      const remaining = limit === "request deadline" ? 2_500 : 1_000;
+      if (limit === "request deadline") input.request.deadline = new Date(input.now.getTime() + remaining).toISOString();
+      else {
+        input.request.maxDataAgeSeconds = 30;
+        input.request.marketState.observedAt = new Date(input.now.getTime() - 29_000).toISOString();
+      }
+      mockAudition.mockImplementationOnce(async (_request, _position, options) => {
+        expect(options?.mcpTimeoutMilliseconds).toBe(remaining);
+        return new Promise((_resolve, reject) => {
+          const aborted = () => reject(new HeyAnonMcpCallError("getCurrentPoolPrice", "FETCH", "CALLER_CANCELLED"));
+          options!.signal!.addEventListener("abort", aborted, { once: true });
+          if (options!.signal!.aborted) aborted();
+        });
+      });
+      const pending = executeLpLiveMatchProvider(input);
+      await vi.advanceTimersByTimeAsync(remaining);
+      const response = await pending;
+      expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
+      expect(response.liveMatchExecution?.invocation.checks[0]?.code).toBe("LP_DELIVERY_DEADLINE");
+      expect(response.liveMatchExecution?.invocation.checks[0]?.detail).toContain(`after ${remaining} ms`);
+      expect(response.result.job.providerId).toBe("erc8004:56:45650");
+      expect(mockAudition).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     { phase: "FETCH", kind: "CALLER_CANCELLED", expected: "LP_DELIVERY_DEADLINE" },
     { phase: "RESPONSE_BODY", kind: "CALLER_CANCELLED", expected: "LP_DELIVERY_DEADLINE" },
@@ -59,9 +110,9 @@ describe("selected external LP execution", () => {
     try {
       const input = await prepared();
       mockAudition.mockImplementationOnce(async (_request, _positionId, options) => {
-        // Three seconds of prerequisites leave less than the MCP's own
-        // eight-second budget before the ten-second delivery deadline.
-        await new Promise<void>((resolve) => setTimeout(resolve, 3_000));
+        // Six seconds of prerequisites leave less than the MCP's own
+        // fifteen-second budget before the twenty-second delivery deadline.
+        await new Promise<void>((resolve) => setTimeout(resolve, 6_000));
         return new Promise<Awaited<ReturnType<typeof auditionHeyAnonV3LpJob>>>((_resolve, reject) => {
           const aborted = () => reject(new HeyAnonMcpCallError("getPredefinedPriceRanges", phase, kind));
           options!.signal!.addEventListener("abort", aborted, { once: true });
@@ -69,7 +120,7 @@ describe("selected external LP execution", () => {
         });
       });
       const pending = executeLpLiveMatchProvider(input);
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(20_000);
       const response = await pending;
       expect(response.liveMatchExecution?.outcome).toBe("REFUSED");
       expect(response.result.deliverable.decision).toBe("NONE");
@@ -78,7 +129,7 @@ describe("selected external LP execution", () => {
       expect(response.liveMatchExecution?.invocation.checks[0]?.code).toBe(expected);
       if (kind === "CALLER_CANCELLED") {
         expect(response.liveMatchExecution?.invocation.checks[0]?.detail)
-          .toContain("PositionCrew's LP delivery deadline expired after 10000 ms");
+          .toContain("PositionCrew's LP delivery deadline expired after 20000 ms");
       }
       expect(mockAudition).toHaveBeenCalledTimes(2);
     } finally {

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { TASKS } from "../task-config";
 import { serviceLabel, shortHash } from "../presentation";
+import { identityNetworkLabel } from "../provider-presentation";
 import { CapitalCheckPanel } from "./CapitalCheckPanel";
 import { ProviderCompatibilityPanel } from "./ProviderCompatibilityPanel";
 import type {
@@ -203,7 +204,7 @@ export function MarketplaceView({
                             onClick={() => onSelect(provider.service)}
                           >
                             <span className="provider-icon">{Icon && <Icon size={17} aria-hidden="true" />}</span>
-                            <span><strong>{provider.name}</strong><small>ERC-8004 #{provider.identity.agentId} · {provider.identity.explorerUrl.startsWith("https://testnet.bscscan.com/") ? "BSC testnet evidence" : "Identity evidence"} · {shortHash(provider.providerId, 12)}</small></span>
+                            <span><strong>{provider.name}</strong><small>BSC mainnet data · {identityNetworkLabel(provider.identity.explorerUrl)} registration</small></span>
                           </button>
                         </td>
                         <td><span className="category-label">{provider.category}</span></td>
@@ -254,14 +255,16 @@ export function MarketplaceView({
                   </section>
                 ) : null}
                 <dl className="provider-facts">
+                  <div><dt><Database size={14} /> Market observations</dt><dd>BSC mainnet · chain 56 · current job snapshots</dd></div>
                   <div><dt><Server size={14} /> Endpoint</dt><dd><code>{selected.method} {selected.endpoint}</code></dd></div>
                   <div><dt><Radio size={14} /> Health</dt><dd><code>GET {selected.healthEndpoint}</code></dd></div>
-                  <div><dt><BadgeCheck size={14} /> Identity evidence</dt><dd><a href={selected.identity.explorerUrl} target="_blank" rel="noreferrer">ERC-8004 #{selected.identity.agentId} · {selected.identity.explorerUrl.startsWith("https://testnet.bscscan.com/") ? "BSC testnet" : "View network"} <ExternalLink size={11} aria-hidden="true" /></a></dd></div>
+                  <div><dt><BadgeCheck size={14} /> Registration evidence</dt><dd><a href={selected.identity.explorerUrl} target="_blank" rel="noreferrer">ERC-8004 #{selected.identity.agentId} · {identityNetworkLabel(selected.identity.explorerUrl)} <ExternalLink size={11} aria-hidden="true" /></a></dd></div>
                   <div><dt><Code2 size={14} /> Machine contract</dt><dd><a href={selected.manifestEndpoint} target="_blank" rel="noreferrer">Inspect provider manifest <ExternalLink size={11} aria-hidden="true" /></a></dd></div>
                   <div><dt><Database size={14} /> Request</dt><dd><code>{selected.requestSchema}</code></dd></div>
                   <div><dt><Code2 size={14} /> Deliverable</dt><dd><code>{selected.deliverableSchema}</code></dd></div>
                   <div><dt><BadgeCheck size={14} /> Conformance</dt><dd>{selectedResult ? `${selectedResult.result.evaluation.score}/100 · ${selectedResult.result.job.state}` : matrixLoadState === "UNAVAILABLE" ? "Unavailable · retry live data" : "Checking"}</dd></div>
                 </dl>
+                <p className="provider-summary">The registration network is separate from the BSC mainnet market data used by current assessments. Registration does not prove a mainnet transaction or payment.</p>
                 <button className="primary-action" type="button" onClick={() => onCreateJob(selected.service)}>
                   {selectedTask?.currentAction ?? `Open current ${serviceLabel(selected.service).toLowerCase()} hire`}
                   <ArrowRight size={16} aria-hidden="true" />
