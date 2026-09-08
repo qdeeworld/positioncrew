@@ -1893,6 +1893,29 @@ export async function inspectVenusStableYields(
     ),
   );
   const marketValues = await rpcBatchChunked(MAINNET_RPC, marketCalls);
+  if (options.retainYieldRateObservation) {
+    // Numeric state tags are supported by the approved public RPCs. Recheck
+    // both headers after all state calls before authenticating the capture;
+    // a detected reorganisation or inconsistent header must never be signed.
+    const confirmedValues = await rpcBatch(MAINNET_RPC, [
+      { method: "eth_getBlockByNumber", params: [block.number, false] },
+      { method: "eth_getBlockByNumber", params: [toHex(priorBlockNumber), false] },
+    ]);
+    const identities = [
+      { label: "observed", initialValue: blockValue, initial: block, number: blockNumber },
+      { label: "baseline", initialValue: priorBlockValue, initial: priorBlock, number: priorBlockNumber },
+    ];
+    for (const [index, identity] of identities.entries()) {
+      const confirmedValue = confirmedValues[index];
+      const confirmed = rpcBlock(confirmedValue, `Venus ${identity.label} block confirmation`);
+      if (BigInt(identity.initial.number) !== identity.number ||
+          BigInt(confirmed.number) !== identity.number ||
+          BigInt(confirmed.timestamp) !== BigInt(identity.initial.timestamp) ||
+          yieldObservationBlockHash(confirmedValue).toLowerCase() !== yieldObservationBlockHash(identity.initialValue).toLowerCase()) {
+        throw new Error(`The Venus ${identity.label} block changed during the market read; refresh the capture`);
+      }
+    }
+  }
   let cursor = 0;
   const decodedMarkets = VENUS_STABLE_MARKETS.map((market) => {
     const listing = decodeFunctionResult({
