@@ -64,6 +64,9 @@ export function verifyBuyerRedemption(proof: BuyerVenusSupplyProof, transaction:
     .filter(log => sameAddress(log.address, proof.market) && sameAddress(log.args.redeemer, proof.account));
   requireBuyer(redemptions.length === 1 && redemptions[0]!.args.redeemTokens === shares && redemptions[0]!.args.redeemAmount > 0n,
     "A successful EVM receipt alone does not prove a withdrawal.");
+  // The allowlisted implementation's four-argument Redeem emits remainedAmount
+  // (net of the separate RedeemFee), not the gross pre-fee redemption value.
+  // Subtracting that fee again would understate actual delivery and reject it.
   const amount = redemptions[0]!.args.redeemAmount;
   const transfers = parseEventLogs({ abi: BUYER_TOKEN_ABI, eventName: "Transfer", logs: receipt.logs, strict: true });
   requireBuyer(transfers.some(log => sameAddress(log.address, proof.token) && sameAddress(log.args.from, proof.market) && sameAddress(log.args.to, proof.account) && log.args.value === amount),
