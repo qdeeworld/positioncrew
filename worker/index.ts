@@ -1,4 +1,9 @@
 import { ZodError } from "zod";
+import { handleBuyerVenus } from "../src/commerce/buyer-venus-api.js";
+import { buyerVenusPublicClient } from "../src/commerce/buyer-venus-read.js";
+import { BUYER_TOKEN_ABI, BUYER_ORACLE_ABI, BUYER_COMPTROLLER_ABI, VENUS_BUYER_MARKETS, VENUS_BUYER_COMPTROLLER, VENUS_BUYER_VBNB } from "../src/commerce/buyer-venus-policy.js";
+import { formatFixed, parseFixed, FIXED_SCALE } from "../src/core/fixed.js";
+import { formatUnits, type Address } from "viem";
 import { verifyTrustedGatewayRequest, TrustedGatewayRequestError } from "../src/api/trusted-gateway.js";
 import agentCaptureManifest from "../benchmarks/agent-capture-commitments-2026-08-12.json" with { type: "json" };
 import erc8183Job489Deliverable from "../evidence/erc8183-job-489.deliverable.json" with { type: "json" };
@@ -167,6 +172,7 @@ interface Env {
   SHADOW_GRID_TEST_CHECKPOINT_NOW?: string;
   ALTANA_VENUS_SESSION?: string;
   BSC_LOG_RPC_URL?: string;
+  BUYER_VENUS_RPC_URL?: string;
   SOURCE_OBSERVATION_HMAC_KEY?: string;
   TRUSTED_GATEWAY_HMAC_KEY?: string;
 }
@@ -2435,6 +2441,10 @@ async function api(
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: API_HEADERS });
 
   try {
+    if (url.pathname.startsWith("/api/buyer-venus/")) {
+      return handleBuyerVenus(request, { db: env.DB, ...(env.SOURCE_OBSERVATION_HMAC_KEY ? { observationKey: env.SOURCE_OBSERVATION_HMAC_KEY } : {}),
+        ...(env.BUYER_VENUS_RPC_URL ? { client: buyerVenusPublicClient(env.BUYER_VENUS_RPC_URL) } : {}) });
+    }
     if (url.pathname === "/.well-known/positioncrew.json") {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
       return json(
@@ -2706,12 +2716,70 @@ async function api(
 
     if (url.pathname === "/api/markets/venus/stable-yields") {
       if (request.method !== "GET") return apiError(405, "METHOD_NOT_ALLOWED", ["Use GET."]);
-      const { yieldRateObservation, ...probe } = await inspectVenusStableYields({ retainYieldRateObservation: true });
+      const account = url.searchParams.get("account");
+      const heldAsset = url.searchParams.get("heldAsset");
+      if (heldAsset !== null && heldAsset !== "USDT") return apiError(422, "UNSUPPORTED_HELD_ASSET", ["The buyer execution path currently supports existing USDT only."]);
+      if (account !== null && !/^0x[0-9a-fA-F]{40}$/.test(account)) return apiError(422, "INVALID_BUYER_WALLET", ["Enter a valid BSC wallet address."]);
+      if (heldAsset === "USDT" && (!account || /^0x0{40}$/i.test(account))) return apiError(422, "BUYER_WALLET_REQUIRED", ["Connect the wallet that holds your USDT."]);
+      const { yieldRateObservation, ...probe } = await inspectVenusStableYields({ retainYieldRateObservation: true, ...(account ? { account } : {}),
+        ...(heldAsset && env.BUYER_VENUS_RPC_URL ? { rpcUrl: env.BUYER_VENUS_RPC_URL } : {}) });
+      let buyerHolding: { account: string; usdtBalance: string; bnbBalance: string; valueUsd: string } | undefined;
+      if (heldAsset === "USDT") {
+        if (!account) return apiError(422, "BUYER_WALLET_REQUIRED", ["Connect the wallet that holds your USDT."]);
+        probe.yieldRequest.opportunities = probe.yieldRequest.opportunities.filter(item => item.asset.symbol === "USDT");
+        probe.markets = probe.markets.filter(item => item.symbol === "USDT");
+        const markets = new Set(probe.yieldRequest.opportunities.map(item => item.vaultOrMarket.toLowerCase()));
+        if (yieldRateObservation) yieldRateObservation.marketRates = yieldRateObservation.marketRates.filter(item => markets.has(item.market.toLowerCase()));
+        const client = buyerVenusPublicClient(env.BUYER_VENUS_RPC_URL);
+        const market = VENUS_BUYER_MARKETS[0];
+        const blockNumber = BigInt(probe.source.blockNumber);
+        const [chainId, balance, bnb, price, gasPrice, bnbPrice, treasuryPercent] = await Promise.all([
+          client.getChainId(),
+          client.readContract({ address: market.token, abi: BUYER_TOKEN_ABI, functionName: "balanceOf", args: [account as Address], blockNumber }),
+          client.getBalance({ address: account as Address, blockNumber }),
+          client.readContract({ address: probe.source.oracle, abi: BUYER_ORACLE_ABI, functionName: "getUnderlyingPrice", args: [market.market], blockNumber }),
+          client.getGasPrice(),
+          client.readContract({ address: probe.source.oracle, abi: BUYER_ORACLE_ABI, functionName: "getUnderlyingPrice", args: [VENUS_BUYER_VBNB], blockNumber }),
+          client.readContract({ address: VENUS_BUYER_COMPTROLLER, abi: BUYER_COMPTROLLER_ABI, functionName: "treasuryPercent", blockNumber }),
+        ]);
+        const canonical = await client.getBlock({ blockNumber });
+        if (chainId !== 56 || price <= 0n || !yieldRateObservation || canonical.hash !== yieldRateObservation.observedBlock.blockHash) return apiError(409, "REFRESH_REQUIRED", ["The wallet and market snapshot could not be reconciled. Refresh before assessing."]);
+        const value = balance * price / FIXED_SCALE;
+        if (value < FIXED_SCALE) return apiError(422, "NO_SUPPORTED_HOLDING", ["This wallet needs at least $1 of existing USDT for an assessment. This path does not buy or swap assets."]);
+        const capital = value < parseFixed("10000000") ? value : parseFixed("10000000");
+        probe.yieldRequest.capitalUsd = formatFixed(capital, 2);
+        probe.yieldRequest.maxAllocationUsd = probe.yieldRequest.capitalUsd;
+        // Visible defaults for a new assessment. A completed recommendation
+        // is never silently reduced or replaced by these values.
+        probe.yieldRequest.maxActionUsd = formatFixed(capital * 9n / 10n, 2);
+        // New wallet-assessment defaults include reset + exact approval +
+        // supply and a withdrawal reserve. They never alter an existing hire.
+        if (gasPrice <= 0n || bnbPrice <= 0n || treasuryPercent < 0n || treasuryPercent >= FIXED_SCALE) return apiError(409, "REFRESH_REQUIRED", ["The wallet's round-trip costs could not be verified."]);
+        const ceil = (value: bigint, divisor: bigint) => (value + divisor - 1n) / divisor;
+        const reviewedGasPrice = ceil(gasPrice * 12n, 10n);
+        const entryGasUsd = ceil(reviewedGasPrice * 700_000n * bnbPrice, FIXED_SCALE);
+        const exitGasUsd = ceil(reviewedGasPrice * 500_000n * bnbPrice, FIXED_SCALE);
+        const apy = Math.max(...probe.yieldRequest.opportunities.map(item => item.grossApyBps));
+        const gross = capital * BigInt(apy) * BigInt(probe.yieldRequest.constraints.evaluationHorizonDays) / (10_000n * 365n);
+        const exitFeeUsd = ceil((capital + gross) * treasuryPercent, FIXED_SCALE);
+        const roundTrip = entryGasUsd + exitGasUsd + exitFeeUsd;
+        const costLimit = roundTrip > parseFixed("0.25") ? roundTrip : parseFixed("0.25");
+        const costString = (value: bigint) => formatFixed(ceil(value, 10n ** 12n) * 10n ** 12n, 6);
+        probe.yieldRequest.maxExecutionCostUsd = costString(costLimit);
+        probe.yieldRequest.maxGasUsd = costString(costLimit);
+        for (const opportunity of probe.yieldRequest.opportunities) {
+          const liquidity = parseFixed(opportunity.liquidityUsd);
+          opportunity.amountUsd = formatFixed(capital < liquidity ? capital : liquidity, 2);
+          opportunity.estimatedEntryCostUsd = costString(entryGasUsd);
+          opportunity.estimatedExitCostUsd = costString(exitGasUsd + exitFeeUsd);
+        }
+        buyerHolding = { account, usdtBalance: formatUnits(balance, 18), bnbBalance: formatUnits(bnb, 18), valueUsd: formatFixed(value, 2) };
+      }
       const observationBinding = await issueServerObservationBinding(probe.yieldRequest, {
         blockNumber: probe.source.blockNumber, observedAt: probe.source.blockTimestamp, explorerUrl: probe.source.explorerUrl,
       }, env.SOURCE_OBSERVATION_HMAC_KEY, new Date(),
       yieldRateObservation === undefined ? undefined : { yieldRateObservation });
-      return json({ ...probe, observationBinding });
+      return json({ ...probe, observationBinding, ...(buyerHolding ? { buyerHolding } : {}) });
     }
 
     if (url.pathname === "/api/matrix") {

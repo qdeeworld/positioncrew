@@ -2307,3 +2307,20 @@ code, pre, .mono-value { font-family: "SFMono-Regular", Consolas, "Liberation Mo
   .activation-sandbox__limits { grid-template-columns: 1fr; }
   .activation-sandbox .primary-action { width: 100%; min-height: 44px; }
 }
+/* The buyer flow uses the existing assessment cards and native controls. */
+.buyer-venus { overflow-wrap: anywhere; }
+.buyer-venus button, .buyer-venus__connect button { min-height: 44px; padding: 10px 16px; }
+.buyer-venus__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+.buyer-venus__facts div { min-width: 0; }
+.buyer-venus__facts dt { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.buyer-venus__facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.buyer-venus__consent { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 16px 0; cursor: pointer; }
+.buyer-venus__consent input { width: 20px; height: 20px; flex: 0 0 20px; }
+.buyer-venus__pending, .buyer-venus__position { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.buyer-venus__pending label { display: grid; gap: 8px; margin-bottom: 12px; }
+.buyer-venus__pending input { min-height: 44px; width: 100%; }
+.buyer-venus details { margin: 16px 0; }
+.buyer-venus summary { cursor: pointer; min-height: 44px; padding: 12px 0; }
+.buyer-venus__connect { margin: 12px 0; overflow-wrap: anywhere; }
+.buyer-venus__connect p { line-height: 1.5; }
+@media (max-width: 640px) { .buyer-venus__facts { grid-template-columns: 1fr; } }

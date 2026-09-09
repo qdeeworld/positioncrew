@@ -612,6 +612,8 @@ export interface VenusYieldRequestOptions {
   account?: string;
   capitalUsd?: number;
   retainYieldRateObservation?: boolean;
+  /** Trusted server configuration, never accepted from an HTTP caller. */
+  rpcUrl?: string;
 }
 
 export interface PancakePositionProbe {
@@ -1799,6 +1801,7 @@ function yieldObservationBlockHash(value: unknown): string {
 export async function inspectVenusStableYields(
   options: VenusYieldRequestOptions = {},
 ): Promise<VenusYieldProbe> {
+  const rpcUrl = options.rpcUrl ?? MAINNET_RPC;
   const accountInput = options.account ?? NATIVE_BNB;
   if (!isAddress(accountInput)) throw new Error("A valid EVM account address is required");
   const account = accountInput as Address;
@@ -1807,7 +1810,7 @@ export async function inspectVenusStableYields(
     throw new Error("capitalUsd must be between 1 and 10000000");
   }
 
-  const [blockValue, gasPriceValue] = await rpcBatch(MAINNET_RPC, [
+  const [blockValue, gasPriceValue] = await rpcBatch(rpcUrl, [
     { method: "eth_getBlockByNumber", params: ["latest", false] },
     { method: "eth_gasPrice", params: [] },
   ]);
@@ -1817,7 +1820,7 @@ export async function inspectVenusStableYields(
     ? { blockHash: yieldObservationBlockHash(blockValue) as Hex, requireCanonical: true }
     : block.number;
   const priorBlockNumber = blockNumber > 120n ? blockNumber - 120n : 0n;
-  const [priorBlockValue, oracleValue] = await rpcBatch(MAINNET_RPC, [
+  const [priorBlockValue, oracleValue] = await rpcBatch(rpcUrl, [
     { method: "eth_getBlockByNumber", params: [toHex(priorBlockNumber), false] },
     ethCall(
       VENUS_COMPTROLLER,
@@ -1895,12 +1898,12 @@ export async function inspectVenusStableYields(
       stateBlock,
     ),
   );
-  const marketValues = await rpcBatchChunked(MAINNET_RPC, marketCalls);
+  const marketValues = await rpcBatchChunked(rpcUrl, marketCalls);
   if (options.retainYieldRateObservation) {
     // Every retained state call is hash-bound, including across hedged RPCs.
     // Also recheck both canonical headers after all state calls; a detected
     // reorganisation or inconsistent header must never be signed.
-    const confirmedValues = await rpcBatch(MAINNET_RPC, [
+    const confirmedValues = await rpcBatch(rpcUrl, [
       { method: "eth_getBlockByNumber", params: [block.number, false] },
       { method: "eth_getBlockByNumber", params: [toHex(priorBlockNumber), false] },
     ]);

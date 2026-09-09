@@ -215,6 +215,18 @@ export function buildMarketplaceManifest(
     aacpReadinessUrl: absolute(origin, "/api/commerce/aacp"),
     freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
     freshCurrentHireUrl: absolute(origin, "/api/benchmark-hires"),
+    buyerApprovedExecution: {
+      chainId: 56, service: "YIELD_OPTIMIZATION", asset: "USDT", protocol: "Venus Core vUSDT",
+      assessmentInputUrl: absolute(origin, "/api/markets/venus/stable-yields?account={wallet}&heldAsset=USDT"),
+      prepareUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/prepare"),
+      statusUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}"),
+      preflightUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/preflight"),
+      confirmUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/confirm"),
+      withdrawalQuoteUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/withdraw-quote"),
+      withdrawalPreflightUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/withdraw-preflight"),
+      withdrawalConfirmUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/withdraw-confirm"),
+      boundary: "Exact unsigned transactions require buyer wallet approval. Supply and withdrawal are verified separately from the free assessment. No custody, autonomous signing, onchain expiry or guaranteed yield/redemption liquidity.",
+    },
     providers: PROVIDER_CATALOG.map((provider) => ({
       providerId: provider.providerId,
       service: provider.service,
@@ -338,6 +350,29 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
   );
   const paths = {
     ...providerPaths,
+    ...Object.fromEntries([
+      ["", "get", "Read the saved buyer-approved execution and position proofs", {}],
+      ["/prepare", "post", "Prepare exact USDT supply transactions from a completed current Yield receipt", { account: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$" } }],
+      ["/preflight", "post", "Recheck the unchanged supply or allowance step before buyer signing", { step: { type: "integer", minimum: 0, maximum: 2 } }],
+      ["/confirm", "post", "Verify the buyer transaction after 15 canonical BSC confirmations", { step: { type: "integer", minimum: 0, maximum: 2 }, transactionHash: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" } }],
+      ["/withdraw-quote", "post", "Quote redemption of only the shares minted by this deposit", {}],
+      ["/withdraw-preflight", "post", "Recheck wallet, quote, shares, protocol cash and gas before signing", {}],
+      ["/withdraw-confirm", "post", "Verify delivered USDT or record a finalized reverted withdrawal", { transactionHash: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" } }],
+    ].map(([suffix, method, summary, properties]) => [`/api/buyer-venus/{receiptId}${suffix}`, {
+      [method as string]: {
+        summary,
+        parameters: [{ name: "receiptId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        ...(method === "post" ? { requestBody: { required: true, content: { "application/json": { schema: {
+          type: "object", additionalProperties: false, properties, required: Object.keys(properties as object),
+        } } } } } : {}),
+        responses: {
+          "200": { description: "Saved state, checked unsigned step, or verified proof; signing remains in the buyer wallet" },
+          "201": { description: "Immutable execution plan created" },
+          "202": { description: "Transaction recorded, awaiting 15 confirmations" },
+          "409": { description: "Execution stopped with an explicit reason; no server-side signing or broadcast" },
+        },
+      },
+    }])),
     [EXTERNAL_COMPARISON_SNAPSHOT_ROUTE]: {
       get: {
         summary: "Read the immutable third-party comparison-candidate evidence snapshot",
@@ -672,6 +707,10 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
       get: {
         summary: "Build an unsigned yield-allocation request from one pinned Venus block",
         operationId: "inspectVenusStableYields",
+        parameters: [
+          { name: "account", in: "query", schema: { type: "string", pattern: "^0x[0-9a-fA-F]{40}$" } },
+          { name: "heldAsset", in: "query", description: "USDT requires a nonzero account and uses that wallet's actual holding", schema: { type: "string", enum: ["USDT"] } },
+        ],
         responses: {
           "200": { description: "Pinned Venus stablecoin base-rate probe and unsigned allocation request" },
           "500": { description: "Pinned market, oracle, token, or gas reads were unavailable" },
@@ -685,7 +724,7 @@ export function buildOpenApiDocument(origin: string): Record<string, unknown> {
       title: "PositionCrew Provider API",
       version: "1.0.0",
       description:
-        "Machine-readable contracts for four bounded BSC capital providers. Public assessments cost $0.00 with no wallet or payment. Direct provider jobs evaluate caller-supplied scenarios; the separate D1 hire path preserves four current block-pinned categories and three historical tasks. Current snapshot attestations are checked at admission, without re-fetching chain state during execution. Outputs are unsigned plans or refusals, not capital transactions, paid settlement, or external demand.",
+        "Machine-readable contracts for four bounded BSC capital providers. Public assessments cost $0.00 with no wallet or payment. Direct provider jobs evaluate caller-supplied scenarios; the D1 hire path preserves four current block-pinned categories and three historical tasks. Assessment outputs are unsigned plans or refusals. A separate buyer-venus path rechecks an eligible current USDT Yield recommendation, prepares exact transactions for buyer wallet approval, and verifies supplied shares and redeemed USDT. No custody or autonomous signing; assessment receipts do not prove paid settlement or external demand.",
     },
     servers: [{ url: origin }],
     paths,
