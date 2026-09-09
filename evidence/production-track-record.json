@@ -1,6 +1,6 @@
 {
   "schemaVersion": "positioncrew.production-track-record.v1",
-  "generatedAt": "2026-09-09T16:55:01.126Z",
+  "generatedAt": "2026-09-09T19:49:59.232Z",
   "status": "DEGRADED",
   "epoch": {
     "schemaVersion": "positioncrew.production-monitor-epoch.v1",
@@ -41,17 +41,26 @@
     "sourceStatus": "AVAILABLE"
   },
   "summary": {
-    "totalScheduledRunsSinceEpoch": 504,
+    "totalScheduledRunsSinceEpoch": 505,
     "observedRunCount": 100,
     "completedRuns": 100,
     "successfulRuns": 87,
     "unsuccessfulRuns": 13,
     "pendingRuns": 0,
     "rollingPassRatePct": 87,
-    "rollingWindowStartedAt": "2026-08-26T09:05:35Z",
-    "rollingWindowEndedAt": "2026-09-09T16:53:50Z"
+    "rollingWindowStartedAt": "2026-08-26T09:25:56Z",
+    "rollingWindowEndedAt": "2026-09-09T19:48:47Z"
   },
   "runs": [
+    {
+      "runId": 34397282656,
+      "status": "completed",
+      "conclusion": "success",
+      "createdAt": "2026-09-09T19:48:47Z",
+      "completedAt": "2026-09-09T19:49:59.232Z",
+      "headSha": "e814cf326109d894bff3f54bedc9a2e3e520bdcf",
+      "url": "https://github.com/qdeeworld/positioncrew/actions/runs/34397282656"
+    },
     {
       "runId": 34379578952,
       "status": "completed",
@@ -942,15 +951,6 @@
       "completedAt": "2026-08-26T09:27:11.253Z",
       "headSha": "f065ddbc4950c46c7f6d8c1c78fc5f516671686f",
       "url": "https://github.com/dolepee/positioncrew/actions/runs/32952960781"
-    },
-    {
-      "runId": 32951155628,
-      "status": "completed",
-      "conclusion": "success",
-      "createdAt": "2026-08-26T09:05:35Z",
-      "completedAt": "2026-08-26T09:06:13.736Z",
-      "headSha": "f065ddbc4950c46c7f6d8c1c78fc5f516671686f",
-      "url": "https://github.com/dolepee/positioncrew/actions/runs/32951155628"
     }
   ],
   "boundary": "This record measures scheduled production verification outcomes after the fixed epoch. It is not external demand, investment performance, mainnet execution, or an Agent Advantage result."
