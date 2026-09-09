@@ -1584,6 +1584,7 @@ describe("fresh marketplace hire contract", () => {
     const generatedShadowGridMigrationName = "0003_shadow_grid_events.sql";
     const generatedAltanaActivationMigrationName = "0004_altana_venus_activations.sql";
     const generatedLpLiveMatchMigrationName = "0005_lp_live_match_selection.sql";
+    const generatedBuyerVenusMigrationName = "0006_buyer_venus_executions.sql";
     expect(readdirSync(drizzleRoot).sort()).toEqual([
       generatedMigrationName,
       generatedCurrentMigrationName,
@@ -1591,6 +1592,7 @@ describe("fresh marketplace hire contract", () => {
       generatedShadowGridMigrationName,
       generatedAltanaActivationMigrationName,
       generatedLpLiveMatchMigrationName,
+      generatedBuyerVenusMigrationName,
       "meta",
     ]);
     expect(readdirSync(resolve(drizzleRoot, "meta")).sort()).toEqual([
@@ -1624,6 +1626,7 @@ describe("fresh marketplace hire contract", () => {
       { idx: 3, tag: "0003_shadow_grid_events" },
       { idx: 4, tag: "0004_altana_venus_activations" },
       { idx: 5, tag: "0005_lp_live_match_selection" },
+      { idx: 6, tag: "0006_buyer_venus_executions" },
     ]);
 
     const altanaActivationMigration = readFileSync(
@@ -1644,6 +1647,9 @@ describe("fresh marketplace hire contract", () => {
       "utf8",
     );
     expect(generatedLpLiveMatchMigration).toBe(lpLiveMatchMigration);
+    expect(readFileSync(resolve(drizzleRoot, generatedBuyerVenusMigrationName), "utf8")).toBe(
+      readFileSync(resolve(PROJECT_ROOT, "migrations", "0007_buyer_venus_executions.sql"), "utf8"),
+    );
 
     const currentMigration = readFileSync(
       resolve(PROJECT_ROOT, "migrations", "0002_current_block_pinned_hires.sql"),

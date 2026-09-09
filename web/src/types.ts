@@ -1099,6 +1099,7 @@ export interface PancakePositionProbe {
 
 export interface VenusYieldProbe {
   observationBinding?: ServerObservationBinding;
+  buyerHolding?: { account: string; usdtBalance: string; bnbBalance: string; valueUsd: string };
   schemaVersion: "positioncrew.venus-yield-probe.v1";
   generatedAt: string;
   chainId: 56;

@@ -233,7 +233,13 @@ describe("public fixture job boundary", () => {
       },
     });
     expect(openApi).toMatchObject({ openapi: "3.1.0", servers: [{ url: origin }] });
-    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(27);
+    expect(Object.keys((openApi.paths ?? {}) as object)).toHaveLength(34);
+    expect(openApi.paths).toMatchObject({
+      "/api/buyer-venus/{receiptId}/prepare": { post: { requestBody: { content: { "application/json": { schema: { required: ["account"], additionalProperties: false } } } } } },
+      "/api/buyer-venus/{receiptId}/confirm": { post: { requestBody: { content: { "application/json": { schema: { required: ["step", "transactionHash"] } } } } } },
+      "/api/buyer-venus/{receiptId}/withdraw-preflight": { post: { summary: expect.stringContaining("Recheck") } },
+      "/api/buyer-venus/{receiptId}/withdraw-confirm": { post: { summary: expect.stringContaining("reverted") } },
+    });
     expect(openApi.paths).toMatchObject({
       "/api/provider-contract-preflight": {
         get: { operationId: "getProviderContractPreflightTemplates" },

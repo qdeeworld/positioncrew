@@ -1,6 +1,6 @@
 # PositionCrew
 
-PositionCrew is a job-first BSC marketplace for capital decisions. A buyer chooses a task, sets limits, hires an eligible provider, and receives a machine-readable plan or an explicit refusal. Plans are unsigned assessments, not executable transactions or guarantees against loss.
+PositionCrew is a job-first BSC marketplace for capital decisions. A buyer chooses a task, sets limits, hires an eligible provider, and receives a machine-readable plan or an explicit refusal. Assessments are unsigned. An eligible current USDT Yield recommendation can then enter a separate buyer-approved Venus supply and withdrawal flow; neither the assessment nor execution guarantees returns or protection against loss.
 
 Public application: [positioncrew.dolepee.com](https://positioncrew.dolepee.com)
 
@@ -24,7 +24,17 @@ The web application is the primary interface:
 
 The flagship cold-buyer journey is **Rescue a lending position**. It returns exact token base units, projected health factor, execution preconditions, expiry, deterministic evaluation, and a fail-closed refusal when evidence is stale or constraints make the action unsafe.
 
-## Durable no-wallet hires
+## Current assessments and buyer-approved execution
+
+### Buyer-approved USDT supply and withdrawal
+
+In the Yield workspace, **Assess USDT held in my wallet** creates a wallet-bound, USDT-only assessment. Set the total capital and maximum allocation explicitly, leaving room for costs. A completed actionable SUPPLY result can be reviewed, rechecked and approved transaction by transaction in the buyer's existing EVM wallet on BSC mainnet. PositionCrew prepares exact unsigned transactions; it never receives the wallet's key or signs on the buyer's behalf.
+
+The initial execution path supports only existing USDT at Venus Core vUSDT. It includes approval, supply, estimated withdrawal gas and the current protocol redemption fee in an independent benefit check. Ineligible or uneconomic requests stop. Received vTokens and underlying value are verified against contract events and the transaction block; the saved receipt supports withdrawal of that deposit's shares after the assessment expires. Pending transactions survive reload without an automatic resend.
+
+Venus's direct mint/redeem calls do not enforce an onchain deadline or minimum output. Expiry is checked before opening the wallet; an already signed transaction can be mined later. Rates, prices, fees and redemption liquidity can change. This is buyer-approved execution in one category, not autonomous four-category capital management. The implementation was tested against an isolated BSC fork with artificial balances; that test is not mainnet delivery, customer adoption or investment performance. See [execution scope and API](docs/buyer-venus-execution.md).
+
+### Assessment lifecycle
 
 The public hire API provides a D1-persisted outer lifecycle for all four current block-referenced BSC request categories: `lending-rescue`, `lp-rebalance`, `yield-optimization`, and `bounded-grid`. It commits the request, provider binding, declared block evidence, result, evaluation, and timing trace so a completed receipt can be reloaded after the creating browser session ends. The observation is caller-supplied and is not independently re-fetched during provider execution, so every result must be revalidated before financial action.
 

@@ -2,6 +2,8 @@ import { RecentJobsPanel } from "./RecentJobsPanel";
 import { ProviderFailureSummary } from "./ProviderFailureSummary";
 import { currentHireErrorMessage, currentRequestEvidenceKey, currentRequestNeedsRefresh, isCurrentHireRefreshError } from "../current-request-expiry";
 import { VenusActivationSandbox } from "./VenusActivationSandbox";
+import { BuyerVenusExecution } from "./BuyerVenusExecution";
+import { buyerWalletAccount } from "../buyer-wallet";
 import { clearCapitalCheckSeed, readCapitalCheckSeed } from "../capital-check";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
@@ -215,6 +217,7 @@ function draftFromRequest(request: JobRequest | undefined): JobDraft {
     return {
       ...next,
       yieldCapital: String(request.capitalUsd ?? next.yieldCapital),
+      maxAction: String(request.maxActionUsd ?? next.maxAction),
       yieldCandidateApy: String(candidate.grossApyBps ?? next.yieldCandidateApy),
       yieldMinimumLiquidity: String(constraints.minimumLiquidityUsd ?? next.yieldMinimumLiquidity),
       yieldMinimumBenefit: String(constraints.minimumNetBenefitUsd ?? next.yieldMinimumBenefit),
@@ -270,6 +273,7 @@ function applyDraft(
     const opportunities = Array.isArray(next.opportunities) ? next.opportunities : [];
     const candidate = objectValue(opportunities[0]);
     next.capitalUsd = draft.yieldCapital;
+    next.maxActionUsd = draft.maxAction;
     for (const opportunity of lockObservations ? [] : opportunities) {
       const market = objectValue(opportunity);
       const liquidityUsd = Number(market.liquidityUsd);
@@ -370,7 +374,8 @@ function draftValidationErrors(service: ServiceId, draft: JobDraft): string[] {
         ]
       : service === "YIELD_OPTIMIZATION"
         ? [
-            [draft.yieldCapital, "Capital", "1", "10000000", "1"],
+            [draft.yieldCapital, "Capital", "1", "10000000", "0.01"],
+            [draft.maxAction, "Maximum allocation", "0.01", "10000000", "0.01"],
             [draft.yieldCandidateApy, "Leading base APY", "0", "1000000", "1"],
             [draft.yieldMinimumLiquidity, "Minimum liquidity", "0", "10000000000", "1"],
             [draft.yieldMinimumBenefit, "Minimum net benefit", "0", "1000000", "0.01"],
@@ -1880,16 +1885,18 @@ function YieldMarketProbe({
   const [probe, setProbe] = useState<VenusYieldProbe | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [buyerAccount, setBuyerAccount] = useState<string | null>(null);
 
-  async function inspect(signal?: AbortSignal) {
+  async function inspect(signal?: AbortSignal, account = buyerAccount) {
     onClearRequest();
     setLoading(true);
     setError(null);
     setProbe(null);
     try {
-      const response = await fetch("/api/markets/venus/stable-yields", {
+      const query = account ? `?account=${encodeURIComponent(account)}&heldAsset=USDT` : "";
+      const response = await fetch(`/api/markets/venus/stable-yields${query}`, {
         headers: { Accept: "application/json" },
-        signal,
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null) as { details?: unknown } | null;
@@ -1932,6 +1939,15 @@ function YieldMarketProbe({
           {loading ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
           {loading ? "Reading" : "Refresh"}
         </button>
+      </div>
+      <div className="buyer-venus__connect">
+        <button type="button" disabled={loading} onClick={() => {
+          setError(null);
+          void buyerWalletAccount(true).then(account => { setBuyerAccount(account); return inspect(undefined, account); })
+            .catch(cause => setError(cause instanceof Error ? cause.message : "Wallet connection failed."));
+        }}>{buyerAccount ? "Reconnect buyer wallet and refresh USDT" : "Assess USDT held in my wallet"}</button>
+        <p>{buyerAccount ? `Assessed wallet: ${buyerAccount}. Only existing USDT is eligible for this execution path. Set your capital and maximum allocation below; leave room for round-trip costs.` : "Market assessments remain free and require no wallet. Connect a wallet to assess its existing USDT for buyer-approved supply."}</p>
+        {probe?.buyerHolding && <p>Held at the observed block: {probe.buyerHolding.usdtBalance} USDT (${probe.buyerHolding.valueUsd}) and {probe.buyerHolding.bnbBalance} BNB. The editable default allocation is 90% of the assessed capital.</p>}
       </div>
       {error && <div className="wallet-probe-error" role="alert"><AlertTriangle size={14} /> {error}</div>}
       {probe && bestMarket && (
@@ -2337,7 +2353,8 @@ export function JobWorkspace({
               <YieldMarketProbe onUseRequest={useLiveRequest} onClearRequest={clearLiveRequest} />
               <div className="request-context"><span>Venus stablecoin markets</span><strong>Base rates only</strong><small>No incentive assumptions</small></div>
               <div className="form-grid">
-                <NumberField label="Total capital, including current holdings (USD)" value={draft.yieldCapital} onChange={(value) => updateDraft("yieldCapital", value)} disabled={inputsDisabled} min="1" max="10000000" step="1" />
+                <NumberField label="Total capital, including current holdings (USD)" value={draft.yieldCapital} onChange={(value) => updateDraft("yieldCapital", value)} disabled={inputsDisabled} min="1" max="10000000" step="0.01" />
+                <NumberField label="Maximum allocation (USD)" value={draft.maxAction} onChange={(value) => updateDraft("maxAction", value)} disabled={inputsDisabled} min="0.01" max="10000000" step="0.01" />
                 <NumberField label="Leading base APY (bps)" value={draft.yieldCandidateApy} onChange={(value) => updateDraft("yieldCandidateApy", value)} disabled={inputsDisabled || Boolean(liveRequest)} min="0" max="1000000" step="1" />
                 <NumberField label="Minimum liquidity (USD)" value={draft.yieldMinimumLiquidity} onChange={(value) => updateDraft("yieldMinimumLiquidity", value)} disabled={inputsDisabled} min="0" max="10000000000" step="1" />
                 <NumberField label="Minimum net benefit (USD)" value={draft.yieldMinimumBenefit} onChange={(value) => updateDraft("yieldMinimumBenefit", value)} disabled={inputsDisabled} min="0" max="1000000" step="0.01" />
@@ -2510,6 +2527,12 @@ export function JobWorkspace({
             hireId={marketplaceTrace.hire.hireId}
             receiptId={marketplaceTrace.receipt.receiptId}
           />
+        )}
+      {service === "YIELD_OPTIMIZATION" && receiptTrace?.hire.service === "YIELD_OPTIMIZATION" &&
+        receiptTrace.hire.evidenceMode === "CURRENT_BLOCK_PINNED" && receiptTrace.job.status === "COMPLETED" &&
+        receiptTrace.receipt?.response.result.deliverable.decision === "SUPPLY" &&
+        typeof receiptTrace.hire.request.account === "string" && !/^0x0{40}$/i.test(receiptTrace.hire.request.account) && (
+          <BuyerVenusExecution key={receiptTrace.receipt.receiptId} receiptId={receiptTrace.receipt.receiptId} />
         )}
       <RecentJobsPanel onOpenJob={onSelectJob} />
     </main>
