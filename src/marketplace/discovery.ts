@@ -188,6 +188,8 @@ export function buildMarketplaceManifest(
   origin: string,
   generatedAt = new Date(),
 ): Record<string, unknown> {
+  // URI-template placeholders must stay literal until the client expands them.
+  const buyerExecutionTemplate = `${new URL(origin).origin}/api/buyer-venus/{receiptId}`;
   return {
     schemaVersion: "positioncrew.marketplace-manifest.v1",
     generatedAt: generatedAt.toISOString(),
@@ -218,13 +220,13 @@ export function buildMarketplaceManifest(
     buyerApprovedExecution: {
       chainId: 56, service: "YIELD_OPTIMIZATION", asset: "USDT", protocol: "Venus Core vUSDT",
       assessmentInputUrl: absolute(origin, "/api/markets/venus/stable-yields?account={wallet}&heldAsset=USDT"),
-      prepareUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/prepare"),
-      statusUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}"),
-      preflightUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/preflight"),
-      confirmUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/confirm"),
-      withdrawalQuoteUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/withdraw-quote"),
-      withdrawalPreflightUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/withdraw-preflight"),
-      withdrawalConfirmUrlTemplate: absolute(origin, "/api/buyer-venus/{receiptId}/withdraw-confirm"),
+      prepareUrlTemplate: `${buyerExecutionTemplate}/prepare`,
+      statusUrlTemplate: buyerExecutionTemplate,
+      preflightUrlTemplate: `${buyerExecutionTemplate}/preflight`,
+      confirmUrlTemplate: `${buyerExecutionTemplate}/confirm`,
+      withdrawalQuoteUrlTemplate: `${buyerExecutionTemplate}/withdraw-quote`,
+      withdrawalPreflightUrlTemplate: `${buyerExecutionTemplate}/withdraw-preflight`,
+      withdrawalConfirmUrlTemplate: `${buyerExecutionTemplate}/withdraw-confirm`,
       boundary: "Exact unsigned transactions require buyer wallet approval. Supply and withdrawal are verified separately from the free assessment. No custody, autonomous signing, onchain expiry or guaranteed yield/redemption liquidity.",
     },
     providers: PROVIDER_CATALOG.map((provider) => ({
