@@ -1,0 +1,150 @@
+{
+  "schemaVersion": "positioncrew.real-source-arithmetic-recheck.v1",
+  "reviewDate": "2026-09-09",
+  "captureDate": "2026-09-06",
+  "method": "Python Decimal from original frozen requests; no provider generator, LLM scoring or network calls in this verifier. Retrospective author-operated verification, not an independent human study.",
+  "sourceSha256": {
+    "agent/lending/deliverable.json": "63fe592f60f0819ee4de1401ffcfe65c6e193da9ad223215f2ed7e871d7e6b86",
+    "agent/lending/inputs/request.json": "e00b9a28270d11460e0b38cf80b636cbdb738cceb7ca0e8b1df5d6d298b62197",
+    "agent/lp/deliverable.json": "6b1ee6d948e4444e9fced77f9c3c5a8819868226fce5ca9ae01ce9af55fe1a94",
+    "agent/lp/inputs/request.json": "8e4d6b198a853ef1f03fbc225e32436e50f0c170a50a47acf8fceef762c246b0",
+    "agent/yield/deliverable.json": "5de36a0d9000b390ed7577f91c21a64eebbc3df45deec9858958058eca609f00",
+    "agent/yield/inputs/request.json": "e7f3e1e1299a031e2e1ba846d91de4aaebe08489eee4a5ec2d70a3b52f2aeb57",
+    "index.html": "9d3f7ae09718ad9a6c0efd8bc66f9221a6234c979d12fa27cace292004d48e3b",
+    "index.md": "7aebacedef616acb4b4069930fe6d843655c389af6d0f68b5e805b324ec35f77",
+    "manual/lending/founder-response-original.txt": "9d2d7f1f3b274728276e9082c76a600cba15b75310cc1bf5ea36a54a94c7a643",
+    "manual/lending/participant-corrections.md": "2f84646818652a46d9245053555b4024d7a0cbc237c006476ac17982d2ef5f5d",
+    "manual/lp/founder-response-original.txt": "d7d09ab733efe8b23689176573751f396fd16b351894438c260dd83c722386a7",
+    "manual/lp/participant-corrections.md": "65730fd13117db0d9b9e27a7ad03622d6111f2a4f59eb6cbb42c321a45d3e4dc",
+    "manual/participant-time-corrections.md": "1e62a90db5cd943d733bcd07c24cae56dd5dd7fdfe3a4aac47b2581f5310c161",
+    "manual/yield/founder-response-original.txt": "23fa80a5164e7f9043d33863b75b647d9349de8ba9bb4ffcdc5c06a099390abc",
+    "paired-arithmetic.json": "e8164352c06004492132cbf82ef2ce3961235088b32834a902cbc65f042dbf1c",
+    "protocol.commitment.json": "cafd4e7b7dc508b52fb3c06ec7649bb2222339dc9141b7358e8781c12eabf809",
+    "protocol.json": "0377a35cd3ebbdbae2f3d02a11a0faf85686ebad7ed30a3cace7b82291150dc2",
+    "worksheets/lending.md": "f19d691e7ed3d9835d3ba98eec4371ad89d2a0be47eb9930fc456ed86006e4fe",
+    "worksheets/lp.md": "8450a3614adf6437a0bb3ed0e6d176ccb748e2e1134d822a165f30ac84c20aa3",
+    "worksheets/yield.md": "e392ddce163027e41bf358ade7b949615103b5b4b7b92b08d50fefb2cb50b23a"
+  },
+  "checks": [
+    {
+      "name": "lending: output belongs to frozen request",
+      "passed": true
+    },
+    {
+      "name": "lp: output belongs to frozen request",
+      "passed": true
+    },
+    {
+      "name": "yield: output belongs to frozen request",
+      "passed": true
+    },
+    {
+      "name": "lending: no rescue required by supplied target",
+      "passed": true
+    },
+    {
+      "name": "lending: agent returns no action",
+      "passed": true
+    },
+    {
+      "name": "lending: agent collateral and debt reproduce",
+      "passed": true
+    },
+    {
+      "name": "lending: agent current and stressed health reproduce",
+      "passed": true
+    },
+    {
+      "name": "lp: frozen position is in range and outside edge buffer",
+      "passed": true
+    },
+    {
+      "name": "lp: supplied low-volatility branch applies",
+      "passed": true
+    },
+    {
+      "name": "lp: agent fee output reproduces at displayed precision",
+      "passed": true
+    },
+    {
+      "name": "lp: even full uptime cannot cover the quoted move cost in this model",
+      "passed": true
+    },
+    {
+      "name": "lp: agent reports HOLD without a replacement range",
+      "passed": true
+    },
+    {
+      "name": "yield: USDT leads the four nominal projections",
+      "passed": true
+    },
+    {
+      "name": "yield: agent allocation reserves entry cost",
+      "passed": true
+    },
+    {
+      "name": "yield: total agent budget equals supplied capital",
+      "passed": true
+    },
+    {
+      "name": "yield: agent net projection independently reproduces",
+      "passed": true
+    },
+    {
+      "name": "yield: preserved manual response contains nominal allocation and separate fee",
+      "passed": true
+    }
+  ],
+  "results": {
+    "lending": {
+      "collateralUsd": "1403.256925224906",
+      "weightedCollateralUsd": "1013.084653397794",
+      "debtUsd": "284.099923921143",
+      "health": "3.565944824677",
+      "stressedHealth": "3.209350342209",
+      "humanRoundedValues": {
+        "collateralUsd": "1403.26",
+        "debtUsd": "284.10",
+        "health": "3.57",
+        "stressedHealth": "3.21"
+      },
+      "comparison": "Both answers reach the supported no-action decision. No quality win assigned; the report retains the agent's 4.284-second invalidation-wording caveat."
+    },
+    "lp": {
+      "widthTicks": 4460,
+      "nearestEdgeTicks": 1869,
+      "edgeBpsFloor": 4190,
+      "feeBaseUsd": "0.136278139068",
+      "modeledCurrentFeesUsd": "0.122650325161",
+      "maximumExtraFeesWithinFixedShareModelUsd": "0.013627813906",
+      "quotedMoveCostUsd": "0.978160000000",
+      "minimumIncrementalNetBenefitUsd": "3.550912",
+      "comparison": "Both choose HOLD. The agent explicitly identifies the short-window extrapolation, assumed uptime, fixed share and exclusions. This checks its arithmetic, not exact V3 fee entitlement, realized savings or every possible alternative strategy."
+    },
+    "yield": {
+      "nominalNetAfterEntryUsd": {
+        "USDT": "6.767593917808",
+        "FDUSD": "6.101840493150",
+        "USDC": "5.090881589041",
+        "DAI": "4.499100767123"
+      },
+      "humanStatedAllocationUsd": "1000",
+      "entryCostUsd": "0.013228",
+      "humanAllocationPlusEntryUsd": "1000.013228",
+      "agentAllocationUsd": "999.986772",
+      "agentAllocationPlusEntryUsd": "1000.000000",
+      "agentNetAfterEntryUsd": "6.767504221095",
+      "comparison": "The manual answer leaves the entry fee's funding unspecified; the agent explicitly reserves it within the hypothetical budget. The difference is $0.013228, not a material realized profit claim. This does not assume a real funded wallet. The historical future-exit exclusion and ambiguous entry/exit step wording remain disclosed."
+    }
+  },
+  "claimBoundary": {
+    "newHumanTasks": 0,
+    "newMarketplaceRuns": 0,
+    "timingReconstructed": false,
+    "controlledSpeedupEstablished": false,
+    "independentDemandEstablished": false,
+    "realizedTradingPerformanceEstablished": false,
+    "numericQualityScoreAssigned": false,
+    "originalResponsesChanged": false
+  }
+}

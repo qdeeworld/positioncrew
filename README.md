@@ -58,6 +58,8 @@ The core decisions agree: no rescue, retain the LP range, and conditionally sele
 
 The high-stakes scope is liquidation-risk assessment and LP range-trading analysis, not an executed rescue, a smart-contract security audit or trading fills. Sponsor acceptance of the required trading/equities/security task classification is not claimed by the report.
 
+The separately dated [arithmetic recheck](https://positioncrew.dolepee.com/evidence/real-source-founder-2026-09-06/verification-2026-09-09.json) fingerprints every original study file and recomputes the Lending health factors, LP fee ceiling and Yield budget using Python Decimal, without importing the provider generator. Run `python3 scripts/verify-real-source-comparison.py` from this checkout to verify the attachment. It preserves the agent's adverse wording findings, assigns no new quality score and creates no new human or timing evidence.
+
 The persisted lifecycle uses these routes:
 
 - `POST /api/benchmark-hires` creates the hire and its `CREATED` job before provider computation;
