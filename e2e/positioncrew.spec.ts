@@ -1561,7 +1561,16 @@ test("the evidence page separates conformance from advantage claims", async ({ p
   });
   await page.goto("/#evidence");
   await expect(page.getByRole("heading", { name: "Historical receipts and proof" })).toBeVisible();
-  const comparisonSection = page.getByRole("region", { name: "Agent Advantage evidence" });
+  const realSourceSection = page.getByRole("region", { name: "Three real-source task comparisons" });
+  await expect(realSourceSection.getByRole("listitem")).toHaveCount(3);
+  await expect(realSourceSection).toContainText("Both sides reached the same core decisions");
+  await expect(realSourceSection).toContainText("not controlled speedup measurements");
+  await expect(realSourceSection.getByRole("link", { name: "Read all three comparisons and original outputs" })).toHaveAttribute("href", "/evidence/real-source-founder-2026-09-06/index.html");
+  const recheckResponse = await request.get("/evidence/real-source-founder-2026-09-06/verification-2026-09-09.json");
+  expect(recheckResponse.ok()).toBe(true);
+  expect(await recheckResponse.json()).toMatchObject({ claimBoundary: { controlledSpeedupEstablished: false, newHumanTasks: 0 } });
+  const comparisonSection = page.getByRole("region", { name: "Historical synthetic comparison" });
+  await expect(comparisonSection).toContainText("synthetic inputs");
   await expect(comparisonSection.getByText("Founder comparison published", { exact: true })).toBeVisible();
   const taskComparisons = comparisonSection.getByRole("list", { name: "Founder Agent Advantage task comparisons" });
   await expect(taskComparisons.getByRole("listitem")).toHaveCount(3);
@@ -1688,7 +1697,7 @@ test("a refreshed founder publication cache is bound to both commitments", async
   });
 
   await page.goto("/#evidence");
-  const comparisonSection = page.getByRole("region", { name: "Agent Advantage evidence" });
+  const comparisonSection = page.getByRole("region", { name: "Historical synthetic comparison" });
   await expect(comparisonSection.getByRole("list", { name: "Founder Agent Advantage task comparisons" }).getByRole("listitem")).toHaveCount(3);
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 

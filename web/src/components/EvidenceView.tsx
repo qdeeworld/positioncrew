@@ -237,6 +237,38 @@ export function EvidenceView({
         </div>
       </div>
 
+      <section className="evidence-section benchmark-section" aria-labelledby="real-source-title">
+        <div className="section-bar">
+          <div><span className="section-kicker">September 6 study · real BSC observations</span><h2 id="real-source-title">Three real-source task comparisons</h2></div>
+          <span className="state-label neutral">Founder-operated</span>
+        </div>
+        <p>Original human answers and marketplace receipts compare the same frozen tasks. Both sides reached the same core decisions. The useful differences concern fee funding and disclosure of model assumptions.</p>
+        <div className="advantage-task-list" role="list" aria-label="Real-source comparison findings">
+          <article role="listitem">
+            <div className="advantage-task-heading"><strong>Venus liquidation-risk assessment</strong></div>
+            <p>Both answers correctly choose no rescue for the observed borrower: health factor 3.57, stressed health 3.21, target 1.25. The report retains the agent's 4.284-second balance-invalidation wording gap.</p>
+            <a className="benchmark-data-link" href="/evidence/real-source-founder-2026-09-06/manual/lending/founder-response-original.txt">Original human answer <ExternalLink size={13} /></a>
+            <a className="benchmark-data-link" href="/api/benchmark-receipts/bbf025cc-c4e7-410e-9c4a-8330ab570a02">Marketplace receipt <ExternalLink size={13} /></a>
+          </article>
+          <article role="listitem">
+            <div className="advantage-task-heading"><strong>PancakeSwap LP trading-range decision</strong></div>
+            <p>Both keep NFT 1456267's range. Inside the disclosed fixed-share model, improving assumed uptime from 90% to 100% adds at most $0.013628 in fees, below the $0.978160 move cost. The agent explicitly states the extrapolation window and model exclusions. This is analysis, not realized savings or an executed trade.</p>
+            <a className="benchmark-data-link" href="/evidence/real-source-founder-2026-09-06/manual/lp/founder-response-original.txt">Original human answer <ExternalLink size={13} /></a>
+            <a className="benchmark-data-link" href="/api/benchmark-receipts/57afc631-5e00-4230-a678-ac0b28f1fd38">Marketplace receipt <ExternalLink size={13} /></a>
+          </article>
+          <article role="listitem">
+            <div className="advantage-task-heading"><strong>Venus yield scenario</strong></div>
+            <p>Both select USDT. The manual answer allocates the hypothetical $1,000 and leaves the $0.013228 entry fee's funding unspecified. The agent allocates $999.986772 and reserves that fee within the budget. This small accounting difference is not a profit claim or proof of an actual funded portfolio.</p>
+            <a className="benchmark-data-link" href="/evidence/real-source-founder-2026-09-06/manual/yield/founder-response-original.txt">Original human answer <ExternalLink size={13} /></a>
+            <a className="benchmark-data-link" href="/api/benchmark-receipts/3813d871-5612-49b1-a45f-979ce5748297">Marketplace receipt <ExternalLink size={13} /></a>
+          </article>
+        </div>
+        <p>Human full-task times were 130, 57 and 50 minutes; automated prepared-input delivery took 3.770, 3.930 and 3.459 seconds. The timing boundaries differ, so these are not controlled speedup measurements. Both reported $0 direct expenditure; labor and infrastructure costs were not measured.</p>
+        <p>The study used AI-prepared worksheets and non-blind AI-assisted assessment. The original report preserves both sides' limitations, including the historical Yield exit-cost wording. It establishes neither independent demand nor a live trading-performance record.</p>
+        <a className="benchmark-data-link" href="/evidence/real-source-founder-2026-09-06/index.html">Read all three comparisons and original outputs <ExternalLink size={13} /></a>
+        <a className="benchmark-data-link" href="/evidence/real-source-founder-2026-09-06/verification-2026-09-09.json">Inspect the reproducible arithmetic recheck <ExternalLink size={13} /></a>
+      </section>
+
       <section className="evidence-section infrastructure-section" aria-labelledby="infrastructure-title">
         <div className="section-bar">
           <div><span className="section-kicker">Live sources</span><h2 id="infrastructure-title">Onchain infrastructure register</h2></div>
@@ -624,9 +656,10 @@ export function EvidenceView({
       <div className="evidence-columns">
         <section className="evidence-section benchmark-section" aria-labelledby="advantage-title">
           <div className="section-bar">
-            <div><span className="section-kicker">TermiX evidence</span><h2 id="advantage-title">Agent Advantage evidence</h2></div>
+            <div><span className="section-kicker">Retained August 20 fixtures</span><h2 id="advantage-title">Historical synthetic comparison</h2></div>
             <span className={`state-label ${publishedFounderAdvantage ? "good" : founderAdvantagePublicationLoadState === "LOADING" ? "neutral" : "warn"}`}>{publishedFounderAdvantage ? <BadgeCheck size={13} /> : <Clock3 size={13} />} {publishedFounderAdvantage ? "Founder comparison published" : founderAdvantagePublicationLoadState === "LOADING" ? "Loading" : "Unavailable"}</span>
           </div>
+          <p>These older controlled cases use synthetic inputs. Their exact-output agreement and differently measured times are separate from the real-source study above and do not establish financial correctness or a controlled speedup.</p>
           {founderAdvantageAtAGlance && founderAdvantageAtAGlanceLoadState === "AVAILABLE" ? (
             <div className="advantage-task-list" role="list" aria-label="Founder Agent Advantage task comparisons">
               {founderAdvantageAtAGlance.tasks.map((task) => (

@@ -27,6 +27,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Verify committed evidence
         run: |
+          python3 scripts/verify-real-source-comparison.py
           npm run benchmark:verify-lock
           npm run benchmark:verify-captures
           npm run benchmark:verify-marketplace-protocol
