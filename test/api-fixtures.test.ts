@@ -365,6 +365,21 @@ describe("public fixture job boundary", () => {
     });
   });
 
+  it("lets agent clients expand every buyer execution URI template into the real API route", () => {
+    const origin = "https://positioncrew.example";
+    const execution = buildMarketplaceManifest(origin).buyerApprovedExecution as Record<string, string>;
+    const receiptId = "11111111-1111-4111-8111-111111111111";
+    const templates = Object.entries(execution).filter(([key]) => key.endsWith("UrlTemplate"));
+    expect(templates).toHaveLength(7);
+    for (const [, template] of templates) {
+      expect(template).toContain("{receiptId}");
+      expect(template).not.toContain("%7B");
+      const expanded = new URL(template.replace("{receiptId}", receiptId));
+      expect(expanded.origin).toBe(origin);
+      expect(expanded.pathname).toMatch(new RegExp(`^/api/buyer-venus/${receiptId}(?:/(prepare|preflight|confirm|withdraw-quote|withdraw-preflight|withdraw-confirm))?$`));
+    }
+  });
+
   it("does not carry the locked benchmark onto a modified fixture", async () => {
     const modified = structuredClone(lendingFixture);
     modified.maxActionUsd = "100";
