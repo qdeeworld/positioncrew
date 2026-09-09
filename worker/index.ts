@@ -1,7 +1,7 @@
 import { ZodError } from "zod";
 import { handleBuyerVenus } from "../src/commerce/buyer-venus-api.js";
 import { buyerVenusPublicClient } from "../src/commerce/buyer-venus-read.js";
-import { BUYER_TOKEN_ABI, BUYER_ORACLE_ABI, BUYER_COMPTROLLER_ABI, VENUS_BUYER_MARKETS, VENUS_BUYER_COMPTROLLER, VENUS_BUYER_VBNB } from "../src/commerce/buyer-venus-policy.js";
+import { BUYER_TOKEN_ABI, BUYER_ORACLE_ABI, BUYER_COMPTROLLER_ABI, VENUS_BUYER_MARKETS, VENUS_BUYER_COMPTROLLER, VENUS_BUYER_VBNB, buyerAssessmentCostDefaults } from "../src/commerce/buyer-venus-policy.js";
 import { formatFixed, parseFixed, FIXED_SCALE } from "../src/core/fixed.js";
 import { formatUnits, type Address } from "viem";
 import { verifyTrustedGatewayRequest, TrustedGatewayRequestError } from "../src/api/trusted-gateway.js";
@@ -2754,24 +2754,16 @@ async function api(
         probe.yieldRequest.maxActionUsd = formatFixed(capital * 9n / 10n, 2);
         // New wallet-assessment defaults include reset + exact approval +
         // supply and a withdrawal reserve. They never alter an existing hire.
-        if (gasPrice <= 0n || bnbPrice <= 0n || treasuryPercent < 0n || treasuryPercent >= FIXED_SCALE) return apiError(409, "REFRESH_REQUIRED", ["The wallet's round-trip costs could not be verified."]);
-        const ceil = (value: bigint, divisor: bigint) => (value + divisor - 1n) / divisor;
-        const reviewedGasPrice = ceil(gasPrice * 12n, 10n);
-        const entryGasUsd = ceil(reviewedGasPrice * 700_000n * bnbPrice, FIXED_SCALE);
-        const exitGasUsd = ceil(reviewedGasPrice * 500_000n * bnbPrice, FIXED_SCALE);
-        const apy = Math.max(...probe.yieldRequest.opportunities.map(item => item.grossApyBps));
-        const gross = capital * BigInt(apy) * BigInt(probe.yieldRequest.constraints.evaluationHorizonDays) / (10_000n * 365n);
-        const exitFeeUsd = ceil((capital + gross) * treasuryPercent, FIXED_SCALE);
-        const roundTrip = entryGasUsd + exitGasUsd + exitFeeUsd;
-        const costLimit = roundTrip > parseFixed("0.25") ? roundTrip : parseFixed("0.25");
-        const costString = (value: bigint) => formatFixed(ceil(value, 10n ** 12n) * 10n ** 12n, 6);
-        probe.yieldRequest.maxExecutionCostUsd = costString(costLimit);
-        probe.yieldRequest.maxGasUsd = costString(costLimit);
+        const costs = buyerAssessmentCostDefaults({ capitalUsd: capital, gasPrice, bnbPrice, treasuryPercent,
+          grossApyBps: Math.max(...probe.yieldRequest.opportunities.map(item => item.grossApyBps)),
+          evaluationHorizonDays: probe.yieldRequest.constraints.evaluationHorizonDays });
+        probe.yieldRequest.maxExecutionCostUsd = costs.maxExecutionCostUsd;
+        probe.yieldRequest.maxGasUsd = costs.maxGasUsd;
         for (const opportunity of probe.yieldRequest.opportunities) {
           const liquidity = parseFixed(opportunity.liquidityUsd);
           opportunity.amountUsd = formatFixed(capital < liquidity ? capital : liquidity, 2);
-          opportunity.estimatedEntryCostUsd = costString(entryGasUsd);
-          opportunity.estimatedExitCostUsd = costString(exitGasUsd + exitFeeUsd);
+          opportunity.estimatedEntryCostUsd = costs.estimatedEntryCostUsd;
+          opportunity.estimatedExitCostUsd = costs.estimatedExitCostUsd;
         }
         buyerHolding = { account, usdtBalance: formatUnits(balance, 18), bnbBalance: formatUnits(bnb, 18), valueUsd: formatFixed(value, 2) };
       }

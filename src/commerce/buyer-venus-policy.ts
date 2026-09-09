@@ -93,6 +93,29 @@ export function requireBuyer(condition: unknown, message: string): asserts condi
 export function sameAddress(left: string, right: string): boolean { return left.toLowerCase() === right.toLowerCase(); }
 function minimum(values: bigint[]): bigint { return values.reduce((a, b) => a < b ? a : b); }
 
+/** Visible defaults for a new assessment, never an update to accepted limits. */
+export function buyerAssessmentCostDefaults(input: {
+  capitalUsd: bigint; gasPrice: bigint; bnbPrice: bigint; treasuryPercent: bigint;
+  grossApyBps: number; evaluationHorizonDays: number;
+}) {
+  requireBuyer(input.gasPrice > 0n && input.bnbPrice > 0n && input.treasuryPercent >= 0n && input.treasuryPercent < FIXED_SCALE,
+    "The wallet's round-trip costs could not be verified.");
+  const ceil = (value: bigint, divisor: bigint) => (value + divisor - 1n) / divisor;
+  const price = ceil(input.gasPrice * 12n, 10n);
+  const entryGas = ceil(price * 700_000n * input.bnbPrice, FIXED_SCALE);
+  const exitGas = ceil(price * 500_000n * input.bnbPrice, FIXED_SCALE);
+  const gross = input.capitalUsd * BigInt(input.grossApyBps) * BigInt(input.evaluationHorizonDays) / (10_000n * 365n);
+  const exitFee = ceil((input.capitalUsd + gross) * input.treasuryPercent, FIXED_SCALE);
+  const quote = (value: bigint) => formatFixed(ceil(value, 10n ** 12n) * 10n ** 12n, 6);
+  const estimatedEntryCostUsd = quote(entryGas);
+  const estimatedExitCostUsd = quote(exitGas + exitFee);
+  // Sum the published rounded components. Rounding the unrounded sum could
+  // make the displayed total one micro-dollar lower than its own components.
+  const total = parseFixed(estimatedEntryCostUsd) + parseFixed(estimatedExitCostUsd);
+  const maxExecutionCostUsd = quote(total > parseFixed("0.25") ? total : parseFixed("0.25"));
+  return { estimatedEntryCostUsd, estimatedExitCostUsd, maxExecutionCostUsd, maxGasUsd: maxExecutionCostUsd };
+}
+
 export function supplySource(chain: FreshMarketplaceChain, account: string, now: Date) {
   requireBuyer(chain.job.state === "COMPLETED" && chain.receipt, "Complete a current Yield assessment first.");
   requireBuyer(chain.hire.service === "YIELD_OPTIMIZATION" && chain.hire.evidenceMode === "CURRENT_BLOCK_PINNED", "Only a current Yield assessment can authorize preparation.");

@@ -1,7 +1,7 @@
 import { buyerVenusFixture as fixture } from "./buyer-venus-fixture.js";
 import { describe, expect, it } from "vitest";
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, parseAbiParameters, type Transaction, type TransactionReceipt } from "viem";
-import { buildSupplyIntent, BUYER_TOKEN_ABI, BUYER_VTOKEN_ABI, VENUS_BUYER_COMPTROLLER, VENUS_BUYER_IMPLEMENTATION, VENUS_BUYER_MARKETS, type BuyerVenusSnapshot } from "../src/commerce/buyer-venus-policy.js";
+import { buildSupplyIntent, buyerAssessmentCostDefaults, BUYER_TOKEN_ABI, BUYER_VTOKEN_ABI, VENUS_BUYER_COMPTROLLER, VENUS_BUYER_IMPLEMENTATION, VENUS_BUYER_MARKETS, type BuyerVenusSnapshot } from "../src/commerce/buyer-venus-policy.js";
 import { verifyBuyerSupply } from "../src/commerce/buyer-venus-confirm.js";
 import { YieldOptimizationRequestSchema } from "../src/contracts/yield-optimization.js";
 import { createYieldOptimizationDeliverable } from "../src/providers/yield-optimization.js";
@@ -16,6 +16,23 @@ const hash = `0x${"a".repeat(64)}` as const;
 
 
 describe("buyer Venus feasibility policy", () => {
+  it.each([50_000_000n, 1_000_000_000n, 1_234_567_891n])("keeps published round-trip components within the fresh cost limit at gas price %s", gasPrice => {
+    const costs = buyerAssessmentCostDefaults({ capitalUsd: parseFixed("1000"), gasPrice, bnbPrice: parseFixed("755.787456"), treasuryPercent: 0n, grossApyBps: 185, evaluationHorizonDays: 90 });
+    const total = parseFixed(costs.estimatedEntryCostUsd) + parseFixed(costs.estimatedExitCostUsd);
+    expect(total).toBeLessThanOrEqual(parseFixed(costs.maxExecutionCostUsd));
+    expect(costs.maxGasUsd).toBe(costs.maxExecutionCostUsd);
+    const { chain, snapshot } = fixture();
+    Object.assign(chain.hire.request, { maxExecutionCostUsd: costs.maxExecutionCostUsd, maxGasUsd: costs.maxGasUsd });
+    Object.assign(snapshot, { gasPrice, bnbPrice: parseFixed("755.787456") });
+    expect(() => buildSupplyIntent(chain, account, snapshot, now)).not.toThrow();
+  });
+  it("includes a nonzero protocol exit fee in the fresh assessment's stated withdrawal cost", () => {
+    const input = { capitalUsd: parseFixed("1000"), gasPrice: 50_000_000n, bnbPrice: parseFixed("750"), grossApyBps: 500, evaluationHorizonDays: 90 };
+    const free = buyerAssessmentCostDefaults({ ...input, treasuryPercent: 0n });
+    const fee = buyerAssessmentCostDefaults({ ...input, treasuryPercent: parseFixed("0.001") });
+    expect(parseFixed(fee.estimatedExitCostUsd) - parseFixed(free.estimatedExitCostUsd)).toBeGreaterThan(parseFixed("1"));
+    expect(parseFixed(fee.maxExecutionCostUsd)).toBe(parseFixed(fee.estimatedEntryCostUsd) + parseFixed(fee.estimatedExitCostUsd));
+  });
   it("binds an actual provider recommendation to exact existing USDT, exact approval and nonce", () => {
     const { chain, snapshot, result } = fixture();
     const intent = buildSupplyIntent(chain, account, snapshot, now);
