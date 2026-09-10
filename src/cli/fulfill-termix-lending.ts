@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, lstatSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, lstatSync, mkdirSync, openSync, fsyncSync, closeSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { resolve, isAbsolute } from "node:path";
+import { resolve, isAbsolute, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createPublicClient, http, keccak256, formatEther, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -31,20 +31,30 @@ export function validateDeliveryPolicy(input: unknown, orderInput: unknown, now 
   createTermixLendingIntakeFromOrderScope(order);
   return {policy:p,order};
 }
-function secret(path: string) {
+export function protectedText(path: string, trim = true) {
   if (!isAbsolute(path)) throw new Error("Credential path must be absolute");
   const st=lstatSync(path);
   if (!st.isFile() || st.isSymbolicLink() || (st.mode & 0o077)!==0) throw new Error("Unsafe credential permissions");
-  return readFileSync(path,"utf8").trim();
+  const text=readFileSync(path,"utf8");
+  return trim ? text.trim() : text;
+}
+export function deliveryJournalName(orderId: string, redoUsed: boolean) {
+  return `${orderId}.round-${redoUsed ? 2 : 1}.delivery-signed.json`;
+}
+export function durableJournal(path: string, content: string) {
+  const fd=openSync(path,"wx",0o600);
+  try {writeFileSync(fd,content);fsyncSync(fd);} finally {closeSync(fd);}
+  const dir=openSync(dirname(path),"r");
+  try {fsyncSync(dir);} finally {closeSync(dir);}
 }
 const json = (v: unknown) => JSON.stringify(v,(_,x)=>typeof x==="bigint"?String(x):x);
 async function run() {
   const policyPath=process.env.TERMIX_DELIVERY_POLICY_FILE ?? "";
-  const policy=DeliveryPolicySchema.parse(JSON.parse(secret(policyPath)));
+  const policy=DeliveryPolicySchema.parse(JSON.parse(protectedText(policyPath)));
   const root=process.env.TERMIX_FULFILLMENT_STATE_DIR ?? "";
   if (!isAbsolute(root)) throw new Error("State directory must be absolute");
   mkdirSync(root,{recursive:true,mode:0o700});
-  const token=secret(process.env.TERMIX_SESSION_TOKEN_FILE ?? "");
+  const token=protectedText(process.env.TERMIX_SESSION_TOKEN_FILE ?? "");
   async function get(path:string) {
     const response=await fetch(BASE+path,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(15000)});
     if(!response.ok) throw new Error(`TermiX read failed: ${response.status}`);
@@ -52,12 +62,12 @@ async function run() {
   }
   const readOrder=()=>get(`/api/v1/orders/${policy.orderId}`);
   let {order}=validateDeliveryPolicy(policy,await readOrder());
-  const journalPath=resolve(root,`${policy.orderId}.delivery-signed.json`);
+  const journalPath=resolve(root,deliveryJournalName(policy.orderId,order.redoUsed));
   const client=createPublicClient({chain:bsc,transport:http("https://bsc-dataseed.bnbchain.org",{timeout:15000,retryCount:2})});
   if(await client.getChainId()!==56) throw new Error("Wrong chain");
   // Recover an already signed transaction before attempting to generate any new artifact.
   if (existsSync(journalPath)) {
-    const signed=JSON.parse(secret(journalPath));
+    const signed=JSON.parse(protectedText(journalPath));
     if(keccak256(signed.raw)!==signed.hash) throw new Error("Signed journal mismatch");
     const receipt=await client.getTransactionReceipt({hash:signed.hash}).catch(()=>null);
     if(receipt){if(receipt.status!=="success")throw new Error("Delivery transaction reverted; operator required");console.log(json({event:"delivery.confirmed",hash:signed.hash}));return;}
@@ -65,6 +75,7 @@ async function run() {
     if(!known) {
       if(Date.parse(signed.expiresAt)<=Date.now()+30000) throw new Error("Signed artifact expired; operator reconciliation required");
       if(!["FUNDED","IN_PROGRESS"].includes(order.status)) throw new Error("Order no longer deliverable");
+      validateDeliveryPolicy(policy,order);
       await client.sendRawTransaction({serializedTransaction:signed.raw});
     }
     const recovered=await client.waitForTransactionReceipt({hash:signed.hash,timeout:60000});
@@ -74,16 +85,16 @@ async function run() {
   if(["DELIVERED","ACCEPTED","SETTLED"].includes(order.status)){console.log(json({event:"delivery.already-complete",status:order.status}));return;}
   if(!["FUNDED","IN_PROGRESS"].includes(order.status)||!order.availableActions.canSubmitDelivery){console.log(json({event:"delivery.waiting",status:order.status}));return;}
   const checkpointPath=resolve(root,`${canonicalHash(policy.orderId).slice(7)}.json`);
-  const previous=existsSync(checkpointPath)?verifyTermixFulfillmentCheckpoint(JSON.parse(secret(checkpointPath))):null;
+  const previous=existsSync(checkpointPath)?verifyTermixFulfillmentCheckpoint(JSON.parse(protectedText(checkpointPath))):null;
   const args=[resolve(process.env.TERMIX_PREPARE_SCRIPT ?? "/opt/positioncrew-termix-orders/prepare-termix-lending-delivery.mjs"),"prepare-delivery","--order",policy.orderId,"--from-order-scope"];
   if(previous?.artifact && Date.parse(previous.artifact.resultExpiresAt)<Date.now()+120000)args.push("--refresh-expired");
   const prepared=spawnSync(process.execPath,args,{env:{...process.env,TERMIX_AGENT_ID:AGENT,TERMIX_LISTING_ID:LISTING},encoding:"utf8",maxBuffer:2*1024*1024,timeout:180000});
   if(prepared.status!==0) throw new Error(`Delivery preparation failed: ${prepared.stderr.slice(0,1500)}`);
-  const checkpoint=verifyTermixFulfillmentCheckpoint(JSON.parse(secret(checkpointPath)));
+  const checkpoint=verifyTermixFulfillmentCheckpoint(JSON.parse(protectedText(checkpointPath)));
   ({order}=validateDeliveryPolicy(policy,await readOrder()));
   if(!checkpoint.artifact || !checkpoint.submitIntent || checkpoint.orderId!==policy.orderId || !checkpoint.intake)throw new Error("Missing prepared delivery");
   if(canonicalHash(createTermixLendingIntakeFromOrderScope(order))!==checkpoint.intakeHash)throw new Error("Prepared intake changed");
-  const artifact=secret(checkpoint.artifact.localPath);
+  const artifact=protectedText(checkpoint.artifact.localPath,false);
   if(createHash("sha256").update(artifact).digest("hex")!==checkpoint.artifact.sha256)throw new Error("Local artifact hash mismatch");
   // The preparation tool verifies SHA256 of both local and remote artifact bytes.
   const config=TermixContractsConfigSchema.parse(await get("/api/v1/config/contracts"));
@@ -95,12 +106,14 @@ async function run() {
   const gasPrice=await client.getGasPrice();
   if(gas*gasPrice>BigInt(policy.maxGasWei))throw new Error("Delivery gas exceeds policy");
   if(Date.parse(checkpoint.artifact.resultExpiresAt)<Date.now()+60000)throw new Error("Artifact too close to expiry");
-  const account=privateKeyToAccount(secret(process.env.TERMIX_DELIVERY_OWNER_KEY_FILE??"") as Hex);
+  const account=privateKeyToAccount(protectedText(process.env.TERMIX_DELIVERY_OWNER_KEY_FILE??"") as Hex);
   if(account.address.toLowerCase()!==OWNER.toLowerCase())throw new Error("Wrong signing owner");
   const nonce=await client.getTransactionCount({address:OWNER,blockTag:"pending"});
+  validateDeliveryPolicy(policy,order);
   const raw=await account.signTransaction({chainId:56,type:"legacy",to,data,value:0n,gas,gasPrice,nonce});
   const hash=keccak256(raw);
-  writeFileSync(journalPath,json({raw,hash,expiresAt:checkpoint.artifact.resultExpiresAt}),{flag:"wx",mode:0o600});
+  durableJournal(journalPath,json({raw,hash,expiresAt:checkpoint.artifact.resultExpiresAt}));
+  validateDeliveryPolicy(policy,order);
   await client.sendRawTransaction({serializedTransaction:raw});
   const receipt=await client.waitForTransactionReceipt({hash,timeout:60000});
   if(receipt.status!=="success")throw new Error("Delivery reverted");
