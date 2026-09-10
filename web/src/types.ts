@@ -178,7 +178,7 @@ export interface ProviderListing {
 export interface ProviderCatalogResponse {
   schemaVersion: "positioncrew.provider-catalog-response.v1";
   generatedAt: string;
-  commerceAdapter: "AACP_PRODUCTION_RUNTIME_PENDING";
+  commerceAdapter: "AACP_DEDICATED_RUNTIME_CONFIGURED";
   providers: ProviderListing[];
 }
 

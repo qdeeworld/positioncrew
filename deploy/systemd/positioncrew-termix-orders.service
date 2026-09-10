@@ -11,10 +11,10 @@ Type=oneshot
 User=positioncrew-orders
 Group=positioncrew-orders
 WorkingDirectory=/opt/positioncrew-termix-orders
-Environment=TERMIX_AGENT_ID=cmt4dzxvcli4tw70125nd5ra8
+Environment=TERMIX_AGENT_IDS=cmt4dzxvcli4tw70125nd5ra8,cmtvave8t02wgw001wgg2ckgr,cmtvavee602wow001ob536zaf,cmtvavnib02y4w001uum4edob
 Environment=TERMIX_BASE_URL=https://platform-backend.prod.termix.live
 Environment=TERMIX_SESSION_TOKEN_FILE=%d/session-token
-Environment=TERMIX_ORDER_STATE_PATH=/var/lib/positioncrew-termix-orders/state.json
+Environment=TERMIX_ORDER_STATE_PATH=/var/lib/positioncrew-termix-orders/fleet-state.json
 Environment=TERMIX_ORDER_OUTBOX_PATH=/var/spool/positioncrew-termix-order-outbox
 ExecStart=/usr/bin/node /opt/positioncrew-termix-orders/watch-termix-orders.mjs
 TimeoutStartSec=5h

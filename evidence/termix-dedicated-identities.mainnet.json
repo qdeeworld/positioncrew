@@ -1,0 +1,85 @@
+{
+  "schemaVersion": "positioncrew.termix-identities.v1",
+  "network": "bsc-mainnet",
+  "chainId": 56,
+  "owner": "0xADd748C416E8A7efd7d65D18Abb121dea268ddF9",
+  "verifiedAt": "2026-09-10T09:08:45.338Z",
+  "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+  "providers": [
+    {
+      "service": "LENDING_RESCUE",
+      "handle": "positioncrew-rescue-adf9.agent",
+      "agentTokenId": "293111",
+      "metadataUrl": "https://termix-platform-prod.s3.ap-southeast-1.amazonaws.com/platform/agents/912bd3e5080a87a0696eacd62c9684d99280e6ac7f0dae29be2d3892587e9f5a.json",
+      "metadataSha256": "5284b84a788e5a7dddc1a2f6836f3f604dc05b67601de12b62c7fa1cc4b8c685",
+      "registrationTransaction": "0x846d7dd0f7b70b1d34a01b3632456bdcf17321aae60543a4f644fa1a29752e2f",
+      "blockNumber": 117428445,
+      "blockTimestamp": "2026-08-22T13:01:09.000Z",
+      "gasCostBnb": "0.000022447035",
+      "description": "Bounded BSC lending health-factor analysis and deterministic rescue planning with explicit cost, expiry, and no custody or autonomous transactions.",
+      "tags": [
+        "bsc",
+        "lending-risk",
+        "health-factor",
+        "positioncrew"
+      ]
+    },
+    {
+      "service": "LP_REBALANCE",
+      "handle": "positioncrew-lp-adf9.agent",
+      "agentTokenId": "342734",
+      "metadataUrl": "https://termix-platform-prod.s3.ap-southeast-1.amazonaws.com/platform/agents/b1cb59b86ddfbcbb706e750ffdf6fc0a875c049e7d1512fd0b6b848cc65b6102.json",
+      "metadataSha256": "081f9136c79e21a7164072e86b8eca83e3fbf61b331f174750247c70a9aae623",
+      "description": "Evaluates a PancakeSwap V3 position and proposes a cost-, slippage-, inventory-, and break-even-bounded range shift or HOLD.",
+      "tags": [
+        "defi-yield",
+        "portfolio",
+        "onchain-analytics"
+      ],
+      "registrationTransaction": "0x2df6b843da8e1cfcfa7dfcc446f7e579b2f556778bfb5e753a818c5f91328d0d",
+      "blockNumber": 121042859,
+      "blockTimestamp": "2026-09-10T09:03:21.000Z",
+      "gasCostBnb": "0.00001641195"
+    },
+    {
+      "service": "YIELD_OPTIMIZATION",
+      "handle": "positioncrew-yield-adf9.agent",
+      "agentTokenId": "342735",
+      "metadataUrl": "https://termix-platform-prod.s3.ap-southeast-1.amazonaws.com/platform/agents/332fa36ec790609b927d0162487290577bf068d222c75afd98a13eb23a4e998e.json",
+      "metadataSha256": "a245da35f5ea4e3f8a50fc3c0ad899c24f3270d53df5700388e811ef5265e172",
+      "description": "Compares block-pinned Venus stablecoin markets and returns a liquidity-, concentration-, migration-cost-, and risk-bounded allocation or HOLD.",
+      "tags": [
+        "defi-yield",
+        "portfolio",
+        "onchain-analytics"
+      ],
+      "registrationTransaction": "0xb74edc1f62780c2191cfa0ebb931c547a8121da033d9143c7377a4e653446390",
+      "blockNumber": 121042866,
+      "blockTimestamp": "2026-09-10T09:03:24.000Z",
+      "gasCostBnb": "0.00001641195"
+    },
+    {
+      "service": "BOUNDED_GRID",
+      "handle": "positioncrew-grid-adf9.agent",
+      "agentTokenId": "342736",
+      "metadataUrl": "https://termix-platform-prod.s3.ap-southeast-1.amazonaws.com/platform/agents/eb4ea5db3de6946e5d8a173f75e5279e5b21394d18d8d0068415d284b7f229c0.json",
+      "metadataSha256": "7dbdae8991f3d2a9818afacb82fe14149021e0bfa771eb0a7661d72ebb053598",
+      "description": "Constructs or rejects a PancakeSwap WBNB/USDT grid under explicit volatility, fee, slippage, inventory, gas, and maximum-loss limits. No autonomous transaction execution.",
+      "tags": [
+        "bounded-grid",
+        "risk-analysis",
+        "onchain-analytics"
+      ],
+      "registrationTransaction": "0x7bf06d975798658e7cca7edcb8b35efbd4994184d4b8ca03a67c284619729809",
+      "blockNumber": 121042883,
+      "blockTimestamp": "2026-09-10T09:03:32.000Z",
+      "gasCostBnb": "0.00001641195"
+    }
+  ],
+  "totalGasCostBnb": "0.000071682885",
+  "boundaries": [
+    "These four current provider identities belong to the dedicated PositionCrew production wallet.",
+    "The original personal-wallet identities remain preserved in termix-identities.mainnet.json; no ownership transfer is claimed.",
+    "Registration receipts do not prove paid orders, demand, revenue, or continuous uptime."
+  ]
+}

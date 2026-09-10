@@ -48,10 +48,11 @@ export function orderFingerprint(order: Order): string {
   });
 }
 
-export function actionableOrders(orders: Order[], agentId: string): Order[] {
+export function actionableOrders(orders: Order[], agentId: string | readonly string[]): Order[] {
+  const agentIds = new Set(typeof agentId === "string" ? [agentId] : agentId);
   return orders.filter((order) =>
     ACTIONABLE_STATUSES.has(order.status) &&
-    (!order.providerAgentId || order.providerAgentId === agentId)
+    (!order.providerAgentId || agentIds.has(order.providerAgentId))
   );
 }
 
@@ -134,21 +135,27 @@ async function fetchOrders(baseUrl: string, token: string): Promise<Order[]> {
 }
 
 async function main(): Promise<void> {
-  const agentId = process.env.TERMIX_AGENT_ID?.trim();
+  const agentIds = [...new Set(
+    (process.env.TERMIX_AGENT_IDS ?? process.env.TERMIX_AGENT_ID ?? "")
+      .split(",").map((id) => id.trim()).filter(Boolean),
+  )].sort();
+  const agentId = agentIds.join(",");
   const tokenPath = process.env.TERMIX_SESSION_TOKEN_FILE?.trim();
   const statePath = resolve(process.env.TERMIX_ORDER_STATE_PATH?.trim() || ".state/termix-orders.json");
   const outboxPath = resolve(process.env.TERMIX_ORDER_OUTBOX_PATH?.trim() || ".state/termix-order-outbox");
   const baseUrl = (process.env.TERMIX_BASE_URL?.trim() || "https://platform-backend.prod.termix.live").replace(/\/$/, "");
-  if (!agentId) throw new Error("TERMIX_AGENT_ID is required");
+  if (!agentId || agentIds.some((id) => !/^[a-z0-9]{20,40}$/.test(id))) {
+    throw new Error("TERMIX_AGENT_IDS or TERMIX_AGENT_ID must identify owned agents");
+  }
   if (!tokenPath || !tokenPath.startsWith("/")) throw new Error("TERMIX_SESSION_TOKEN_FILE must be absolute");
 
   const token = await readProtectedToken(tokenPath);
   const previous = await loadState(statePath, agentId);
   const providerOrders = (await fetchOrders(baseUrl, token)).filter(
-    (order) => !order.providerAgentId || order.providerAgentId === agentId,
+    (order) => !order.providerAgentId || agentIds.includes(order.providerAgentId),
   );
   const transition = unseenOrderTransitions(previous, providerOrders);
-  const changed = actionableOrders(transition.changed, agentId);
+  const changed = actionableOrders(transition.changed, agentIds);
   if (changed.length) {
     for (const order of changed) {
       const fingerprint = orderFingerprint(order);
@@ -157,7 +164,7 @@ async function main(): Promise<void> {
       await atomicJson(resolve(outboxPath, `${id}.json`), {
         schemaVersion: "positioncrew.termix-order-alert.v1",
         observedAt: transition.state.lastPollAt,
-        agentId,
+        agentId: order.providerAgentId ?? agentId,
         order: {
           orderId: order.id,
           status: order.status,
@@ -174,7 +181,7 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify({
     event: "termix.order-watch.complete",
     agentId,
-    actionableCount: actionableOrders(providerOrders, agentId).length,
+    actionableCount: actionableOrders(providerOrders, agentIds).length,
     changedCount: changed.length,
     lastPollAt: transition.state.lastPollAt,
   })}\n`);

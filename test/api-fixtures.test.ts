@@ -213,7 +213,7 @@ describe("public fixture job boundary", () => {
     expect(JSON.stringify(manifest)).toContain(`${origin}${provider.endpoint}`);
     expect(manifest).toMatchObject({
       commerce: {
-        adapter: "AACP_PRODUCTION_RUNTIME_PENDING",
+        adapter: "AACP_DEDICATED_RUNTIME_CONFIGURED",
         readinessUrl: `${origin}/api/commerce/aacp`,
       },
     });
@@ -227,7 +227,7 @@ describe("public fixture job boundary", () => {
         categoryCoverage: "4_OF_4",
         providerIdentity: "ERC8004_BSC_TESTNET_VERIFIED",
         judgeTrial: "NO_WALLET_PROVIDER_CALL",
-        aacp: "PRODUCTION_RUNTIME_PENDING",
+        aacp: "DEDICATED_RUNTIME_CONFIGURED",
         venusTestnetNativeSupply: VENUS_TESTNET_NATIVE_SUPPLY_PUBLIC_CLAIM_BOUNDARY,
         boundedActivation: ALTANA_VENUS_CLAIM_BOUNDARY,
       },

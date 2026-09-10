@@ -99,6 +99,18 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(advanced.changed.map((order) => order.id)).toEqual(["order-1"]);
   });
 
+  it("watches all selected dedicated providers without accepting another provider's orders", () => {
+    const selected = ["lending", "lp", "yield", "grid"];
+    const orders = selected.map((providerAgentId) => ({
+      id: `${providerAgentId}-order`, status: "FUNDED", providerAgentId,
+    }));
+    orders.push({ id: "foreign-order", status: "FUNDED", providerAgentId: "foreign" });
+    orders.push({ id: "settled-order", status: "SETTLED", providerAgentId: "lp" });
+    expect(actionableOrders(orders, selected).map((order) => order.id)).toEqual([
+      "lending-order", "lp-order", "yield-order", "grid-order",
+    ]);
+  });
+
   it("publishes an alert durably before the watcher may advance its cursor", async () => {
     const operations: string[] = [];
     let openCount = 0;
