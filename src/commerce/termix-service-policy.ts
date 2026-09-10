@@ -1,7 +1,8 @@
+import {TERMIX_SERVICES, TermixServiceSchema, serviceForOrder} from "./termix-capital-services.js";
 import { z } from "zod";
 import { canonicalHash } from "../core/canonical.js";
 import { DeliveryPolicySchema } from "../cli/fulfill-termix-lending.js";
-import { assertTermixProviderOrder, TermixContractsConfigSchema, type TermixLendingIntake } from "./termix-provider-delivery.js";
+import { assertTermixProviderOrder, TermixContractsConfigSchema, type TermixIntake } from "./termix-provider-delivery.js";
 
 export const LENDING_AGENT = "cmt4dzxvcli4tw70125nd5ra8";
 export const LENDING_LISTING = "cmt4e8j3nlmuiw7019f4qf24x";
@@ -9,6 +10,7 @@ export const SELLER_WALLET = "0xADd748C416E8A7efd7d65D18Abb121dea268ddF9" as con
 const Wei = z.string().regex(/^[1-9][0-9]*$/);
 export const ServicePolicySchema = z.object({
   schemaVersion: z.literal("positioncrew.termix-service-policy.v1"),
+  enabledServices: z.array(TermixServiceSchema).min(1).max(4).optional(),
   startsAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
   chainId: z.literal(56),
@@ -44,7 +46,11 @@ export function validateServicePolicy(input: unknown, now = Date.now()) {
 }
 export function assertServiceOrder(input: unknown, policy: ServicePolicy, now = Date.now(), phase: "admit" | "resume" = "admit") {
   validateServicePolicy(policy, now);
-  const order = assertTermixProviderOrder(input, {orderId: z.object({id:z.string()}).parse(input).id, providerAgentId:policy.providerAgentId, listingId:policy.listingId});
+  const raw=z.object({id:z.string(),providerAgentId:z.string(),listingId:z.string()}).parse(input);
+  const service=serviceForOrder(raw);
+  if(!(policy.enabledServices ?? ["LENDING_RESCUE"]).includes(service))throw new Error("Service not enabled by policy");
+  const identity=TERMIX_SERVICES[service];
+  const order = assertTermixProviderOrder(input, {orderId:raw.id,providerAgentId:identity.agentId,listingId:identity.listingId});
   if (order.currency !== policy.currency || order.amount !== policy.amount) throw new Error("Unsupported price or currency");
   // Never enrol historical work or orders created before this deployment's policy.
   const createdAt = z.string().datetime().parse(order.createdAt);
@@ -62,12 +68,12 @@ export function assertZeroStakeConfig(input: unknown, policy: ServicePolicy) {
   if (!currency || currency.providerLockBps !== 0 || currency.contracts.escrow.toLowerCase() !== policy.escrow.toLowerCase()) throw new Error("Escrow changed or provider stake is nonzero/unavailable");
   return config;
 }
-export function reserveOrder(ledgerInput: unknown, policy: ServicePolicy, orderInput: unknown, intake: TermixLendingIntake, buyerMessage?: z.infer<typeof DeliveryPolicySchema>["buyerMessage"], now = Date.now()): ServiceLedger {
+export function reserveOrder(ledgerInput: unknown, policy: ServicePolicy, orderInput: unknown, intake: TermixIntake, buyerMessage?: z.infer<typeof DeliveryPolicySchema>["buyerMessage"], now = Date.now()): ServiceLedger {
   const ledger = ServiceLedgerSchema.parse(ledgerInput);
   if (ledger.policyHash !== canonicalHash(policy)) throw new Error("Ledger belongs to another service policy");
   const order = assertServiceOrder(orderInput, policy, now);
   if (intake.orderId !== order.id || intake.buyerEvidence.senderAccountId !== order.clientAccountId) throw new Error("Intake belongs to another buyer/order");
-  const perOrder = DeliveryPolicySchema.parse({orderId:order.id, onChainOrderId:order.onChainOrderId, clientAccountId:order.clientAccountId,
+  const perOrder = DeliveryPolicySchema.parse({...(serviceForOrder(order)!=="LENDING_RESCUE"?{service:serviceForOrder(order)}:{}),orderId:order.id, onChainOrderId:order.onChainOrderId, clientAccountId:order.clientAccountId,
     scopeHash:canonicalHash(order.scope), currency:policy.currency, escrow:policy.escrow, intakeHash:canonicalHash(intake),
     expiresAt:policy.expiresAt, maxGasWei:policy.maxGasWei, ...(buyerMessage ? {buyerMessage} : {})});
   const existing = ledger.reservations[order.id];

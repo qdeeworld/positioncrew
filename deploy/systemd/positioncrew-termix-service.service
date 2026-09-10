@@ -1,5 +1,5 @@
 [Unit]
-Description=Bounded PositionCrew TermiX Lending order automation
+Description=Bounded PositionCrew TermiX capital service automation
 After=network-online.target
 Wants=network-online.target
 OnFailure=crosswind-alert@positioncrew-termix-service.service
@@ -10,10 +10,16 @@ User=positioncrew-fulfill
 Group=positioncrew-fulfill
 LoadCredential=session-token:/var/lib/positioncrew-termix-session-renew/termix-session.token
 LoadCredential=runtime-token:/etc/positioncrew-runtime/credentials/dedicated-lending.token
+LoadCredential=lp-runtime-token:/etc/positioncrew-runtime/credentials/dedicated-lp.token
+LoadCredential=yield-runtime-token:/etc/positioncrew-runtime/credentials/dedicated-yield.token
+LoadCredential=grid-runtime-token:/etc/positioncrew-runtime/credentials/dedicated-grid.token
 LoadCredential=owner-key:/etc/positioncrew-runtime/credentials/dedicated-lending.owner-key
 LoadCredential=policy:/etc/positioncrew-runtime/service-policy.json
 Environment=TERMIX_SESSION_TOKEN_FILE=%d/session-token
 Environment=TERMIX_RUNTIME_TOKEN_FILE=%d/runtime-token
+Environment=TERMIX_LP_RUNTIME_TOKEN_FILE=%d/lp-runtime-token
+Environment=TERMIX_YIELD_RUNTIME_TOKEN_FILE=%d/yield-runtime-token
+Environment=TERMIX_GRID_RUNTIME_TOKEN_FILE=%d/grid-runtime-token
 Environment=TERMIX_DELIVERY_OWNER_KEY_FILE=%d/owner-key
 Environment=TERMIX_SERVICE_POLICY_FILE=%d/policy
 Environment=TERMIX_SERVICE_STATE_DIR=/var/lib/positioncrew-fulfill/service

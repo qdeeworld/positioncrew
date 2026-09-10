@@ -1,3 +1,7 @@
+import { CapitalIntakeSchema, parseCapitalRequirements, serviceForOrder, observeCapital, type CapitalIntake } from "./termix-capital-services.js";
+import { PositionCrewRequestSchema, PositionCrewDeliverableSchema } from "../contracts/index.js";
+import { executeProvider } from "../providers/index.js";
+import { evaluateProviderConformance } from "../evaluators/provider-conformance.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { decodeFunctionData, parseAbi } from "viem";
@@ -170,6 +174,11 @@ export const TermixLendingDeliveryArtifactSchema = z.object({
   }).strict(),
 }).strict();
 
+export const TermixIntakeSchema=z.union([TermixLendingIntakeSchema,CapitalIntakeSchema]);
+export type TermixIntake=z.infer<typeof TermixIntakeSchema>;
+export const TermixCapitalArtifactSchema=TermixLendingDeliveryArtifactSchema.extend({schemaVersion:z.literal("positioncrew.termix-capital-delivery.v1"),intake:CapitalIntakeSchema,request:PositionCrewRequestSchema,result:PositionCrewDeliverableSchema}).refine(a=>a.request.service===a.intake.requirements.service && a.result.service===a.request.service,"Artifact service mismatch");
+export const TermixDeliveryArtifactSchema=z.union([TermixLendingDeliveryArtifactSchema,TermixCapitalArtifactSchema]);
+
 export const TermixFulfillmentStageSchema = z.enum([
   "ORDER_OBSERVED",
   "ACCEPT_INTENT_PREPARED",
@@ -196,7 +205,7 @@ const PreparedArtifactSchema = z.object({
 }).strict();
 
 export const TermixFulfillmentCheckpointSchema = z.object({
-  schemaVersion: z.literal("positioncrew.termix-lending-fulfillment.v1"),
+  schemaVersion: z.enum(["positioncrew.termix-lending-fulfillment.v1","positioncrew.termix-fulfillment.v2"]),
   chainId: z.literal(56),
   baseUrl: z.string().url(),
   providerAgentId: z.string().min(1),
@@ -206,7 +215,7 @@ export const TermixFulfillmentCheckpointSchema = z.object({
   stage: TermixFulfillmentStageSchema,
   order: TermixProviderOrderSchema,
   orderHash: Sha256Schema,
-  intake: TermixLendingIntakeSchema.nullable(),
+  intake: TermixIntakeSchema.nullable(),
   intakeHash: Sha256Schema.nullable(),
   artifact: PreparedArtifactSchema.nullable(),
   acceptIntent: AacpOrderTxIntentSchema.nullable(),
@@ -544,7 +553,7 @@ export function createTermixLendingDeliveryArtifact(
 export function termixDeliveryArtifactDescriptor(
   artifactInput: unknown,
 ): {
-  artifact: TermixLendingDeliveryArtifact;
+  artifact: z.infer<typeof TermixDeliveryArtifactSchema>;
   content: string;
   fileName: string;
   contentType: "application/json";
@@ -552,7 +561,7 @@ export function termixDeliveryArtifactDescriptor(
   sha256: string;
   deliveryHash: string;
 } {
-  const artifact = TermixLendingDeliveryArtifactSchema.parse(artifactInput);
+  const artifact = TermixDeliveryArtifactSchema.parse(artifactInput);
   const content = `${JSON.stringify(artifact, null, 2)}\n`;
   const encoded = new TextEncoder().encode(content);
   const digest = bytesToHex(sha256(encoded));
@@ -560,7 +569,7 @@ export function termixDeliveryArtifactDescriptor(
   return {
     artifact,
     content,
-    fileName: `positioncrew-lending-${safeOrderId}-round-${artifact.order.deliveryRound}.json`,
+    fileName: `positioncrew-${(artifact.request.service === "LENDING_RESCUE" ? "lending" : artifact.request.service.toLowerCase())}-${safeOrderId}-round-${artifact.order.deliveryRound}.json`,
     contentType: "application/json",
     sizeBytes: encoded.byteLength,
     sha256: digest,
@@ -584,4 +593,44 @@ export function verifyTermixFulfillmentCheckpoint(input: unknown): TermixFulfill
   const { checkpointHash, ...body } = checkpoint;
   if (canonicalHash(body) !== checkpointHash) throw new Error("TermiX fulfillment checkpoint hash mismatch");
   return checkpoint;
+}
+
+export function createTermixIntakeFromOrderScope(orderInput:unknown):TermixIntake {
+ const order=normalizeTermixProviderOrder(orderInput),service=serviceForOrder(order);
+ if(service==="LENDING_RESCUE")return createTermixLendingIntakeFromOrderScope(order);
+ const scope=z.string().min(1).max(16000).parse(order.scope),parts=scope.split("Buyer requirements:\n");
+ if(parts.length!==2)throw new Error("Order needs one explicit Buyer requirements section");
+ const requirements=parseCapitalRequirements(parts[1]!,order.id,service);
+ return CapitalIntakeSchema.parse({schemaVersion:"positioncrew.termix-capital-intake.v1",orderId:order.id,requirements,buyerEvidence:{source:"TERMIX_ORDER_SCOPE",conversationId:order.id,messageId:canonicalHash(scope),senderAccountId:order.clientAccountId,senderWalletAddress:null,messageCreatedAt:TimestampSchema.parse(order.createdAt),rawMessageHash:canonicalHash(scope),parsedRequestHash:canonicalHash(requirements)}});
+}
+export function createTermixIntakeFromRuntimeMessage(orderInput:unknown,locatorInput:unknown,messageInput:unknown):TermixIntake {
+ const order=normalizeTermixProviderOrder(orderInput),service=serviceForOrder(order);
+ if(service==="LENDING_RESCUE")return createTermixLendingIntakeFromRuntimeMessage(order,locatorInput,messageInput);
+ const locator=TermixBuyerMessageLocatorSchema.parse(locatorInput),message=TermixRuntimeBuyerMessageSchema.parse(messageInput);
+ if(locator.orderId!==order.id||message.orderId!==order.id||message.conversationId!==locator.conversationId||message.messageId!==locator.messageId||message.from.accountId!==order.clientAccountId)throw new Error("Buyer message is not bound to exact order, conversation and buyer");
+ const requirements=parseCapitalRequirements(message.text,order.id,service);
+ return CapitalIntakeSchema.parse({schemaVersion:"positioncrew.termix-capital-intake.v1",orderId:order.id,requirements,buyerEvidence:{source:"TERMIX_RUNTIME_INBOX",conversationId:message.conversationId,messageId:message.messageId,senderAccountId:message.from.accountId,senderWalletAddress:message.from.walletAddress??null,messageCreatedAt:message.createdAt,rawMessageHash:canonicalHash(message.text),parsedRequestHash:canonicalHash(requirements)}});
+}
+export async function observeTermixIntake(intake:TermixIntake) {
+ if(intake.schemaVersion==="positioncrew.termix-capital-intake.v1")return observeCapital(intake);
+ const {inspectVenusAccount}=await import("../telemetry/bsc.js");
+ return inspectVenusAccount(intake.account,{targetHealthFactor:intake.targetHealthFactor,stressPriceDropBps:intake.stressPriceDropBps,maxActionUsd:intake.maxActionUsd,maxGasUsd:intake.maxGasUsd,maxSlippageBps:intake.maxSlippageBps});
+}
+export async function prepareTermixArtifact(orderInput:unknown,intake:TermixIntake) {
+ const order=normalizeTermixProviderOrder(orderInput);
+ if(intake.schemaVersion==="positioncrew.termix-lending-intake.v1") {
+  const {inspectVenusAccount}=await import("../telemetry/bsc.js");
+  const probe=await inspectVenusAccount(intake.account,{targetHealthFactor:intake.targetHealthFactor,stressPriceDropBps:intake.stressPriceDropBps,maxActionUsd:intake.maxActionUsd,maxGasUsd:intake.maxGasUsd,maxSlippageBps:intake.maxSlippageBps});
+  return createTermixLendingDeliveryArtifact(order,intake,probe,new Date());
+ }
+ if(intake.orderId!==order.id||intake.buyerEvidence.senderAccountId!==order.clientAccountId||intake.requirements.service!==serviceForOrder(order))throw new Error("Artifact intake differs from order");
+ const probe=await observeCapital(intake),now=new Date(),request=probe.request,result=executeProvider(request,now);
+ const evaluation=evaluateProviderConformance(request,result,"positioncrew-termix-provider-gate",now);
+ if(!evaluation.passed)throw new Error("Capital deliverable failed conformance");
+ return TermixCapitalArtifactSchema.parse({schemaVersion:"positioncrew.termix-capital-delivery.v1",generatedAt:now.toISOString(),order:artifactOrderIdentity(order),intake,request,result,evaluation,evidence:{bscBlockNumber:probe.source.blockNumber,bscExplorerUrl:probe.source.explorerUrl,observationGeneratedAt:probe.generatedAt,intakeHash:canonicalHash(intake),requestHash:canonicalHash(request),resultHash:canonicalHash(result),evaluationHash:evaluation.evaluationHash},boundaries:{walletSignatureCreated:false,transactionBroadcast:false,protocolActionExecuted:false,settlementCompleted:false,note:"Analysis only. LP uses an observed position; Yield and Grid use explicitly hypothetical capital. No trades are executed. Escrow delivery is a separate transaction."}});
+}
+export function assertTermixArtifactOrder(input:unknown,order:unknown) {
+ const artifact=TermixDeliveryArtifactSchema.parse(input);
+ if(canonicalHash(artifact.order)!==canonicalHash(artifactOrderIdentity(order))||artifact.request.service!==serviceForOrder(normalizeTermixProviderOrder(order)))throw new Error("Artifact belongs to a different order or service");
+ return artifact;
 }
