@@ -428,6 +428,13 @@ function registeredArtifact(input: unknown): z.infer<typeof RemoteArtifactSchema
   throw new Error("TermiX artifact registration has an undocumented response shape");
 }
 
+export function assertAttachedTermixArtifact(input: unknown, artifactId: string, sha256: string): void {
+  const attached = remoteArtifacts(input).find((item) => item.id === artifactId);
+  if (!attached || normalizeSha256(attached.sha256) !== normalizeSha256(sha256)) {
+    throw new Error("TermiX delivery is missing the verified report attachment");
+  }
+}
+
 async function uploadArtifact(grantInput: unknown, content: string, contentType: string): Promise<void> {
   const grant = UploadGrantSchema.parse(grantInput);
   const uploadUrl = new URL(grant.uploadUrl);
@@ -690,6 +697,11 @@ async function run(): Promise<void> {
     if (!priorArtifact.publicUrl) {
       throw new Error("Cached delivery artifact has no public verification URL");
     }
+    if (!priorArtifact.remoteArtifactId) throw new Error("Cached delivery has no artifact ID");
+    assertAttachedTermixArtifact(
+      await apiJson(baseUrl, token, "GET", `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/artifacts`),
+      priorArtifact.remoteArtifactId, descriptor.sha256,
+    );
     await verifyPublishedArtifact(priorArtifact.publicUrl, descriptor);
     if (Date.parse(priorArtifact.resultExpiresAt) - Date.now() < 120_000) {
       throw new Error("Cached delivery artifact became unsafe during remote verification");
@@ -758,8 +770,12 @@ async function run(): Promise<void> {
     `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/submit`,
     {
       deliveryHash: descriptor.deliveryHash,
+      artifactIds: [registered.id],
       note: "PositionCrew bounded Lending Rescue analysis and conformance receipt.",
     },
+  );
+  assertAttachedTermixArtifact(
+    await apiJson(baseUrl, token, "GET", artifactPathname), registered.id, descriptor.sha256,
   );
   if (Date.parse(artifact.result.expiresAt) - Date.now() < 120_000) {
     throw new Error("Delivery artifact became unsafe while preparing the submit intent");

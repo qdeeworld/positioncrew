@@ -1,3 +1,4 @@
+import {assertAttachedTermixArtifact} from "../src/cli/prepare-termix-lending-delivery.js";
 import {mkdtempSync,writeFileSync,readFileSync,rmSync,statSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -25,3 +26,11 @@ describe("delivery recovery persistence",()=>{
 it("does not refresh an expired prior-round artifact when a redo starts",()=>{const now=Date.parse("2026-09-10T15:00:00Z"), prior={deliveryRound:1,artifact:{resultExpiresAt:"2026-09-10T14:00:00Z"}};expect(shouldRefreshDelivery(prior,true,now)).toBe(false);expect(shouldRefreshDelivery(prior,false,now)).toBe(true);expect(shouldRefreshDelivery({...prior,deliveryRound:2},true,now)).toBe(true);});
 
 it("rechecks all deadlines after simulated RPC delay before signing or broadcasting",()=>{const o=live(),p={orderId:o.id,onChainOrderId:o.chainOrderId,clientAccountId:o.buyer.id,scopeHash:canonicalHash(o.scope),expiresAt:"2026-09-12T12:00:00.000Z",maxGasWei:"34000000000000"};const end=Date.parse(o.deadlines.deliveryDueAt),artifact="2026-09-11T15:00:00.000Z";expect(()=>assertDeliveryWindow(p,o,artifact,end-121000)).not.toThrow();expect(()=>assertDeliveryWindow(p,o,artifact,end-119000)).toThrow("Delivery deadline");expect(()=>assertDeliveryWindow(p,o,new Date(end-120000).toISOString(),end-121000)).toThrow("Artifact");});
+
+it("rejects an unattached or substituted report even after successful submit preparation",()=>{
+ const sha="ab".repeat(32);
+ expect(()=>assertAttachedTermixArtifact({items:[]},"report",sha)).toThrow("missing");
+ expect(()=>assertAttachedTermixArtifact({items:[{id:"other",sha256:sha}]},"report",sha)).toThrow("missing");
+ expect(()=>assertAttachedTermixArtifact({items:[{id:"report",sha256:"cd".repeat(32)}]},"report",sha)).toThrow("missing");
+ expect(()=>assertAttachedTermixArtifact({items:[{id:"report",sha256:"0x"+sha}]},"report",sha)).not.toThrow();
+});

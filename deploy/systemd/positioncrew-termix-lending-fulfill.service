@@ -31,4 +31,4 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 MemoryMax=256M
-TasksMax=24
+TasksMax=64
