@@ -193,8 +193,9 @@ export async function runTermixService() {
         mayHaveSigned = true;
         const signed = await account.signTransaction({chainId:56,type:"legacy",to,data,value:0n,gas,gasPrice,nonce:pending});
         const hash = keccak256(signed);
-        // Short acceptance retry window, bounded further by known order deadlines.
-        const expiresAt = new Date(Math.min(Date.now()+120000,Date.parse(policy.expiresAt),Date.parse(order.acceptDeadline ?? order.deliveryDueAt!))).toISOString();
+        // Cover receipt timeout + timer cooldown + startup, while retaining
+        // a full minute of recovery safety and all known order/policy deadlines.
+        const expiresAt = new Date(Math.min(Date.now()+300000,Date.parse(policy.expiresAt),Date.parse(order.acceptDeadline ?? order.deliveryDueAt!))).toISOString();
         durableJournal(journalPath,JSON.stringify({raw:signed,hash,expiresAt}));
         assertServiceOrder(order,policy);
         await client.sendRawTransaction({serializedTransaction:signed});

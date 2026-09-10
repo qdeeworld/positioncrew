@@ -76,6 +76,8 @@ describe("service coordinator integration with simulated chain and authenticated
  it("persists the exact acceptance signature before a broadcast outage and recovers without signing again",async()=>{
   mocks.client.sendRawTransaction.mockRejectedValueOnce(new Error("RPC unavailable"));await runTermixService();expect(mocks.sign).toHaveBeenCalledTimes(1);
   const signed=JSON.parse(readFileSync(join(root,"state",orders[0]!.id,"accept-signed.json"),"utf8"));expect(signed.hash).toBe(keccak256(signed.raw));
+  // Receipt wait, timer cooldown and startup can exceed two minutes.
+  vi.setSystemTime(new Date(Date.now()+125000));
   mocks.client.getTransactionReceipt.mockRejectedValueOnce(Object.assign(new Error("not found"),{name:"TransactionReceiptNotFoundError"}));
   await runTermixService();expect(mocks.sign).toHaveBeenCalledTimes(1);expect(mocks.client.sendRawTransaction).toHaveBeenLastCalledWith({serializedTransaction:signed.raw});expect(mocks.spawn).toHaveBeenCalledTimes(1);
  });
