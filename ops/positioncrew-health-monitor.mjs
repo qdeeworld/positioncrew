@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 const BASE = 'https://positioncrew.dolepee.com';
-export const STOP_AT = Date.parse('2026-09-24T00:00:00Z');
+export const STOP_AT = Date.parse('2026-11-06T00:00:00Z');
 const STATE_DIR = '/var/lib/positioncrew-health-monitor';
 const STATE_PATH = `${STATE_DIR}/state.json`;
 const MAX_PROBE_MS = 18_000;

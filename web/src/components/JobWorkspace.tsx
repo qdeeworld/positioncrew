@@ -476,6 +476,7 @@ function LendingPositionBar({ request }: { request: JobRequest | null }) {
 
 function ProviderAdmissionLadder({
   providerName,
+  assessmentScope,
   listed,
   verified,
   live,
@@ -484,6 +485,7 @@ function ProviderAdmissionLadder({
   selected,
 }: {
   providerName: string;
+  assessmentScope?: string;
   listed: boolean;
   verified: boolean;
   live: boolean;
@@ -495,8 +497,8 @@ function ProviderAdmissionLadder({
     { label: "Listed", passed: listed, detail: listed ? "Provider identity recorded" : "Provider is not listed" },
     { label: "Verified", passed: verified, detail: verified ? "Identity evidence validated" : "Identity evidence is incomplete" },
     { label: "Live", passed: live, detail: live ? "Provider returned attributable evidence" : "No callable response was proven" },
-    { label: "Compatible", passed: compatible, detail: compatible ? "Declared task contract passed" : "Declared task compatibility is unproven" },
-    { label: "Activatable", passed: activatable, detail: activatable ? "Scoped activation path passed" : "Activation admission is withheld" },
+    { label: "Compatible", passed: compatible, detail: assessmentScope ? (compatible ? `${assessmentScope} only; capital-action contract not passed` : `${assessmentScope} compatibility is unproven`) : compatible ? "Declared task contract passed" : "Declared task compatibility is unproven" },
+    { label: "Activatable", passed: activatable, detail: assessmentScope ? (activatable ? `${assessmentScope} response available; capital action not admitted` : `${assessmentScope} admission is withheld`) : activatable ? "Scoped activation path passed" : "Activation admission is withheld" },
     { label: "Selected", passed: selected, detail: selected ? "Selected under the disclosed policy" : "Provider was not selected" },
   ];
   const firstFailure = stages.findIndex((stage) => !stage.passed);
@@ -992,7 +994,7 @@ function GridAndYieldExternalComparisonPanel({
     : (comparable ? "Live yield match completed" : partial ? "Rate leader cross-checked" : "External rate check recorded");
   const summary = isGrid
     ? `${grid?.externalState ?? "Unavailable"} / ${grid?.externalRecommendation ?? "Unavailable"} externally · ${grid?.positionCrewDecision.replaceAll("_", " ")} by PositionCrew`
-    : `${yieldComparison?.externalSimpleAnnualRateBps ?? "-"} bps external · ${yieldComparison?.positionCrewGrossApyBps ?? "-"} bps PositionCrew`;
+    : `${yieldComparison?.externalSimpleAnnualRateBps ?? "-"} bps simple annual rate externally · ${yieldComparison?.positionCrewGrossApyBps ?? "-"} bps APY by PositionCrew`;
   const detail = isGrid
     ? comparable
       ? `Brain on BNB replayed ${grid?.measuredWindow?.swaps ?? 0} live swaps and supplied independently measured range candidates. PositionCrew admitted ±${grid?.providerRange?.widthPct ?? "-"}% only after the unchanged order, cost, inventory, maximum-loss, expiry, and refusal contract passed.`
@@ -1031,6 +1033,7 @@ function GridAndYieldExternalComparisonPanel({
           </div>
           <ProviderAdmissionLadder
             providerName={provider.name}
+            assessmentScope={comparable ? undefined : scopedRole}
             listed
             verified
             live={checks.some((check) => check.status === "PASS")}
@@ -1040,7 +1043,7 @@ function GridAndYieldExternalComparisonPanel({
           />
           <div className="provider-audition-facts">
             <div>
-              <span>Independent result</span>
+              <span>External observation</span>
               <b>{summary}</b>
               <small>ERC-8004 #{provider.erc8004TokenId}; no payment, authority grant, or transaction occurred.</small>
             </div>
@@ -1052,7 +1055,7 @@ function GridAndYieldExternalComparisonPanel({
               <small>{eligibleForScopedActivation
                 ? comparable
                   ? yieldComparison?.selection?.basis ?? "PositionCrew selected the native exact-contract provider after both results passed."
-                  : `The provider passed the ${scopedRole.toLowerCase()} subtask only; PositionCrew retains the bounded action, costs, risk and expiry contract.`
+                  : `The provider passed the ${scopedRole.toLowerCase()} subtask only. This does not establish agreement on every pinned value or eligibility to execute a capital action; PositionCrew retains the bounded action, costs, risk and expiry contract.`
                 : "The provider did not pass its scoped assessment contract, so no activation or ranking is claimed."}</small>
             </div>
           </div>
