@@ -10,8 +10,8 @@ import {
   Radio,
   ShieldCheck,
 } from "lucide-react";
-import termixIdentityEvidence from "../../../evidence/termix-identities.mainnet.json" with { type: "json" };
-import termixListingEvidence from "../../../evidence/termix-listings.mainnet.json" with { type: "json" };
+import termixIdentityEvidence from "../../../evidence/termix-dedicated-identities.mainnet.json" with { type: "json" };
+import termixListingEvidence from "../../../evidence/termix-dedicated-listings.mainnet.json" with { type: "json" };
 import { shortHash } from "../presentation";
 import { ShadowGridPortfolioCohorts, shadowPortfolioLabel } from "./ShadowGridPortfolioCohorts";
 import type {
@@ -334,7 +334,7 @@ export function EvidenceView({
           <div><strong>{aacpReadiness?.protocol.currencies.map((currency) => currency.symbol).join(" + ") || "-"}</strong><span>settlement currencies</span><small>{aacpReadiness?.protocol.protocolFeeBps == null ? "Live fee check pending" : `${aacpReadiness.protocol.protocolFeeBps / 100}% protocol fee`}</small></div>
           <div><strong>{aacpReadiness?.marketplace.registeredIdentityCount ?? committedIdentityCount}/4</strong><span>mainnet identities</span><small>Committed ERC-8004 mint receipts remain available during live-source delays</small></div>
           <div><strong>{aacpReadiness?.marketplace.publishedListingCount ?? committedListingCount}/4</strong><span>public listings</span><small>Committed Agent.family listing records remain directly inspectable</small></div>
-          <div><strong>{aacpReadiness ? (aacpReadiness.marketplace.dedicatedFlagship.status === "ONLINE_AND_LISTED" ? "ONLINE" : aacpReadiness.marketplace.dedicatedFlagship.status === "LISTED_OFFLINE" ? "OFFLINE" : "UNAVAILABLE") : "-"}</strong><span>dedicated flagship</span><small>{aacpReadiness ? `Original fleet ${aacpReadiness.marketplace.onlineProviderCount}/${aacpReadiness.marketplace.requiredProviderCount}; reported separately` : "Expiring A2A presence; reported separately from core health"}</small></div>
+          <div><strong>{aacpReadiness ? (aacpReadiness.marketplace.dedicatedFlagship.status === "ONLINE_AND_LISTED" ? "ONLINE" : aacpReadiness.marketplace.dedicatedFlagship.status === "LISTED_OFFLINE" ? "OFFLINE" : "UNAVAILABLE") : "-"}</strong><span>dedicated flagship</span><small>{aacpReadiness ? `Active fleet ${aacpReadiness.marketplace.onlineProviderCount}/${aacpReadiness.marketplace.requiredProviderCount} online` : "Expiring A2A presence; reported separately from core health"}</small></div>
         </div>
         {aacpReadiness ? (
           <>
