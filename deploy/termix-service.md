@@ -95,8 +95,7 @@ match. Unknown fields and executable requests are rejected.
 - `BOUNDED_GRID`: `account`, `capitalUsd`, `capitalSource: "HYPOTHETICAL"` and
   constraints `lowerPrice`, `upperPrice`, `levelCount: 5`, `maximumInventoryUsd`,
   `maximumLossUsd`, `minimumExpectedNetProfitUsd`, `minimumLiquidityUsd`,
-  `maximumVolatilityBps`, `expectedCompletedCycles`, `orderExpirySeconds`
-  (60–120). Live observations cover Pancake WBNB/USDT. Five levels match the
+  `maximumVolatilityBps`, `expectedCompletedCycles`, `orderExpirySeconds: 120`. Live observations cover Pancake WBNB/USDT. Five levels match the
   supported gas estimate.
 
 Yield and Grid capital must be between 1 and 10000000 USD, with at most two

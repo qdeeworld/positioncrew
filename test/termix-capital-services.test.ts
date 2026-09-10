@@ -542,3 +542,31 @@ it("shares one admission cap across services and retains existing reservations",
     Object.values(ledger.reservations).map((r) => r.policy.service),
   ).toEqual(["LP_REBALANCE", "YIELD_OPTIMIZATION"]);
 });
+
+it("rejects Grid expiries that cannot retain paid-delivery signing headroom", () => {
+  const r = requirements("BOUNDED_GRID");
+  for (const seconds of [60, 89, 90, 119]) {
+    expect(() =>
+      createTermixIntakeFromOrderScope(
+        order(
+          "BOUNDED_GRID",
+          JSON.stringify({
+            ...r,
+            constraints: { ...r.constraints, orderExpirySeconds: seconds },
+          }),
+        ),
+      ),
+    ).toThrow();
+  }
+  expect(() =>
+    createTermixIntakeFromOrderScope(
+      order(
+        "BOUNDED_GRID",
+        JSON.stringify({
+          ...r,
+          constraints: { ...r.constraints, orderExpirySeconds: 120 },
+        }),
+      ),
+    ),
+  ).not.toThrow();
+});

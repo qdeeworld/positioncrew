@@ -121,7 +121,7 @@ export const CapitalBuyerRequestSchema = z.discriminatedUnion("service", [
         .object({
           ...gridLimits,
           levelCount: z.literal(5),
-          orderExpirySeconds: z.number().int().min(60).max(120),
+          orderExpirySeconds: z.literal(120),
         })
         .strict()
         .refine((v) => Number(v.lowerPrice) < Number(v.upperPrice)),
@@ -233,7 +233,7 @@ export function capitalRequirementsGuide(
       ? "Include positionTokenId and LP limits: minimumWidthTicks, maximumWidthTicks, edgeBufferBps, highVolatilityBps, maximumToken0ShareBps, maximumToken1ShareBps, minimumNetBenefitUsd, evaluationHorizonHours. Slippage at most 30bps."
       : service === "YIELD_OPTIMIZATION"
         ? "Include account, capitalUsd, capitalSource HYPOTHETICAL, maxExecutionCostUsd and limits: protocolAllowlist [Venus Core Pool], maximumRiskTier, maximumProtocolConcentrationBps, maximumLockupSeconds, minimumLiquidityUsd, minimumNetBenefitUsd, evaluationHorizonDays."
-        : "Include account, capitalUsd, capitalSource HYPOTHETICAL and limits: lowerPrice, upperPrice, levelCount 5, maximumInventoryUsd, maximumLossUsd, minimumExpectedNetProfitUsd, minimumLiquidityUsd, maximumVolatilityBps, expectedCompletedCycles, orderExpirySeconds (60–120).") +
+        : "Include account, capitalUsd, capitalSource HYPOTHETICAL and limits: lowerPrice, upperPrice, levelCount 5, maximumInventoryUsd, maximumLossUsd, minimumExpectedNetProfitUsd, minimumLiquidityUsd, maximumVolatilityBps, expectedCompletedCycles, orderExpirySeconds 120.") +
     " USD amounts are decimal strings. Observed data and transaction costs are read from BSC. Reports do not execute trades; hypothetical capital is not a verified wallet balance."
   );
 }
