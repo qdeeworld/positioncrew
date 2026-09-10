@@ -16,9 +16,9 @@ Each instance uses `positioncrew-runtime@INSTANCE.service` plus `positioncrew-ru
 - `/etc/positioncrew-runtime/credentials/INSTANCE.token` and `INSTANCE.expiry.env`: agent-scoped token and verified expiry, written atomically by renewal.
 - `/var/lib/positioncrew-runtime-INSTANCE/runtime.json`: independent inbox cursor and idempotency state.
 
-The VPS's LXC drop-in clears `LoadCredential`, so each instance requires a later `zzzz-instance-credential.conf` drop-in to load only its own runtime token. The renewal instance similarly loads its owner credential. Runtime drop-ins include the matching expiry environment file. The three new instances use `StandardOutput=journal` and `StandardError=journal` so first start does not depend on a pre-existing log file. On the host, journald has `SystemMaxUse=1G` and `SystemKeepFree=4G`.
+The VPS's LXC drop-in clears `LoadCredential`, so each instance requires a later `zzzz-instance-credential.conf` drop-in to load only its own runtime token. The renewal instance similarly loads its owner credential. Runtime drop-ins include the matching expiry environment file. The runtime template and the three new instances use `StandardOutput=journal` and `StandardError=journal` so first start does not depend on a pre-existing log file. On the host, journald has `SystemMaxUse=1G` and `SystemKeepFree=4G`.
 
-For a fresh installation from the repository templates, first stage the pinned runtime bundle using the build commands in `positioncrew-runtime@.service`; its root-owned installation and hash validation run before the poller starts. Both runtime and renewal templates load the same `/etc/positioncrew-runtime/INSTANCE.env` file.
+For a fresh installation from the repository templates, first stage the pinned runtime bundle using the build commands in `positioncrew-runtime@.service`; its root-owned installation and hash validation run before the poller starts. Each instance stages its own candidate file so concurrent starts cannot overwrite one another’s temporary artifact. Both runtime and renewal templates load the same `/etc/positioncrew-runtime/INSTANCE.env` file.
 
 Enable the runtime unit, run its renewal service to issue the initial token and start the process, then enable its hourly renewal timer. Verify both the live agent card and service state. An online observation is not a continuous-uptime guarantee.
 

@@ -511,7 +511,7 @@ describe("PositionCrew TermiX A2A runtime", () => {
         "utf8",
       );
       const pinnedHash = unit.match(
-        /echo "([a-f0-9]{64})  \/opt\/positioncrew-runtime\/\.positioncrew-runtime\.mjs\.candidate"/,
+        /echo "([a-f0-9]{64})  \/opt\/positioncrew-runtime\/\.positioncrew-runtime\.%i\.mjs\.candidate"/,
       )?.[1];
       expect(pinnedHash).toBe(createHash("sha256").update(first).digest("hex"));
     } finally {
@@ -525,10 +525,19 @@ describe("PositionCrew TermiX A2A runtime", () => {
       "utf8",
     );
     expect(unit).toContain("WorkingDirectory=-/opt/positioncrew-runtime");
+    expect(unit).toContain("/.positioncrew-runtime.%i.mjs.candidate");
+    expect(unit).not.toContain("/.positioncrew-runtime.mjs.candidate");
+    expect(unit).toContain("StandardOutput=journal");
+    expect(unit).toContain("StandardError=journal");
     expect(unit).toContain(
       "ExecStart=/usr/bin/env -i TERMIX_A2A_AGENT_ID=${TERMIX_A2A_AGENT_ID} POSITIONCREW_SERVICE=${POSITIONCREW_SERVICE}",
     );
     expect(unit).toContain("/usr/bin/node /opt/positioncrew-runtime/positioncrew-runtime.mjs --runtime-token-file %d/runtime-token");
+    const launch = unit.split("\n").find((line) => line.startsWith("ExecStart="));
+    expect(launch).toContain("TERMIX_AACP_BASE_URL=${TERMIX_AACP_BASE_URL}");
+    expect(launch).toContain("TERMIX_A2A_POLL_SECONDS=${TERMIX_A2A_POLL_SECONDS}");
+    expect(unit).toContain("Environment=TERMIX_AACP_BASE_URL=https://platform-backend.prod.termix.live");
+    expect(unit).toContain("Environment=TERMIX_A2A_POLL_SECONDS=5");
     expect(unit).not.toContain("BindReadOnlyPaths=/home/crosswind/apps/positioncrew");
     expect(unit).toContain(
       "ConditionFileNotEmpty=/home/crosswind/.local/lib/positioncrew/positioncrew-runtime.mjs",
