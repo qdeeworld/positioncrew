@@ -9,7 +9,7 @@ import { bsc } from "viem/chains";
 import { z } from "zod";
 import { canonicalHash } from "../core/canonical.js";
 import { assertTermixProviderOrder, assertTermixProviderIntent, createTermixLendingIntakeFromOrderScope,
-  verifyTermixFulfillmentCheckpoint, TermixContractsConfigSchema } from "../commerce/termix-provider-delivery.js";
+  verifyTermixFulfillmentCheckpoint, TermixContractsConfigSchema, TermixBuyerMessageLocatorSchema } from "../commerce/termix-provider-delivery.js";
 
 const BASE = "https://platform-backend.prod.termix.live";
 const OWNER = "0xADd748C416E8A7efd7d65D18Abb121dea268ddF9";
@@ -21,14 +21,20 @@ export const DeliveryPolicySchema = z.object({
   clientAccountId: z.string().min(1),
   onChainOrderId: z.string().regex(/^0x[a-f0-9]{64}$/),
   expiresAt: z.string().datetime(),
+  currency: z.enum(["USDC", "USDT"]).optional(),
+  escrow: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
+  intakeHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  buyerMessage: TermixBuyerMessageLocatorSchema.optional(),
   maxGasWei: z.string().regex(/^[1-9][0-9]*$/),
 }).strict();
 export function validateDeliveryPolicy(input: unknown, orderInput: unknown, now = Date.now()) {
   const p = DeliveryPolicySchema.parse(input);
   const order = assertTermixProviderOrder(orderInput, {orderId:p.orderId, providerAgentId:AGENT, listingId:LISTING});
   if (Date.parse(p.expiresAt) <= now || BigInt(p.maxGasWei) > 34000000000000n) throw new Error("Delivery policy expired or gas cap excessive");
-  if (order.currency !== "USDC" || order.amount !== "5" || order.clientAccountId !== p.clientAccountId || order.onChainOrderId !== p.onChainOrderId || canonicalHash(order.scope) !== p.scopeHash) throw new Error("Order differs from approved delivery policy");
-  createTermixLendingIntakeFromOrderScope(order);
+  if (order.currency !== (p.currency ?? "USDC") || order.amount !== "5" || order.clientAccountId !== p.clientAccountId || order.onChainOrderId !== p.onChainOrderId || canonicalHash(order.scope) !== p.scopeHash) throw new Error("Order differs from approved delivery policy");
+  if (p.buyerMessage) {
+    if (!p.intakeHash || p.buyerMessage.orderId !== order.id) throw new Error("Unbound buyer-message intake");
+  } else createTermixLendingIntakeFromOrderScope(order);
   return {policy:p,order};
 }
 export function assertDeliveryWindow(policyInput: unknown, orderInput: unknown, artifactExpiresAt: string, now = Date.now()) {
@@ -94,14 +100,19 @@ async function run() {
   if(!["FUNDED","IN_PROGRESS"].includes(order.status)||!order.availableActions.canSubmitDelivery){console.log(json({event:"delivery.waiting",status:order.status}));return;}
   const checkpointPath=resolve(root,`${canonicalHash(policy.orderId).slice(7)}.json`);
   const previous=existsSync(checkpointPath)?verifyTermixFulfillmentCheckpoint(JSON.parse(protectedText(checkpointPath))):null;
-  const args=[resolve(process.env.TERMIX_PREPARE_SCRIPT ?? "/opt/positioncrew-termix-orders/prepare-termix-lending-delivery.mjs"),"prepare-delivery","--order",policy.orderId,"--from-order-scope"];
+  const args=[resolve(process.env.TERMIX_PREPARE_SCRIPT ?? "/opt/positioncrew-termix-orders/prepare-termix-lending-delivery.mjs"),"prepare-delivery","--order",policy.orderId];
+  if (policy.buyerMessage) {
+    const locatorPath=resolve(root,"buyer-message.json");
+    writeFileSync(locatorPath,json(policy.buyerMessage),{mode:0o600});
+    args.push("--intake",locatorPath);
+  } else args.push("--from-order-scope");
   if(shouldRefreshDelivery(previous,order.redoUsed))args.push("--refresh-expired");
   const prepared=spawnSync(process.execPath,args,{env:{...process.env,TERMIX_AGENT_ID:AGENT,TERMIX_LISTING_ID:LISTING},encoding:"utf8",maxBuffer:2*1024*1024,timeout:180000});
   if(prepared.status!==0) throw new Error(`Delivery preparation failed: ${prepared.stderr.slice(0,1500)}`);
   const checkpoint=verifyTermixFulfillmentCheckpoint(JSON.parse(protectedText(checkpointPath)));
   ({order}=validateDeliveryPolicy(policy,await readOrder()));
   if(!checkpoint.artifact || !checkpoint.submitIntent || checkpoint.orderId!==policy.orderId || !checkpoint.intake)throw new Error("Missing prepared delivery");
-  if(canonicalHash(createTermixLendingIntakeFromOrderScope(order))!==checkpoint.intakeHash)throw new Error("Prepared intake changed");
+  if((policy.intakeHash ?? canonicalHash(createTermixLendingIntakeFromOrderScope(order)))!==checkpoint.intakeHash)throw new Error("Prepared intake changed");
   const artifact=protectedText(checkpoint.artifact.localPath,false);
   if(createHash("sha256").update(artifact).digest("hex")!==checkpoint.artifact.sha256)throw new Error("Local artifact hash mismatch");
   // The preparation tool verifies SHA256 of both local and remote artifact bytes.
@@ -109,6 +120,7 @@ async function run() {
   const guard=assertTermixProviderIntent(order,config,checkpoint.submitIntent,"submitDelivery",{expectedDeliveryHash:checkpoint.artifact.deliveryHash});
   if(guard.intentHash!==checkpoint.submitIntentHash)throw new Error("Intent checkpoint mismatch");
   const i=guard.intent;const to=(i.contract??i.to!) as Hex,data=(i.callData??i.data!) as Hex;
+  if (policy.escrow && to.toLowerCase() !== policy.escrow.toLowerCase()) throw new Error("Escrow differs from approved delivery policy");
   await client.call({account:OWNER,to,data,value:0n});
   const gas=(await client.estimateGas({account:OWNER,to,data,value:0n}))*120n/100n;
   const gasPrice=await client.getGasPrice();
@@ -117,6 +129,7 @@ async function run() {
   const account=privateKeyToAccount(protectedText(process.env.TERMIX_DELIVERY_OWNER_KEY_FILE??"") as Hex);
   if(account.address.toLowerCase()!==OWNER.toLowerCase())throw new Error("Wrong signing owner");
   const nonce=await client.getTransactionCount({address:OWNER,blockTag:"pending"});
+  if (await client.getTransactionCount({address:OWNER,blockTag:"latest"}) !== nonce) throw new Error("Seller wallet has an unresolved pending transaction");
   assertDeliveryWindow(policy,order,checkpoint.artifact.resultExpiresAt);
   const raw=await account.signTransaction({chainId:56,type:"legacy",to,data,value:0n,gas,gasPrice,nonce});
   const hash=keccak256(raw);

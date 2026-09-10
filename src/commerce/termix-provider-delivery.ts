@@ -252,29 +252,60 @@ export function normalizeTermixProviderOrder(input: unknown): TermixProviderOrde
   return TermixProviderOrderSchema.parse(out);
 }
 
-/** Only parse the explicit supported request format; never guess missing buyer constraints. */
+export const LENDING_REQUIREMENTS_GUIDE = `Please send these fields with your own limits (replace every value). I will validate them before accepting the work. This service analyses Venus Classic on BSC; it does not execute transactions.
+Account: your 0x wallet address
+Target health factor: your target above 1
+Stress price drop (%): your stress percentage, 0–50
+Maximum action (USD): your action budget
+Maximum gas (USD): your gas budget
+Maximum slippage (bps): your slippage limit
+Analysis only: yes`;
+
+export function parseTermixLendingRequirements(textInput: string, orderId: string) {
+  const text = textInput.trim();
+  let request: unknown;
+  if (text.startsWith("{")) request = JSON.parse(text);
+  else if (text.includes("\n") && text.split(/\r?\n/).every(line => /^\s*[^:]+:/.test(line))) {
+    const fields: Record<string, unknown> = {};
+    const labels: Record<string, string> = {account:"account", "target health factor":"targetHealthFactor", "stress price drop (%)":"stressPriceDropBps", "maximum action (usd)":"maxActionUsd", "maximum gas (usd)":"maxGasUsd", "maximum slippage (bps)":"maxSlippageBps", "analysis only":"analysisOnly"};
+    for (const line of text.split(/\r?\n/)) {
+      const colon = line.indexOf(":"), label = line.slice(0, colon).trim().toLowerCase(), value = line.slice(colon + 1).trim();
+      const key = labels[label];
+      if (!key || key in fields || !value) throw new Error("Unknown, duplicate or empty requirement field");
+      if (key === "analysisOnly") { if (value.toLowerCase() !== "yes") throw new Error("This service is analysis only"); fields[key] = true; }
+      else if (key === "stressPriceDropBps" || key === "maxSlippageBps") {
+        if (!/^\d+(?:\.\d+)?$/.test(value)) throw new Error("Invalid numeric requirement");
+        fields[key] = Number(value) * (key === "stressPriceDropBps" ? 100 : 1);
+      } else fields[key] = value;
+    }
+    if (!fields.analysisOnly) throw new Error("Confirm analysis only: yes");
+    delete fields.analysisOnly;
+    request = {schemaVersion:"positioncrew.termix-lending-buyer-request.v1",orderId,...fields};
+  } else {
+    const match = /^Assess the current Venus BSC mainnet position for (0x[a-fA-F0-9]{40})\. Target health factor (\d+(?:\.\d+)?); stress collateral prices by (\d+(?:\.\d+)?)%; maximum action budget USD (\d+(?:\.\d+)?); maximum gas USD (\d+(?:\.\d+)?); maximum slippage (\d+) bps\. Deliver current health factor, debt and collateral observations, stressed health factor, a bounded rescue recommendation or explicit no-action\/insufficient-budget result, projected health factor, source block, expiry, and a machine-readable report with a concise explanation\. Analysis only; do not execute protocol transactions\.$/.exec(text);
+    if (!match) throw new Error("Unsupported or ambiguous buyer requirements; buyer clarification required");
+    request = { schemaVersion: "positioncrew.termix-lending-buyer-request.v1", orderId: orderId,
+      account: match[1], targetHealthFactor: match[2], stressPriceDropBps: Number(match[3]) * 100,
+      maxActionUsd: match[4], maxGasUsd: match[5], maxSlippageBps: Number(match[6]) };
+  }
+  const parsed = TermixLendingBuyerRequestSchema.parse(request);
+  if (parsed.orderId !== orderId) throw new Error("Request belongs to another order");
+  return parsed;
+}
+
+/** Only parse explicit supported fields; ask for clarification instead of guessing constraints. */
 export function createTermixLendingIntakeFromOrderScope(orderInput: unknown): TermixLendingIntake {
   const order = normalizeTermixProviderOrder(orderInput);
   const scope = z.string().min(1).max(16000).parse(order.scope);
   const marker = "Buyer requirements:\n";
   if (scope.split(marker).length !== 2) throw new Error("Order needs one explicit Buyer requirements section");
-  const text = scope.split(marker)[1]!.trim();
-  let request: unknown;
-  if (text.startsWith("{")) request = JSON.parse(text);
-  else {
-    const match = /^Assess the current Venus BSC mainnet position for (0x[a-fA-F0-9]{40})\. Target health factor (\d+(?:\.\d+)?); stress collateral prices by (\d+(?:\.\d+)?)%; maximum action budget USD (\d+(?:\.\d+)?); maximum gas USD (\d+(?:\.\d+)?); maximum slippage (\d+) bps\. Deliver current health factor, debt and collateral observations, stressed health factor, a bounded rescue recommendation or explicit no-action\/insufficient-budget result, projected health factor, source block, expiry, and a machine-readable report with a concise explanation\. Analysis only; do not execute protocol transactions\.$/.exec(text);
-    if (!match) throw new Error("Unsupported or ambiguous buyer requirements; operator clarification required");
-    request = { schemaVersion: "positioncrew.termix-lending-buyer-request.v1", orderId: order.id,
-      account: match[1], targetHealthFactor: match[2], stressPriceDropBps: Number(match[3]) * 100,
-      maxActionUsd: match[4], maxGasUsd: match[5], maxSlippageBps: Number(match[6]) };
-  }
-  const parsed = TermixLendingBuyerRequestSchema.parse(request);
-  if (parsed.orderId !== order.id) throw new Error("Scope request belongs to another order");
+  const parsed = parseTermixLendingRequirements(scope.split(marker)[1]!, order.id);
   const createdAt = TimestampSchema.parse(order.createdAt);
   return TermixLendingIntakeSchema.parse({ ...parsed, schemaVersion: "positioncrew.termix-lending-intake.v1",
-    buyerEvidence: { source: "TERMIX_ORDER_SCOPE", conversationId: order.id, messageId: canonicalHash(scope),
-      senderAccountId: order.clientAccountId, senderWalletAddress: null, messageCreatedAt: createdAt,
-      rawMessageHash: canonicalHash(scope), parsedRequestHash: canonicalHash(parsed) } });
+    buyerEvidence: { source: "TERMIX_ORDER_SCOPE", conversationId: order.id,
+      messageId: canonicalHash(scope), senderAccountId: order.clientAccountId,
+      senderWalletAddress: null, messageCreatedAt: createdAt, rawMessageHash: canonicalHash(scope),
+      parsedRequestHash: canonicalHash(parsed) } });
 }
 
 export function assertTermixProviderOrder(
@@ -309,16 +340,7 @@ export function createTermixLendingIntakeFromRuntimeMessage(
   if (message.from.accountId !== order.clientAccountId) {
     throw new Error("TermiX buyer message sender is not the order client account");
   }
-  let rawRequest: unknown;
-  try {
-    rawRequest = JSON.parse(message.text);
-  } catch {
-    throw new Error("TermiX buyer message must contain only the structured Lending request JSON");
-  }
-  const buyerRequest = TermixLendingBuyerRequestSchema.parse(rawRequest);
-  if (buyerRequest.orderId !== order.id) {
-    throw new Error("Structured Lending request belongs to a different TermiX order");
-  }
+  const buyerRequest = parseTermixLendingRequirements(message.text, order.id);
   return TermixLendingIntakeSchema.parse({
     ...buyerRequest,
     schemaVersion: "positioncrew.termix-lending-intake.v1",
@@ -389,7 +411,7 @@ export function assertTermixProviderIntent(
   configInput: unknown,
   intentInput: unknown,
   expectedAction: "acceptOrder" | "submitDelivery",
-  options: { expectedDeliveryHash?: string; now?: Date; safetySeconds?: number } = {},
+  options: { expectedDeliveryHash?: string; now?: Date; safetySeconds?: number; allowUnflaggedAcceptance?: boolean } = {},
 ): { intent: z.infer<typeof AacpOrderTxIntentSchema>; intentHash: string; deliveryHash: string | null } {
   const order = TermixProviderOrderSchema.parse(orderInput);
   const config = TermixContractsConfigSchema.parse(configInput);
@@ -408,10 +430,13 @@ export function assertTermixProviderIntent(
     throw new Error("TermiX provider intent targets an unexpected escrow contract");
   }
   if (expectedAction === "acceptOrder") {
-    if (order.status !== "PENDING_ACCEPT" || order.availableActions.canProviderAccept !== true) {
+    if (order.status !== "PENDING_ACCEPT" || (order.availableActions.canProviderAccept !== true && !(options.allowUnflaggedAcceptance && order.availableActions.canProviderAccept === undefined))) {
       throw new Error("TermiX order is not explicitly ready for provider acceptance");
     }
-    assertDeadline(order.acceptDeadline, now, safetySeconds);
+    // Current API omits this flag/deadline. The bounded coordinator also requires
+    // a fresh successful contract simulation; the contract enforces acceptWindow.
+    if (order.acceptDeadline || !options.allowUnflaggedAcceptance) assertDeadline(order.acceptDeadline, now, safetySeconds);
+    else assertDeadline(order.deliveryDueAt, now, safetySeconds);
   } else {
     if (!["FUNDED", "IN_PROGRESS"].includes(order.status)) {
       throw new Error("TermiX order is not in a deliverable state");

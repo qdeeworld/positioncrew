@@ -1,0 +1,37 @@
+[Unit]
+Description=Bounded PositionCrew TermiX Lending order automation
+After=network-online.target
+Wants=network-online.target
+OnFailure=crosswind-alert@positioncrew-termix-service.service
+
+[Service]
+Type=oneshot
+User=positioncrew-fulfill
+Group=positioncrew-fulfill
+LoadCredential=session-token:/var/lib/positioncrew-termix-session-renew/termix-session.token
+LoadCredential=runtime-token:/etc/positioncrew-runtime/credentials/dedicated-lending.token
+LoadCredential=owner-key:/etc/positioncrew-runtime/credentials/dedicated-lending.owner-key
+LoadCredential=policy:/etc/positioncrew-runtime/service-policy.json
+Environment=TERMIX_SESSION_TOKEN_FILE=%d/session-token
+Environment=TERMIX_RUNTIME_TOKEN_FILE=%d/runtime-token
+Environment=TERMIX_DELIVERY_OWNER_KEY_FILE=%d/owner-key
+Environment=TERMIX_SERVICE_POLICY_FILE=%d/policy
+Environment=TERMIX_SERVICE_STATE_DIR=/var/lib/positioncrew-fulfill/service
+# Share the original delivery worker's lock: there is one signing lane per wallet.
+ExecStart=/usr/bin/flock -n /var/lib/positioncrew-fulfill/worker.lock /usr/bin/node /opt/positioncrew-termix-orders/run-termix-service.mjs --execute
+StateDirectory=positioncrew-fulfill
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=15min
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=512M
+TasksMax=64
