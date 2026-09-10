@@ -12,6 +12,7 @@ import {
   assertTermixProviderOrder,
   assertTermixLendingArtifactOrder,
   createTermixLendingIntakeFromRuntimeMessage,
+  createTermixLendingIntakeFromOrderScope,
   createTermixLendingDeliveryArtifact,
   sealTermixFulfillmentCheckpoint,
   termixDeliveryArtifactDescriptor,
@@ -49,18 +50,23 @@ type Command = "observe" | "prepare-accept" | "prepare-delivery" | "status" | "i
 
 function usage(): never {
   throw new Error(
-    "Usage: prepare-termix-lending-delivery <observe|prepare-accept|prepare-delivery|status|intake-template> --order <id> [--intake <absolute-json-path>] [--refresh-expired]",
+    "Usage: prepare-termix-lending-delivery <observe|prepare-accept|prepare-delivery|status|intake-template> --order <id> [--intake <absolute-json-path>] [--refresh-expired] [--from-order-scope]",
   );
 }
 
-function parseArguments(argv: string[]): { command: Command; orderId: string; intakePath?: string; refreshExpired: boolean } {
+function parseArguments(argv: string[]): { command: Command; orderId: string; intakePath?: string; refreshExpired: boolean; fromOrderScope: boolean } {
   const command = argv[0] as Command;
   if (!["observe", "prepare-accept", "prepare-delivery", "status", "intake-template"].includes(command)) usage();
   let orderId: string | undefined;
   let intakePath: string | undefined;
   let refreshExpired = false;
+  let fromOrderScope = false;
   for (let index = 1; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (flag === "--from-order-scope") {
+      if (fromOrderScope) usage();
+      fromOrderScope = true; continue;
+    }
     if (flag === "--refresh-expired") {
       if (refreshExpired) usage();
       refreshExpired = true;
@@ -76,13 +82,14 @@ function parseArguments(argv: string[]): { command: Command; orderId: string; in
   if (!orderId || !/^[a-zA-Z0-9_-]{1,200}$/.test(orderId)) {
     throw new Error("--order must be a safe TermiX order identifier");
   }
-  if (command === "prepare-delivery" && (!intakePath || !isAbsolute(intakePath))) {
+  if (command === "prepare-delivery" && !fromOrderScope && (!intakePath || !isAbsolute(intakePath))) {
     throw new Error("prepare-delivery requires --intake with an absolute JSON path");
   }
   if (refreshExpired && command !== "prepare-delivery") {
     throw new Error("--refresh-expired is valid only with prepare-delivery");
   }
-  return { command, orderId, ...(intakePath ? { intakePath } : {}), refreshExpired };
+  if (fromOrderScope && (command !== "prepare-delivery" || intakePath)) usage();
+  return { fromOrderScope, command, orderId, ...(intakePath ? { intakePath } : {}), refreshExpired };
 }
 
 function checkedBaseUrl(): string {
@@ -590,19 +597,19 @@ async function run(): Promise<void> {
     return;
   }
 
-  const locator = TermixBuyerMessageLocatorSchema.parse(
+  const locator = args.fromOrderScope ? null : TermixBuyerMessageLocatorSchema.parse(
     JSON.parse(await readBoundedFile(args.intakePath!, false)),
   );
-  if (locator.orderId !== order.id) throw new Error("Buyer message locator does not match --order");
+  if (locator && locator.orderId !== order.id) throw new Error("Buyer message locator does not match --order");
   if (!["FUNDED", "IN_PROGRESS"].includes(order.status) || order.availableActions.canSubmitDelivery !== true) {
     throw new Error("Order is not indexed as ready for delivery");
   }
   if (!order.deliveryDueAt || Date.parse(order.deliveryDueAt) - Date.now() < 120_000) {
     throw new Error("Order delivery deadline has less than 120 seconds remaining");
   }
-  const runtimeToken = await readRuntimeToken();
-  const buyerMessage = await fetchRuntimeMessage(baseUrl, runtimeToken, locator);
-  const intake = createTermixLendingIntakeFromRuntimeMessage(order, locator, buyerMessage);
+  const intake = locator
+    ? createTermixLendingIntakeFromRuntimeMessage(order, locator, await fetchRuntimeMessage(baseUrl, await readRuntimeToken(), locator))
+    : createTermixLendingIntakeFromOrderScope(order);
   const intakeHash = canonicalHash(intake);
   const sameRound = previous?.deliveryRound === (order.redoUsed ? 2 : 1);
   if (sameRound && previous.intakeHash && previous.intakeHash !== intakeHash) {

@@ -111,7 +111,7 @@ export const TermixLendingIntakeSchema = z.object({
   schemaVersion: z.literal("positioncrew.termix-lending-intake.v1"),
   ...TermixLendingRequestFields,
   buyerEvidence: z.object({
-    source: z.literal("TERMIX_RUNTIME_INBOX"),
+    source: z.enum(["TERMIX_RUNTIME_INBOX", "TERMIX_ORDER_SCOPE"]),
     conversationId: z.string().min(1).max(200),
     messageId: z.string().min(1).max(200),
     senderAccountId: z.string().min(1),
@@ -231,11 +231,56 @@ export type TermixLendingIntake = z.infer<typeof TermixLendingIntakeSchema>;
 export type TermixLendingDeliveryArtifact = z.infer<typeof TermixLendingDeliveryArtifactSchema>;
 export type TermixFulfillmentCheckpoint = z.infer<typeof TermixFulfillmentCheckpointSchema>;
 
+/** Normalize the public marketplace order DTO without silently accepting conflicting bindings. */
+export function normalizeTermixProviderOrder(input: unknown): TermixProviderOrder {
+  const raw = z.record(z.string(), z.unknown()).parse(input);
+  const nested = (key: string) => z.record(z.string(), z.unknown()).parse(raw[key] ?? {});
+  const buyer = nested("buyer"), seller = nested("seller"), deadlines = nested("deadlines");
+  const mapped: Record<string, unknown> = {
+    onChainOrderId: raw.chainOrderId, amount: raw.budget,
+    clientAgentId: buyer.clientAgentId, clientAccountId: buyer.id,
+    providerAgentId: seller.id, deliveryDueAt: deadlines.deliveryDueAt,
+    challengeWindowEndsAt: deadlines.challengeWindowEndsAt,
+  };
+  const out = { ...raw };
+  for (const [key, value] of Object.entries(mapped)) {
+    if (value === undefined) continue;
+    if (raw[key] !== undefined && raw[key] !== value) throw new Error(`Conflicting TermiX order field: ${key}`);
+    out[key] = value;
+  }
+  return TermixProviderOrderSchema.parse(out);
+}
+
+/** Only parse the explicit supported request format; never guess missing buyer constraints. */
+export function createTermixLendingIntakeFromOrderScope(orderInput: unknown): TermixLendingIntake {
+  const order = normalizeTermixProviderOrder(orderInput);
+  const scope = z.string().min(1).max(16000).parse(order.scope);
+  const marker = "Buyer requirements:\n";
+  if (scope.split(marker).length !== 2) throw new Error("Order needs one explicit Buyer requirements section");
+  const text = scope.split(marker)[1]!.trim();
+  let request: unknown;
+  if (text.startsWith("{")) request = JSON.parse(text);
+  else {
+    const match = /^Assess the current Venus BSC mainnet position for (0x[a-fA-F0-9]{40})\. Target health factor (\d+(?:\.\d+)?); stress collateral prices by (\d+(?:\.\d+)?)%; maximum action budget USD (\d+(?:\.\d+)?); maximum gas USD (\d+(?:\.\d+)?); maximum slippage (\d+) bps\. Deliver current health factor, debt and collateral observations, stressed health factor, a bounded rescue recommendation or explicit no-action\/insufficient-budget result, projected health factor, source block, expiry, and a machine-readable report with a concise explanation\. Analysis only; do not execute protocol transactions\.$/.exec(text);
+    if (!match) throw new Error("Unsupported or ambiguous buyer requirements; operator clarification required");
+    request = { schemaVersion: "positioncrew.termix-lending-buyer-request.v1", orderId: order.id,
+      account: match[1], targetHealthFactor: match[2], stressPriceDropBps: Number(match[3]) * 100,
+      maxActionUsd: match[4], maxGasUsd: match[5], maxSlippageBps: Number(match[6]) };
+  }
+  const parsed = TermixLendingBuyerRequestSchema.parse(request);
+  if (parsed.orderId !== order.id) throw new Error("Scope request belongs to another order");
+  const createdAt = TimestampSchema.parse(order.createdAt);
+  return TermixLendingIntakeSchema.parse({ ...parsed, schemaVersion: "positioncrew.termix-lending-intake.v1",
+    buyerEvidence: { source: "TERMIX_ORDER_SCOPE", conversationId: order.id, messageId: canonicalHash(scope),
+      senderAccountId: order.clientAccountId, senderWalletAddress: null, messageCreatedAt: createdAt,
+      rawMessageHash: canonicalHash(scope), parsedRequestHash: canonicalHash(parsed) } });
+}
+
 export function assertTermixProviderOrder(
   input: unknown,
   expected: { orderId: string; providerAgentId: string; listingId: string },
 ): TermixProviderOrder {
-  const order = TermixProviderOrderSchema.parse(input);
+  const order = normalizeTermixProviderOrder(input);
   if (order.id !== expected.orderId) throw new Error("TermiX returned a different order ID");
   if (order.providerAgentId !== expected.providerAgentId) {
     throw new Error("TermiX order belongs to a different provider agent");
