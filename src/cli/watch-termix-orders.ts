@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isCliEntrypoint } from "../core/cli-entrypoint.js";
 import { z } from "zod";
 import { atomicJson } from "../core/atomic-json.js";
 
@@ -38,7 +38,17 @@ type WatchState = z.infer<typeof StateSchema>;
 
 const ACTIONABLE_STATUSES = new Set(["PENDING_ACCEPT", "FUNDED", "IN_PROGRESS"]);
 
-export function orderFingerprint(order: Order): string {
+export function normalizeWatchedOrder(input: unknown): Order {
+  const order = OrderSchema.parse(input);
+  const seller = z.object({id:z.string()}).nullish().parse(order.seller);
+  const deadlines = z.object({deliveryDueAt:z.string().datetime().nullish()}).nullish().parse(order.deadlines);
+  if (order.providerAgentId && seller?.id && order.providerAgentId !== seller.id) throw new Error("Conflicting provider identity");
+  if (order.deliveryDueAt && deadlines?.deliveryDueAt && order.deliveryDueAt !== deadlines.deliveryDueAt) throw new Error("Conflicting delivery deadline");
+  return {...order,providerAgentId:order.providerAgentId ?? seller?.id ?? null,deliveryDueAt:order.deliveryDueAt ?? deadlines?.deliveryDueAt ?? null};
+}
+
+export function orderFingerprint(input: Order): string {
+  const order = normalizeWatchedOrder(input);
   return JSON.stringify({
     status: order.status,
     deliveryDueAt: order.deliveryDueAt ?? null,
@@ -50,9 +60,9 @@ export function orderFingerprint(order: Order): string {
 
 export function actionableOrders(orders: Order[], agentId: string | readonly string[]): Order[] {
   const agentIds = new Set(typeof agentId === "string" ? [agentId] : agentId);
-  return orders.filter((order) =>
+  return orders.map(normalizeWatchedOrder).filter((order) =>
     ACTIONABLE_STATUSES.has(order.status) &&
-    (!order.providerAgentId || agentIds.has(order.providerAgentId))
+    (!!order.providerAgentId && agentIds.has(order.providerAgentId))
   );
 }
 
@@ -104,7 +114,7 @@ async function loadState(path: string, agentId: string): Promise<WatchState> {
   }
 }
 
-async function fetchOrders(baseUrl: string, token: string): Promise<Order[]> {
+export async function fetchOrders(baseUrl: string, token: string): Promise<Order[]> {
   const orders: Order[] = [];
   const pageSignatures = new Set<string>();
   const pageSize = 50;
@@ -117,7 +127,7 @@ async function fetchOrders(baseUrl: string, token: string): Promise<Order[]> {
     if (!response.ok) throw new Error(`TermiX provider-order read failed with HTTP ${response.status}`);
     const parsed = OrdersResponseSchema.parse(await response.json());
     if (Array.isArray(parsed)) {
-      orders.push(...parsed);
+      orders.push(...parsed.map(normalizeWatchedOrder));
       if (parsed.length < pageSize) return [...new Map(orders.map((order) => [order.id, order])).values()];
       const signature = parsed.map((order) => order.id).join("\n");
       if (pageSignatures.has(signature)) {
@@ -126,7 +136,7 @@ async function fetchOrders(baseUrl: string, token: string): Promise<Order[]> {
       pageSignatures.add(signature);
       continue;
     }
-    orders.push(...parsed.items);
+    orders.push(...parsed.items.map(normalizeWatchedOrder));
     if (parsed.totalPages !== undefined ? page >= parsed.totalPages : parsed.items.length < pageSize) {
       return [...new Map(orders.map((order) => [order.id, order])).values()];
     }
@@ -152,7 +162,7 @@ async function main(): Promise<void> {
   const token = await readProtectedToken(tokenPath);
   const previous = await loadState(statePath, agentId);
   const providerOrders = (await fetchOrders(baseUrl, token)).filter(
-    (order) => !order.providerAgentId || agentIds.includes(order.providerAgentId),
+    (order) => !!order.providerAgentId && agentIds.includes(order.providerAgentId),
   );
   const transition = unseenOrderTransitions(previous, providerOrders);
   const changed = actionableOrders(transition.changed, agentIds);
@@ -187,7 +197,7 @@ async function main(): Promise<void> {
   })}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isCliEntrypoint(import.meta.url, process.argv[1], "watch-termix-orders")) {
   main().catch((error: unknown) => {
     process.stderr.write(`${JSON.stringify({
       event: "termix.order-watch.failed",
