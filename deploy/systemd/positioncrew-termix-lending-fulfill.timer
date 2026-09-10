@@ -1,0 +1,8 @@
+[Unit]
+Description=Retry explicitly authorized Lending delivery every minute
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=60s
+Unit=positioncrew-termix-lending-fulfill.service
+[Install]
+WantedBy=timers.target

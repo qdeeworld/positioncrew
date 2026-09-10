@@ -1,0 +1,34 @@
+[Unit]
+Description=Deliver the explicitly authorized PositionCrew Lending order
+After=network-online.target
+Wants=network-online.target
+OnFailure=crosswind-alert@positioncrew-termix-lending-fulfill.service
+
+[Service]
+Type=oneshot
+User=positioncrew-fulfill
+Group=positioncrew-fulfill
+LoadCredential=session-token:/var/lib/positioncrew-termix-session-renew/termix-session.token
+LoadCredential=owner-key:/etc/positioncrew-runtime/credentials/dedicated-lending.owner-key
+LoadCredential=policy:/etc/positioncrew-runtime/lending-delivery-policy.json
+Environment=TERMIX_SESSION_TOKEN_FILE=%d/session-token
+Environment=TERMIX_DELIVERY_OWNER_KEY_FILE=%d/owner-key
+Environment=TERMIX_DELIVERY_POLICY_FILE=%d/policy
+Environment=TERMIX_FULFILLMENT_STATE_DIR=/var/lib/positioncrew-fulfill
+ExecStart=/usr/bin/flock -n /var/lib/positioncrew-fulfill/worker.lock /usr/bin/node /opt/positioncrew-termix-orders/fulfill-termix-lending.mjs
+StateDirectory=positioncrew-fulfill
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=5min
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+TasksMax=24
