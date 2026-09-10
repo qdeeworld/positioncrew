@@ -1616,7 +1616,7 @@ test("the evidence page separates conformance from advantage claims", async ({ p
     aacpSection.locator(".aacp-facts > div").filter({ hasText: "dedicated flagship" }).locator("strong"),
   ).toBeVisible();
   await expect(
-    aacpSection.getByText(/Original fleet \d\/4; reported separately|Expiring A2A presence; reported separately from core health/),
+    aacpSection.getByText(/Active fleet \d\/4 online|Expiring A2A presence; reported separately from core health/),
   ).toBeVisible();
 
   const commerceResponse = await getWithTransportRetry(page.request, "/api/commerce/erc8183");
