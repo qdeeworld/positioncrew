@@ -23,6 +23,7 @@ import {
   TERMIX_RUNTIME_MIN_POLL_SECONDS,
   TermixRuntimeClient,
   TermixRuntimeHttpError,
+  TermixRuntimeTransportError,
   TermixRuntimeTokenError,
   TermixRuntimeStateSchema,
   assertRuntimeTokenFresh,
@@ -455,6 +456,26 @@ function log(event: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`);
 }
 
+export async function runRuntimeCycleWithRecovery(
+  config: RuntimeEnvironment,
+  state: TermixRuntimeState,
+  client: TermixRuntimeTransport = new TermixRuntimeClient(config.token, config.baseUrl),
+  now = new Date(),
+): Promise<TermixRuntimeState> {
+  try {
+    return await runRuntimeCycle(config, state, client, now);
+  } catch (error) {
+    if (error instanceof TermixRuntimeTransportError ||
+      (error instanceof TermixRuntimeHttpError && error.status >= 500)) {
+      log({ event: "termix.runtime.transient-error",
+        ...(error instanceof TermixRuntimeHttpError ? { status: error.status } : { reason: "transport-unavailable" }) });
+      // Keep the cursor and deterministic reply keys for the next scheduled poll.
+      return state;
+    }
+    throw error;
+  }
+}
+
 export async function runRuntimeCycle(
   config: RuntimeEnvironment,
   state: TermixRuntimeState,
@@ -552,18 +573,7 @@ async function main(): Promise<void> {
     signingMaterialPresent: false,
   });
   while (true) {
-    try {
-      state = await runRuntimeCycle(config, state);
-    } catch (error) {
-      if (
-        error instanceof TermixRuntimeHttpError &&
-        error.status >= 500
-      ) {
-        log({ event: "termix.runtime.transient-error", status: error.status });
-      } else {
-        throw error;
-      }
-    }
+    state = await runRuntimeCycleWithRecovery(config, state);
     if (config.once) return;
     await sleep(config.pollSeconds * 1_000);
   }

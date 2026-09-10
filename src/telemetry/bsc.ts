@@ -222,6 +222,9 @@ export function isRetryableRpcFailure(error: NonNullable<RpcResult["error"]>): b
   );
   if (executionFailure) return false;
   return (
+    // PublicNode can reject a valid pinned read because its public tier lacks
+    // archive access. Retry the same block through the configured providers.
+    (error.code === -32_602 && /archive requests require a personal token/i.test(error.message)) ||
     error.code === -32_002 ||
     error.code === -32_005 ||
     /busy|gateway|header not found|internal error|limit|rate|temporar|timeout/i.test(error.message)
