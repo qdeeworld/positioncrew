@@ -539,9 +539,9 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(unit).toContain("ExecStartPre=+/usr/bin/env -i /usr/bin/chmod 0555");
     expect(unit).toContain("ExecStartPre=+/usr/bin/env -i /usr/bin/mv -fT");
     expect(unit).toContain(
-      "EnvironmentFile=/home/crosswind/.config/positioncrew/runtimes/%i.env",
+      "EnvironmentFile=/etc/positioncrew-runtime/%i.env",
     );
-    expect(unit).not.toContain("EnvironmentFile=/etc/positioncrew-runtime/%i.env");
+    expect(unit).not.toContain("EnvironmentFile=/home/crosswind/.config/positioncrew/runtimes/%i.env");
     expect(unit).toContain(
       "UnsetEnvironment=TERMIX_A2A_RUNTIME_TOKEN TERMIX_A2A_RUNTIME_TOKEN_FILE WALLET_KEY PRIVATE_KEY NODE_OPTIONS NODE_PATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES BASH_ENV ENV",
     );

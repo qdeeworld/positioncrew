@@ -18,6 +18,8 @@ Each instance uses `positioncrew-runtime@INSTANCE.service` plus `positioncrew-ru
 
 The VPS's LXC drop-in clears `LoadCredential`, so each instance requires a later `zzzz-instance-credential.conf` drop-in to load only its own runtime token. The renewal instance similarly loads its owner credential. Runtime drop-ins include the matching expiry environment file. The three new instances use `StandardOutput=journal` and `StandardError=journal` so first start does not depend on a pre-existing log file. On the host, journald has `SystemMaxUse=1G` and `SystemKeepFree=4G`.
 
+For a fresh installation from the repository templates, first stage the pinned runtime bundle using the build commands in `positioncrew-runtime@.service`; its root-owned installation and hash validation run before the poller starts. Both runtime and renewal templates load the same `/etc/positioncrew-runtime/INSTANCE.env` file.
+
 Enable the runtime unit, run its renewal service to issue the initial token and start the process, then enable its hourly renewal timer. Verify both the live agent card and service state. An online observation is not a continuous-uptime guarantee.
 
 The order observer uses `TERMIX_AGENT_IDS` for these four IDs and a new `fleet-state.json` cursor. The older single-agent state is preserved. It only raises operator-attention events; it does not accept, deliver, settle or sign financial actions.
