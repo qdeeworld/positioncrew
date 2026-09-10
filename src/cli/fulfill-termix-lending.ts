@@ -31,6 +31,11 @@ export function validateDeliveryPolicy(input: unknown, orderInput: unknown, now 
   createTermixLendingIntakeFromOrderScope(order);
   return {policy:p,order};
 }
+export function assertDeliveryWindow(policyInput: unknown, orderInput: unknown, artifactExpiresAt: string, now = Date.now()) {
+  const {order}=validateDeliveryPolicy(policyInput,orderInput,now);
+  if (!order.deliveryDueAt || Date.parse(order.deliveryDueAt) < now + 120000) throw new Error("Delivery deadline too close or expired");
+  if (!Number.isFinite(Date.parse(artifactExpiresAt)) || Date.parse(artifactExpiresAt) < now + 60000) throw new Error("Artifact too close to expiry");
+}
 export function protectedText(path: string, trim = true) {
   if (!isAbsolute(path)) throw new Error("Credential path must be absolute");
   const st=lstatSync(path);
@@ -78,7 +83,7 @@ async function run() {
     if(!known) {
       if(Date.parse(signed.expiresAt)<=Date.now()+30000) throw new Error("Signed artifact expired; operator reconciliation required");
       if(!["FUNDED","IN_PROGRESS"].includes(order.status)) throw new Error("Order no longer deliverable");
-      validateDeliveryPolicy(policy,order);
+      assertDeliveryWindow(policy,order,signed.expiresAt);
       await client.sendRawTransaction({serializedTransaction:signed.raw});
     }
     const recovered=await client.waitForTransactionReceipt({hash:signed.hash,timeout:60000});
@@ -112,11 +117,11 @@ async function run() {
   const account=privateKeyToAccount(protectedText(process.env.TERMIX_DELIVERY_OWNER_KEY_FILE??"") as Hex);
   if(account.address.toLowerCase()!==OWNER.toLowerCase())throw new Error("Wrong signing owner");
   const nonce=await client.getTransactionCount({address:OWNER,blockTag:"pending"});
-  validateDeliveryPolicy(policy,order);
+  assertDeliveryWindow(policy,order,checkpoint.artifact.resultExpiresAt);
   const raw=await account.signTransaction({chainId:56,type:"legacy",to,data,value:0n,gas,gasPrice,nonce});
   const hash=keccak256(raw);
   durableJournal(journalPath,json({raw,hash,expiresAt:checkpoint.artifact.resultExpiresAt}));
-  validateDeliveryPolicy(policy,order);
+  assertDeliveryWindow(policy,order,checkpoint.artifact.resultExpiresAt);
   await client.sendRawTransaction({serializedTransaction:raw});
   const receipt=await client.waitForTransactionReceipt({hash,timeout:60000});
   if(receipt.status!=="success")throw new Error("Delivery reverted");

@@ -3,7 +3,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {describe,it,expect} from "vitest";
 import {normalizeTermixProviderOrder,createTermixLendingIntakeFromOrderScope} from "../src/commerce/termix-provider-delivery.js";
-import {validateDeliveryPolicy,protectedText,deliveryJournalName,durableJournal,shouldRefreshDelivery} from "../src/cli/fulfill-termix-lending.js";
+import {validateDeliveryPolicy,protectedText,deliveryJournalName,durableJournal,shouldRefreshDelivery,assertDeliveryWindow} from "../src/cli/fulfill-termix-lending.js";
 import {canonicalHash} from "../src/core/canonical.js";
 const request={schemaVersion:"positioncrew.termix-lending-buyer-request.v1",orderId:"cmtvlt4q41b4tw001odmxvhkv",account:"0xe02702687b1653a782af57fbcc56d59b7e99a935",targetHealthFactor:"1.25",stressPriceDropBps:1000,maxActionUsd:"250",maxGasUsd:"0.10",maxSlippageBps:30};
 function live(){return {id:request.orderId,chainOrderId:`0x${"11".repeat(32)}`,budget:"5",currency:"USDC",status:"FUNDED",buyer:{id:"buyer-1",clientAgentId:"client-1"},seller:{id:"cmt4dzxvcli4tw70125nd5ra8"},listingId:"cmt4e8j3nlmuiw7019f4qf24x",deadlines:{deliveryDueAt:"2026-09-11T14:09:40.396Z"},redoUsed:false,availableActions:{canSubmitDelivery:true},createdAt:"2026-09-10T14:09:40.396Z",scope:`Service description\n\nBuyer requirements:\n${JSON.stringify(request)}`};}
@@ -23,3 +23,5 @@ describe("delivery recovery persistence",()=>{
 });
 
 it("does not refresh an expired prior-round artifact when a redo starts",()=>{const now=Date.parse("2026-09-10T15:00:00Z"), prior={deliveryRound:1,artifact:{resultExpiresAt:"2026-09-10T14:00:00Z"}};expect(shouldRefreshDelivery(prior,true,now)).toBe(false);expect(shouldRefreshDelivery(prior,false,now)).toBe(true);expect(shouldRefreshDelivery({...prior,deliveryRound:2},true,now)).toBe(true);});
+
+it("rechecks all deadlines after simulated RPC delay before signing or broadcasting",()=>{const o=live(),p={orderId:o.id,onChainOrderId:o.chainOrderId,clientAccountId:o.buyer.id,scopeHash:canonicalHash(o.scope),expiresAt:"2026-09-12T12:00:00.000Z",maxGasWei:"34000000000000"};const end=Date.parse(o.deadlines.deliveryDueAt),artifact="2026-09-11T15:00:00.000Z";expect(()=>assertDeliveryWindow(p,o,artifact,end-121000)).not.toThrow();expect(()=>assertDeliveryWindow(p,o,artifact,end-119000)).toThrow("Delivery deadline");expect(()=>assertDeliveryWindow(p,o,new Date(end-120000).toISOString(),end-121000)).toThrow("Artifact");});
