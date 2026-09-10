@@ -428,6 +428,13 @@ function registeredArtifact(input: unknown): z.infer<typeof RemoteArtifactSchema
   throw new Error("TermiX artifact registration has an undocumented response shape");
 }
 
+export function assertAttachedTermixArtifact(input: unknown, artifactId: string, sha256: string): void {
+  const attached = remoteArtifacts(input).find((item) => item.id === artifactId);
+  if (!attached || normalizeSha256(attached.sha256) !== normalizeSha256(sha256)) {
+    throw new Error("TermiX delivery is missing the verified report attachment");
+  }
+}
+
 async function uploadArtifact(grantInput: unknown, content: string, contentType: string): Promise<void> {
   const grant = UploadGrantSchema.parse(grantInput);
   const uploadUrl = new URL(grant.uploadUrl);
@@ -683,33 +690,9 @@ async function run(): Promise<void> {
   }
   await saveCheckpoint(paths.checkpoint, draft);
 
-  if (previous?.submitIntent && previous.submitIntentHash && priorArtifact && !args.refreshExpired) {
-    if (Date.parse(priorArtifact.resultExpiresAt) - Date.now() < 120_000) {
-      throw new Error("Cached delivery artifact has less than 120 seconds remaining");
-    }
-    if (!priorArtifact.publicUrl) {
-      throw new Error("Cached delivery artifact has no public verification URL");
-    }
-    await verifyPublishedArtifact(priorArtifact.publicUrl, descriptor);
-    if (Date.parse(priorArtifact.resultExpiresAt) - Date.now() < 120_000) {
-      throw new Error("Cached delivery artifact became unsafe during remote verification");
-    }
-    const guarded = assertTermixProviderIntent(order, config, previous.submitIntent, "submitDelivery", {
-      expectedDeliveryHash: descriptor.deliveryHash,
-      now: new Date(),
-    });
-    if (guarded.intentHash !== previous.submitIntentHash) {
-      throw new Error("Cached delivery intent hash differs from the protected checkpoint");
-    }
-    draft = checkpointDraft(baseUrl, order, "SUBMIT_INTENT_PREPARED", await loadCheckpoint(paths.checkpoint), new Date());
-    const checkpoint = await saveCheckpoint(paths.checkpoint, draft);
-    print({
-      ...checkpoint,
-      nextAction: "Explicit operator confirmation is required before broadcasting submitDelivery.",
-    });
-    return;
-  }
-
+  // Always prepare the submission with artifact IDs, even when reusing report bytes.
+  // Legacy cached intents were prepared without attachments; a registration-list
+  // lookup cannot prove which IDs were included in that prior submit request.
   const artifactPathname = `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/artifacts`;
   const listed = remoteArtifacts(await apiJson(baseUrl, token, "GET", artifactPathname));
   let registered = listed.find((item) => normalizeSha256(item.sha256) === descriptor.sha256);
@@ -758,8 +741,12 @@ async function run(): Promise<void> {
     `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/submit`,
     {
       deliveryHash: descriptor.deliveryHash,
+      artifactIds: [registered.id],
       note: "PositionCrew bounded Lending Rescue analysis and conformance receipt.",
     },
+  );
+  assertAttachedTermixArtifact(
+    await apiJson(baseUrl, token, "GET", artifactPathname), registered.id, descriptor.sha256,
   );
   if (Date.parse(artifact.result.expiresAt) - Date.now() < 120_000) {
     throw new Error("Delivery artifact became unsafe while preparing the submit intent");
