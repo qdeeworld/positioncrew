@@ -1473,7 +1473,7 @@ test("all three non-lending current hires return category-specific durable resul
       const comparison = page.getByTestId("yield-external-provider-comparison");
       await expect(comparison.getByRole("heading", { name: "Rate leader cross-checked" })).toBeVisible();
       await expect(comparison.getByText("AiKi Venus Yield Optimiser", { exact: true })).toBeVisible();
-      await expect(comparison).toContainText("263 bps external · 267 bps PositionCrew");
+      await expect(comparison).toContainText("263 bps simple annual rate externally · 267 bps APY by PositionCrew");
       await expect(comparison).toContainText("Cross-check only · not eligible");
     }
   }
