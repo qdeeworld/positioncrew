@@ -21,7 +21,7 @@ BindReadOnlyPaths=-/home/crosswind/.local/state/positioncrew:/run/positioncrew-l
 # /usr/bin/node /home/crosswind/apps/positioncrew/dist/cli/run-termix-runtime.js --bundle-runtime-artifact /home/crosswind/.local/lib/positioncrew/positioncrew-runtime.mjs
 ExecStartPre=+/usr/bin/env -i /usr/bin/install -d -o root -g root -m 0755 /opt/positioncrew-runtime
 ExecStartPre=+/usr/bin/env -i /usr/bin/install -T -o root -g root -m 0500 -- /home/crosswind/.local/lib/positioncrew/positioncrew-runtime.mjs /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate
-ExecStartPre=+/usr/bin/env -i /bin/sh -ec 'echo "4f1f896db806874b2541e1ae8a58d965fb4f363796805f46333b424215dc2fa6  /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate" | /usr/bin/sha256sum --check --status'
+ExecStartPre=+/usr/bin/env -i /bin/sh -ec 'echo "0fe25cbcfcf7550ccc0714f2908f7725d325e00f87c27ed1db78a9633a3621c9  /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate" | /usr/bin/sha256sum --check --status'
 ExecStartPre=+/usr/bin/env -i /usr/bin/chmod 0555 /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate
 ExecStartPre=+/usr/bin/env -i /usr/bin/mv -fT -- /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate /opt/positioncrew-runtime/positioncrew-runtime.mjs
 ExecStartPre=!/usr/bin/env -i /usr/bin/node /opt/positioncrew-runtime/positioncrew-runtime.mjs --validate-runtime-token-file /etc/positioncrew-runtime/credentials/%i.token

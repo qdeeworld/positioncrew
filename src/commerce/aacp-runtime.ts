@@ -329,6 +329,14 @@ export interface TermixRuntimeTransport {
   reply(conversationId: string, text: string, clientMessageId: string): Promise<void>;
 }
 
+export class TermixRuntimeTransportError extends Error {
+  constructor() {
+    // Do not retain fetch diagnostics, which may include request credentials.
+    super("TermiX runtime transport unavailable");
+    this.name = "TermixRuntimeTransportError";
+  }
+}
+
 export class TermixRuntimeClient implements TermixRuntimeTransport {
   constructor(
     private readonly token: string,
@@ -348,9 +356,21 @@ export class TermixRuntimeClient implements TermixRuntimeTransport {
       signal: AbortSignal.timeout(10_000),
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     };
-    const response = await this.fetchImpl(new URL(path, `${this.baseUrl}/`), init);
+    const url = new URL(path, `${this.baseUrl}/`);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, init);
+    } catch {
+      throw new TermixRuntimeTransportError();
+    }
     if (!response.ok) throw new TermixRuntimeHttpError(response.status, method, path);
-    return response.json();
+    let text: string;
+    try {
+      text = await response.text();
+    } catch {
+      throw new TermixRuntimeTransportError();
+    }
+    return JSON.parse(text) as unknown;
   }
 
   async poll(since: string, limit = 25): Promise<TermixRuntimeMessage[]> {

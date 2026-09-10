@@ -70,6 +70,9 @@ describe("BSC telemetry math", () => {
   });
 
   it("retries provider faults but never retries EVM execution failures", () => {
+    expect(isRetryableRpcFailure({ code: -32_602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" })).toBe(true);
+    expect(isRetryableRpcFailure({ code: -32_602, message: "invalid argument 1: invalid block parameter" })).toBe(false);
+    expect(isRetryableRpcFailure({ code: 3, message: "execution reverted: Archive requests require a personal token" })).toBe(false);
     expect(isRetryableRpcFailure({ code: -32_002, message: "the resource eth_call is not available" })).toBe(true);
     expect(isRetryableRpcFailure({ code: -32_005, message: "rate limit exceeded" })).toBe(true);
     expect(isRetryableRpcFailure({ code: -32_603, message: "temporary internal error" })).toBe(true);

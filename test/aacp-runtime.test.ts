@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   TermixRuntimeClient,
+  TermixRuntimeTransportError,
   assertRuntimeTokenFresh,
   buildTermixRuntimeDecision,
   createTermixRuntimeState,
@@ -31,6 +32,7 @@ import {
   migrateLegacyRuntimeState,
   parseRuntimeEnvironment,
   runRuntimeCycle,
+  runRuntimeCycleWithRecovery,
   runtimeExitCode,
   validateProtectedRuntimeTokenFile,
 } from "../src/cli/run-termix-runtime.js";
@@ -612,6 +614,47 @@ describe("PositionCrew TermiX A2A runtime", () => {
       );
       expect(JSON.stringify(init)).not.toMatch(/wallet|private|signature/i);
     }
+  });
+
+  it("survives repeated transport timeouts without advancing the cursor and recovers on the next poll", async () => {
+    const token = jwt(Math.floor(NOW.getTime() / 1_000) + 3_600);
+    const config = parseRuntimeEnvironment({
+      TERMIX_A2A_AGENT_ID: "agent-1", TERMIX_A2A_RUNTIME_TOKEN: token,
+      POSITIONCREW_SERVICE: "LENDING_RESCUE",
+    }, []);
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = new TermixRuntimeClient(token, undefined, fetchMock);
+    let state = createTermixRuntimeState("agent-1", "LENDING_RESCUE", NOW);
+    const initial = state;
+    for (let attempt = 0; attempt < 7; attempt += 1) {
+      fetchMock.mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"));
+      state = await runRuntimeCycleWithRecovery(config, state, client, NOW);
+      expect(state).toBe(initial);
+    }
+    fetchMock.mockResolvedValueOnce(Response.json({ items: [] }));
+    state = await runRuntimeCycleWithRecovery(config, state, client, new Date(NOW.getTime() + 60_000));
+    expect(state).not.toBe(initial);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    fetchMock.mockResolvedValueOnce(new Response("unauthorized", { status: 401 }));
+    await expect(runRuntimeCycleWithRecovery(config, state, client, NOW)).rejects.toThrow("HTTP 401");
+    await expect(runRuntimeCycleWithRecovery(config, state, client,
+      new Date(NOW.getTime() + 3_600_000))).rejects.toThrow("expired");
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+  });
+
+  it("recovers interrupted response bodies but keeps malformed inbox data terminal", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = new TermixRuntimeClient("private-runtime-token", undefined, fetchMock);
+    fetchMock.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) { controller.error(new TypeError("connection reset")); },
+    })));
+    await expect(client.poll(NOW.toISOString())).rejects.toBeInstanceOf(TermixRuntimeTransportError);
+    fetchMock.mockRejectedValueOnce(new TypeError("fetch failed: private-runtime-token"));
+    await expect(client.poll(NOW.toISOString())).rejects.toThrow("TermiX runtime transport unavailable");
+    fetchMock.mockResolvedValueOnce(new Response("not json"));
+    await expect(client.poll(NOW.toISOString())).rejects.toBeInstanceOf(SyntaxError);
+    fetchMock.mockResolvedValueOnce(Response.json({ invalid: true }));
+    await expect(client.poll(NOW.toISOString())).rejects.toThrow();
   });
 
   it("deduplicates a replayed inbox item across cycles", async () => {
