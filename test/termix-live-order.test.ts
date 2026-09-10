@@ -1,4 +1,4 @@
-import {assertAttachedTermixArtifact} from "../src/cli/prepare-termix-lending-delivery.js";
+import {termixPreparedManifestHash,hasReusableTermixManifest} from "../src/cli/prepare-termix-lending-delivery.js";
 import {mkdtempSync,writeFileSync,readFileSync,rmSync,statSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -27,10 +27,20 @@ it("does not refresh an expired prior-round artifact when a redo starts",()=>{co
 
 it("rechecks all deadlines after simulated RPC delay before signing or broadcasting",()=>{const o=live(),p={orderId:o.id,onChainOrderId:o.chainOrderId,clientAccountId:o.buyer.id,scopeHash:canonicalHash(o.scope),expiresAt:"2026-09-12T12:00:00.000Z",maxGasWei:"34000000000000"};const end=Date.parse(o.deadlines.deliveryDueAt),artifact="2026-09-11T15:00:00.000Z";expect(()=>assertDeliveryWindow(p,o,artifact,end-121000)).not.toThrow();expect(()=>assertDeliveryWindow(p,o,artifact,end-119000)).toThrow("Delivery deadline");expect(()=>assertDeliveryWindow(p,o,new Date(end-120000).toISOString(),end-121000)).toThrow("Artifact");});
 
-it("rejects an unattached or substituted report even after successful submit preparation",()=>{
- const sha="ab".repeat(32);
- expect(()=>assertAttachedTermixArtifact({items:[]},"report",sha)).toThrow("missing");
- expect(()=>assertAttachedTermixArtifact({items:[{id:"other",sha256:sha}]},"report",sha)).toThrow("missing");
- expect(()=>assertAttachedTermixArtifact({items:[{id:"report",sha256:"cd".repeat(32)}]},"report",sha)).toThrow("missing");
- expect(()=>assertAttachedTermixArtifact({items:[{id:"report",sha256:"0x"+sha}]},"report",sha)).not.toThrow();
+it("binds the live prepared manifest to exactly one verified report and its order",()=>{
+ const sha="ab".repeat(32), manifest="0x"+"cd".repeat(32);
+ const artifact={id:"report",orderId:"order",sha256:"0x"+sha};
+ const response={orderId:"order",deliveryHash:manifest,artifacts:[artifact]};
+ expect(termixPreparedManifestHash(response,"order","report",sha)).toBe(manifest);
+ for(const change of [{artifacts:[]},{artifacts:[artifact,artifact]},{artifacts:[{...artifact,id:"other"}]},{artifacts:[{...artifact,orderId:"other"}]},{artifacts:[{...artifact,sha256:"ef".repeat(32)}]},{orderId:"other"},{deliveryHash:"bad"}]){
+  expect(()=>termixPreparedManifestHash({...response,...change},"order","report",sha)).toThrow();
+ }
+});
+
+it("reuses fresh sealed artifactIds manifests but migrates legacy checkpoints and refreshes expired or other-round work",()=>{
+ const now=Date.parse("2026-09-10T16:00:00Z"), artifact={manifestSource:"TERMIX_ARTIFACT_IDS",remoteArtifactId:"report",publicUrl:"https://example.com/report",resultExpiresAt:new Date(now+300000).toISOString()};
+ const checkpoint={orderId:"order",deliveryRound:2,submitIntent:{action:"submitDelivery"},submitIntentHash:"sealed",artifact};
+ expect(hasReusableTermixManifest(checkpoint,"order",2,now)).toBe(true);
+ for(const c of [{...checkpoint,artifact:{...artifact,manifestSource:undefined}},{...checkpoint,submitIntent:null},{...checkpoint,artifact:{...artifact,remoteArtifactId:null}},{...checkpoint,artifact:{...artifact,resultExpiresAt:new Date(now+1000).toISOString()}},{...checkpoint,deliveryRound:1}])expect(hasReusableTermixManifest(c,"order",2,now)).toBe(false);
+ expect(hasReusableTermixManifest(checkpoint,"other",2,now)).toBe(false);
 });

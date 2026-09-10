@@ -428,11 +428,33 @@ function registeredArtifact(input: unknown): z.infer<typeof RemoteArtifactSchema
   throw new Error("TermiX artifact registration has an undocumented response shape");
 }
 
-export function assertAttachedTermixArtifact(input: unknown, artifactId: string, sha256: string): void {
-  const attached = remoteArtifacts(input).find((item) => item.id === artifactId);
-  if (!attached || normalizeSha256(attached.sha256) !== normalizeSha256(sha256)) {
-    throw new Error("TermiX delivery is missing the verified report attachment");
+export function hasReusableTermixManifest(checkpoint: {
+  orderId: string; deliveryRound: number; submitIntent: unknown; submitIntentHash: string | null;
+  artifact: {manifestSource?: string | undefined; remoteArtifactId: string | null; publicUrl: string | null; resultExpiresAt: string} | null;
+}, orderId: string, round: number, now = Date.now()): boolean {
+  return checkpoint.orderId === orderId && checkpoint.deliveryRound === round &&
+    !!checkpoint.submitIntent && !!checkpoint.submitIntentHash &&
+    checkpoint.artifact?.manifestSource === "TERMIX_ARTIFACT_IDS" &&
+    !!checkpoint.artifact.remoteArtifactId && !!checkpoint.artifact.publicUrl &&
+    Date.parse(checkpoint.artifact.resultExpiresAt) - now >= 120_000;
+}
+
+export function termixPreparedManifestHash(input: unknown, orderId: string, artifactId: string, sha256: string): string {
+  const prepared = z.object({
+    orderId: z.string(),
+    deliveryHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+    artifacts: z.array(RemoteArtifactSchema.extend({ orderId: z.string() })).length(1),
+  }).passthrough().parse(input);
+  const attached = prepared.artifacts[0]!;
+  if (prepared.orderId !== orderId || attached.orderId !== orderId || attached.id !== artifactId ||
+      normalizeSha256(attached.sha256) !== normalizeSha256(sha256)) {
+    throw new Error("TermiX prepared manifest does not bind the verified report attachment");
   }
+  // Documented trust boundary: https://docs.termix.ai/api-reference/orders
+  // The official API builds this hash from artifactIds. No client serialization
+  // is specified. This validates its response binding, NOT an independent
+  // derivation of the manifest hash. File bytes are independently SHA256-checked.
+  return prepared.deliveryHash;
 }
 
 async function uploadArtifact(grantInput: unknown, content: string, contentType: string): Promise<void> {
@@ -647,7 +669,6 @@ async function run(): Promise<void> {
     if (
       storedContent !== descriptor.content ||
       descriptor.sha256 !== priorArtifact.sha256 ||
-      descriptor.deliveryHash.toLowerCase() !== priorArtifact.deliveryHash.toLowerCase() ||
       descriptor.sizeBytes !== priorArtifact.sizeBytes
     ) throw new Error("Current-round artifact differs from the protected checkpoint");
   } else {
@@ -664,6 +685,22 @@ async function run(): Promise<void> {
     }
     artifact = createTermixLendingDeliveryArtifact(order, intake, probe, now);
     descriptor = termixDeliveryArtifactDescriptor(artifact);
+  }
+  if (previous && priorArtifact && !args.refreshExpired &&
+      hasReusableTermixManifest(previous, order.id, order.redoUsed ? 2 : 1)) {
+    // Only new, sealed artifactIds checkpoints enter this path. Legacy intents
+    // omitted attachments, so a cached intent alone is insufficient.
+    await verifyPublishedArtifact(priorArtifact.publicUrl!, descriptor);
+    const guarded = assertTermixProviderIntent(order, config, previous.submitIntent, "submitDelivery", {
+      expectedDeliveryHash: priorArtifact.deliveryHash, now: new Date(),
+    });
+    if (guarded.intentHash !== previous.submitIntentHash) throw new Error("Cached manifest intent changed");
+    if (!hasReusableTermixManifest(previous, order.id, order.redoUsed ? 2 : 1)) {
+      throw new Error("Cached manifest expired during verification");
+    }
+    const cached = checkpointDraft(baseUrl, order, "SUBMIT_INTENT_PREPARED", previous, new Date());
+    print(await saveCheckpoint(paths.checkpoint, cached));
+    return;
   }
   const now = new Date();
   await mkdir(paths.artifactRoot, { recursive: true, mode: 0o700 });
@@ -690,9 +727,8 @@ async function run(): Promise<void> {
   }
   await saveCheckpoint(paths.checkpoint, draft);
 
-  // Always prepare the submission with artifact IDs, even when reusing report bytes.
-  // Legacy cached intents were prepared without attachments; a registration-list
-  // lookup cannot prove which IDs were included in that prior submit request.
+  // Migrate legacy checkpoints by preparing with artifact IDs. Verified new
+  // manifest checkpoints return above without uploading or preparing again.
   const artifactPathname = `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/artifacts`;
   const listed = remoteArtifacts(await apiJson(baseUrl, token, "GET", artifactPathname));
   let registered = listed.find((item) => normalizeSha256(item.sha256) === descriptor.sha256);
@@ -740,22 +776,22 @@ async function run(): Promise<void> {
     "POST",
     `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/submit`,
     {
-      deliveryHash: descriptor.deliveryHash,
       artifactIds: [registered.id],
       note: "PositionCrew bounded Lending Rescue analysis and conformance receipt.",
     },
   );
-  assertAttachedTermixArtifact(
-    await apiJson(baseUrl, token, "GET", artifactPathname), registered.id, descriptor.sha256,
-  );
+  const manifestHash = termixPreparedManifestHash(submitRaw, order.id, registered.id, descriptor.sha256);
   if (Date.parse(artifact.result.expiresAt) - Date.now() < 120_000) {
     throw new Error("Delivery artifact became unsafe while preparing the submit intent");
   }
   const guarded = assertTermixProviderIntent(order, config, submitRaw, "submitDelivery", {
-    expectedDeliveryHash: descriptor.deliveryHash,
+    expectedDeliveryHash: manifestHash,
     now: new Date(),
   });
   draft = checkpointDraft(baseUrl, order, "SUBMIT_INTENT_PREPARED", await loadCheckpoint(paths.checkpoint), new Date());
+  if (!draft.artifact) throw new Error("Prepared artifact disappeared from checkpoint");
+  draft.artifact.deliveryHash = manifestHash;
+  draft.artifact.manifestSource = "TERMIX_ARTIFACT_IDS";
   draft.submitIntent = guarded.intent;
   draft.submitIntentHash = guarded.intentHash;
   const checkpoint = await saveCheckpoint(paths.checkpoint, draft);
