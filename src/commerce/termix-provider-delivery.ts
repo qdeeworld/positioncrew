@@ -188,6 +188,7 @@ const PreparedArtifactSchema = z.object({
   sizeBytes: z.number().int().positive(),
   sha256: RawSha256Schema,
   deliveryHash: Bytes32Schema,
+  manifestSource: z.literal("TERMIX_ARTIFACT_IDS").optional(),
   localPath: z.string().min(1),
   remoteArtifactId: z.string().min(1).nullable(),
   publicUrl: z.string().url().nullable(),
