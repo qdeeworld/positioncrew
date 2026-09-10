@@ -67,6 +67,9 @@ describe("buyer-friendly intake and identity binding",()=>{
   expect(()=>intakeFromMessages(order(),[{...message,from:{accountId:"seller"}}])).toThrow();
   expect(()=>intakeFromMessages(order(),[{...message,conversationId:"another"}])).toThrow();
  });
+ it("does not pick an arbitrary latest message when distinct requests share the same timestamp",()=>{
+  expect(()=>intakeFromMessages(order(),[message,{...message,messageId:"correction"}])).toThrow("share a timestamp");
+ });
  it("does not fall back to old valid requirements after a newer ambiguous buyer correction",()=>{
   expect(()=>intakeFromMessages(order(),[message,{...message,messageId:"later",createdAt:"2026-09-10T17:50:00Z",text:"actually do something else"}])).toThrow();
  });

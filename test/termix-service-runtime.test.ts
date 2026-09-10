@@ -8,7 +8,7 @@ vi.mock("viem",async original=>({...await original<typeof import("viem")>(),crea
 vi.mock("viem/accounts",()=>({privateKeyToAccount:()=>({address:"0xADd748C416E8A7efd7d65D18Abb121dea268ddF9",signTransaction:mocks.sign})}));
 vi.mock("node:child_process",async original=>({...await original<typeof import("node:child_process")>(),spawnSync:mocks.spawn}));
 vi.mock("../src/telemetry/bsc.js",()=>({inspectVenusAccount:mocks.probe}));
-import {runTermixService} from "../src/cli/run-termix-service.js";
+import {runTermixService,collectRuntimeMessages} from "../src/cli/run-termix-service.js";
 import {LENDING_AGENT,LENDING_LISTING} from "../src/commerce/termix-service-policy.js";
 
 let root:string,previousEnv:NodeJS.ProcessEnv,previousArgs:string[],orders:Record<string,any>[],replies:number,messages:unknown[];
@@ -42,6 +42,24 @@ describe("service coordinator integration with simulated chain and authenticated
   await runTermixService();expect(mocks.sign).toHaveBeenCalledTimes(1);expect(mocks.spawn).toHaveBeenCalledTimes(1);
   const ledger=JSON.parse(readFileSync(join(root,"state","ledger.json"),"utf8"));expect(Object.keys(ledger.reservations)).toEqual([orders[0]!.id]);
   await runTermixService();expect(mocks.sign).toHaveBeenCalledTimes(1);expect(mocks.spawn).toHaveBeenCalledTimes(1);
+ });
+ it("resumes accepted delivery inside the ten-minute admission cutoff",async()=>{
+  const expiry=new Date(Date.now()+660000).toISOString();
+  writeFileSync(join(root,"policy"),JSON.stringify({...policy,expiresAt:expiry}),{mode:0o600});orders[0]!.deadlines.deliveryDueAt=expiry;
+  mocks.spawn.mockReturnValueOnce({status:1,stderr:"temporary failure"});await runTermixService();
+  vi.setSystemTime(new Date(Date.now()+420000));await runTermixService();
+  expect(mocks.sign).toHaveBeenCalledTimes(1);expect(mocks.spawn).toHaveBeenCalledTimes(2);
+ });
+ it("overlaps timestamp boundaries and retains a correction beside the hundredth message",async()=>{
+  const start="2026-09-10T17:30:00Z", boundary="2026-09-10T17:31:00.000Z";
+  const first=Array.from({length:100},(_,i)=>({messageId:`m-${i}`,createdAt:i===99 ? boundary : new Date(Date.parse(start)+i).toISOString()}));
+  const correction={messageId:"correction",createdAt:boundary};
+  const poll=vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce([first[99],correction]);
+  const result=await collectRuntimeMessages(poll,start);expect(result).toHaveLength(101);expect(result).toContainEqual(correction);expect(poll.mock.calls[1]![0]).toBe("2026-09-10T17:30:59.999Z");
+ });
+ it("fails closed when a timestamp page repeats without exposing its remaining messages",async()=>{
+  const batch=Array.from({length:100},(_,i)=>({messageId:`m-${i}`,createdAt:"2026-09-10T17:31:00Z"}));
+  await expect(collectRuntimeMessages(vi.fn().mockResolvedValue(batch),"2026-09-10T17:30:00Z")).rejects.toThrow("saturated timestamp");
  });
  it("asks for missing inputs once and never accepts ambiguous work",async()=>{
   orders[0]!.scope="ambiguous";await runTermixService();await runTermixService();expect(replies).toBe(1);expect(mocks.sign).not.toHaveBeenCalled();expect(mocks.spawn).not.toHaveBeenCalled();

@@ -28,13 +28,36 @@ export function intakeFromMessages(order: TermixProviderOrder, messages: unknown
     const message = input as Record<string, unknown>;
     return message.orderId === order.id && message.conversationId === conversationId && message.kind === "TEXT" &&
       (message.from as {accountId?:string} | undefined)?.accountId === order.clientAccountId;
-  }).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  }).sort((a,b)=>Date.parse(String(b.createdAt))-Date.parse(String(a.createdAt)));
   const message = texts[0];
   if (!message) throw new Error("No buyer requirements message");
   const createdAt = z.string().datetime().parse(message.createdAt);
+  if (texts[1] && Date.parse(String(texts[1].createdAt)) === Date.parse(createdAt) && texts[1].messageId !== message.messageId) throw new Error("Latest buyer messages share a timestamp; send one clarified request");
   const locator = {schemaVersion:"positioncrew.termix-buyer-message-locator.v1" as const,orderId:order.id,conversationId,
     messageId:z.string().parse(message.messageId),since:new Date(Date.parse(createdAt)-1).toISOString()};
   return {intake:createTermixLendingIntakeFromRuntimeMessage(order,locator,message),locator};
+}
+/** Timestamp-only inbox pagination must overlap its boundary and deduplicate IDs.
+ * A saturated timestamp that cannot advance is an error, never a complete inbox. */
+export async function collectRuntimeMessages<T extends {messageId:string;createdAt:string}>(poll:(since:string,limit:number)=>Promise<T[]>,createdAt:string):Promise<T[]> {
+  let since = new Date(Date.parse(z.string().datetime().parse(createdAt))-1).toISOString();
+  const messages = new Map<string,T>();
+  for (let page=0;page<20;page++) {
+    const batch = await poll(since,100);
+    let unseen = 0;
+    for (const message of batch) {
+      const previous = messages.get(message.messageId);
+      if (previous && canonicalHash(previous) !== canonicalHash(message)) throw new Error("Inbox changed an existing message ID");
+      if (!previous) unseen++;
+      messages.set(message.messageId,message);
+    }
+    if (batch.length < 100) return [...messages.values()];
+    if (!unseen) throw new Error("Inbox pagination stalled at a saturated timestamp");
+    const latest = Math.max(...batch.map(m=>Date.parse(z.string().datetime().parse(m.createdAt))));
+    if (latest <= Date.parse(since)) throw new Error("Inbox pagination made no forward progress");
+    since = new Date(Math.max(Date.parse(since),latest-1)).toISOString();
+  }
+  throw new Error("Inbox pagination limit reached");
 }
 export function assertNoPendingNonce(latest: number, pending: number) {
   if (latest !== pending) throw new Error("Seller wallet has an unresolved pending transaction; no new signature");
@@ -58,21 +81,7 @@ export async function runTermixService() {
     return response.json();
   }
   const readOrder = async (id: string) => normalizeTermixProviderOrder(await api(`/api/v1/orders/${encodeURIComponent(id)}`));
-  async function buyerMessages(order: TermixProviderOrder) {
-    let since = z.string().datetime().parse(order.createdAt);
-    const messages: unknown[] = [];
-    let exhausted = false;
-    for (let page=0;page<20;page++) {
-      const batch = await runtime.poll(since,100);
-      messages.push(...batch);
-      if (batch.length < 100) {exhausted=true;break;}
-      const next = batch.map(m=>m.createdAt).sort().at(-1)!;
-      if (Date.parse(next)<=Date.parse(since)) throw new Error("Inbox pagination stalled; cannot safely choose current requirements");
-      since=next;
-    }
-    if (!exhausted) throw new Error("Inbox pagination limit reached");
-    return messages;
-  }
+  const buyerMessages = (order: TermixProviderOrder) => collectRuntimeMessages((since,limit)=>runtime.poll(since,limit),z.string().datetime().parse(order.createdAt));
   const config = assertZeroStakeConfig(await api("/api/v1/config/contracts"),policy);
   const client = createPublicClient({chain:bsc,transport:http("https://bsc-dataseed.bnbchain.org",{timeout:15000,retryCount:2})});
   if (await client.getChainId() !== 56) throw new Error("Wrong chain");
@@ -122,7 +131,7 @@ export async function runTermixService() {
         continue;
       }
       if (["DELIVERED","ACCEPTED"].includes(order.status)) continue;
-      assertServiceOrder(order,policy);
+      assertServiceOrder(order,policy,Date.now(),reservation ? "resume" : "admit");
       const directory = resolve(root,order.id);
       if (!reservation) {
         let intake, locator;
