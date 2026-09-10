@@ -4,7 +4,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {describe,it,expect} from "vitest";
 import {normalizeTermixProviderOrder,createTermixLendingIntakeFromOrderScope} from "../src/commerce/termix-provider-delivery.js";
-import {validateDeliveryPolicy,protectedText,deliveryJournalName,durableJournal,shouldRefreshDelivery,assertDeliveryWindow} from "../src/cli/fulfill-termix-lending.js";
+import {validateDeliveryPolicy,protectedText,deliveryJournalName,durableJournal,shouldRefreshDelivery,assertDeliveryWindow,assertDeliverySigningWindow} from "../src/cli/fulfill-termix-lending.js";
 import {canonicalHash} from "../src/core/canonical.js";
 const request={schemaVersion:"positioncrew.termix-lending-buyer-request.v1",orderId:"cmtvlt4q41b4tw001odmxvhkv",account:"0xe02702687b1653a782af57fbcc56d59b7e99a935",targetHealthFactor:"1.25",stressPriceDropBps:1000,maxActionUsd:"250",maxGasUsd:"0.10",maxSlippageBps:30};
 function live(){return {id:request.orderId,chainOrderId:`0x${"11".repeat(32)}`,budget:"5",currency:"USDC",status:"FUNDED",buyer:{id:"buyer-1",clientAgentId:"client-1"},seller:{id:"cmt4dzxvcli4tw70125nd5ra8"},listingId:"cmt4e8j3nlmuiw7019f4qf24x",deadlines:{deliveryDueAt:"2026-09-11T14:09:40.396Z"},redoUsed:false,availableActions:{canSubmitDelivery:true},createdAt:"2026-09-10T14:09:40.396Z",scope:`Service description\n\nBuyer requirements:\n${JSON.stringify(request)}`};}
@@ -18,6 +18,14 @@ it("limits automation to the approved exact order, buyer, scope, token, amount a
 });
 
 describe("delivery recovery persistence",()=>{
+ it("leaves recovery headroom before signing and refreshes aging unsigned artifacts",()=>{
+  const o=live(),now=Date.parse("2026-09-10T15:00:00Z"),p={orderId:o.id,onChainOrderId:o.chainOrderId,clientAccountId:o.buyer.id,scopeHash:canonicalHash(o.scope),expiresAt:"2026-09-12T12:00:00.000Z",maxGasWei:"34000000000000"};
+  const expiry=(seconds:number)=>new Date(now+seconds*1000).toISOString();
+  expect(()=>assertDeliverySigningWindow(p,o,expiry(250),now)).not.toThrow();
+  expect(()=>assertDeliveryWindow(p,o,expiry(250),now+125000)).not.toThrow();
+  for(const seconds of [90,120,239]){expect(()=>assertDeliverySigningWindow(p,o,expiry(seconds),now)).toThrow("recovery time");expect(shouldRefreshDelivery({deliveryRound:1,artifact:{resultExpiresAt:expiry(seconds)}},false,now)).toBe(true);}
+  expect(()=>assertDeliverySigningWindow(p,{...o,deadlines:{deliveryDueAt:expiry(200)}},expiry(250),now)).toThrow("recovery time");
+ });
  it("preserves artifact bytes including the hashed trailing newline",()=>{const dir=mkdtempSync(join(tmpdir(),"termix-artifact-"));try{const path=join(dir,"artifact.json"),content=JSON.stringify({result:"HOLD"},null,2)+"\n";writeFileSync(path,content,{mode:0o600});expect(protectedText(path,false)).toBe(content);expect(protectedText(path)).not.toBe(content);}finally{rmSync(dir,{recursive:true});}});
  it("uses a distinct journal for the buyer-requested redo",()=>{expect(deliveryJournalName("order",false)).not.toBe(deliveryJournalName("order",true));});
  it("persists a protected journal and refuses to overwrite a signed transaction",()=>{const dir=mkdtempSync(join(tmpdir(),"termix-journal-"));try{const path=join(dir,"signed.json");durableJournal(path,'{"hash":"first"}');expect(readFileSync(path,"utf8")).toBe('{"hash":"first"}');expect(statSync(path).mode&0o077).toBe(0);expect(()=>durableJournal(path,'{"hash":"second"}')).toThrow();expect(readFileSync(path,"utf8")).toContain("first");}finally{rmSync(dir,{recursive:true});}});

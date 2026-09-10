@@ -42,6 +42,14 @@ export function assertDeliveryWindow(policyInput: unknown, orderInput: unknown, 
   if (!order.deliveryDueAt || Date.parse(order.deliveryDueAt) < now + 120000) throw new Error("Delivery deadline too close or expired");
   if (!Number.isFinite(Date.parse(artifactExpiresAt)) || Date.parse(artifactExpiresAt) < now + 60000) throw new Error("Artifact too close to expiry");
 }
+export function assertDeliverySigningWindow(policyInput: unknown, orderInput: unknown, artifactExpiresAt: string, now = Date.now()) {
+  assertDeliveryWindow(policyInput,orderInput,artifactExpiresAt,now);
+  const {policy,order}=validateDeliveryPolicy(policyInput,orderInput,now);
+  // Receipt timeout + sixty-second timer cooldown + startup, then the
+  // recovery path's two-minute delivery and one-minute artifact margins.
+  if (Date.parse(policy.expiresAt) < now+300000 || Date.parse(order.deliveryDueAt!) < now+300000) throw new Error("Insufficient delivery recovery time");
+  if (Date.parse(artifactExpiresAt) < now+240000) throw new Error("Artifact has insufficient recovery time");
+}
 export function protectedText(path: string, trim = true) {
   if (!isAbsolute(path)) throw new Error("Credential path must be absolute");
   const st=lstatSync(path);
@@ -50,7 +58,7 @@ export function protectedText(path: string, trim = true) {
   return trim ? text.trim() : text;
 }
 export function shouldRefreshDelivery(previous: {deliveryRound: number; artifact: {resultExpiresAt: string} | null} | null, redoUsed: boolean, now = Date.now()) {
-  return previous?.deliveryRound === (redoUsed ? 2 : 1) && !!previous.artifact && Date.parse(previous.artifact.resultExpiresAt) < now + 120000;
+  return previous?.deliveryRound === (redoUsed ? 2 : 1) && !!previous.artifact && Date.parse(previous.artifact.resultExpiresAt) < now + 240000;
 }
 export function deliveryJournalName(orderId: string, redoUsed: boolean) {
   return `${orderId}.round-${redoUsed ? 2 : 1}.delivery-signed.json`;
@@ -130,7 +138,7 @@ async function run() {
   if(account.address.toLowerCase()!==OWNER.toLowerCase())throw new Error("Wrong signing owner");
   const nonce=await client.getTransactionCount({address:OWNER,blockTag:"pending"});
   if (await client.getTransactionCount({address:OWNER,blockTag:"latest"}) !== nonce) throw new Error("Seller wallet has an unresolved pending transaction");
-  assertDeliveryWindow(policy,order,checkpoint.artifact.resultExpiresAt);
+  assertDeliverySigningWindow(policy,order,checkpoint.artifact.resultExpiresAt);
   const raw=await account.signTransaction({chainId:56,type:"legacy",to,data,value:0n,gas,gasPrice,nonce});
   const hash=keccak256(raw);
   durableJournal(journalPath,json({raw,hash,expiresAt:checkpoint.artifact.resultExpiresAt}));
