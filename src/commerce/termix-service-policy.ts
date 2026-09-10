@@ -50,6 +50,7 @@ export function assertServiceOrder(input: unknown, policy: ServicePolicy, now = 
   const createdAt = z.string().datetime().parse(order.createdAt);
   if (Date.parse(createdAt) < Date.parse(policy.startsAt) || Date.parse(createdAt) > now) throw new Error("Order outside policy start window");
   const admitting = phase === "admit" || order.status === "PENDING_ACCEPT";
+  if (order.status === "PENDING_ACCEPT" && order.acceptDeadline && Date.parse(order.acceptDeadline) < now + 300000) throw new Error("Insufficient acceptance recovery time");
   if (admitting && Date.parse(policy.expiresAt) < now + 600000) throw new Error("Insufficient service policy lifetime for fulfillment");
   if (!order.deliveryDueAt || Date.parse(order.deliveryDueAt) < now + (admitting ? 600000 : 120000)) throw new Error("Insufficient delivery time");
   if (!["PENDING_ACCEPT", "FUNDED", "IN_PROGRESS"].includes(order.status)) throw new Error("Order is not actionable");

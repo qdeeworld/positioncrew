@@ -38,6 +38,17 @@ beforeEach(()=>{
 });
 afterEach(()=>{process.env=previousEnv;process.argv=previousArgs;process.exitCode=0;rmSync(root,{recursive:true,force:true});vi.unstubAllGlobals();vi.restoreAllMocks();vi.useRealTimers();});
 describe("service coordinator integration with simulated chain and authenticated API",()=>{
+ it("does not reserve or sign when an explicit acceptance deadline truncates recovery",async()=>{
+  orders[0]!.acceptDeadline=new Date(Date.now()+150000).toISOString();
+  await runTermixService();expect(mocks.sign).not.toHaveBeenCalled();expect(existsSync(join(root,"state","ledger.json"))).toBe(false);
+ });
+ it("refuses to rebroadcast a delivery journal after its order delivery deadline",async()=>{
+  await runTermixService();orders[0]!.status="FUNDED";
+  orders[0]!.deadlines.deliveryDueAt=new Date(Date.now()-1000).toISOString();
+  writeFileSync(join(root,"state",orders[0]!.id,"delivery-1-signed.json"),JSON.stringify({raw:"0x34",hash:keccak256("0x34"),expiresAt:new Date(Date.now()+600000).toISOString()}),{mode:0o600});
+  mocks.client.getTransactionReceipt.mockImplementation(async({hash}:{hash:string})=>{if(hash===keccak256("0x34"))throw Object.assign(new Error("not found"),{name:"TransactionReceiptNotFoundError"});return {status:"success"};});
+  await expect(runTermixService()).rejects.toThrow("Delivery deadline too close or expired");expect(mocks.client.sendRawTransaction).toHaveBeenCalledTimes(1);
+ });
  it("accepts and dispatches a new paid order once, then ignores repeat settled/delivered events",async()=>{
   await runTermixService();expect(mocks.sign).toHaveBeenCalledTimes(1);expect(mocks.spawn).toHaveBeenCalledTimes(1);
   const ledger=JSON.parse(readFileSync(join(root,"state","ledger.json"),"utf8"));expect(Object.keys(ledger.reservations)).toEqual([orders[0]!.id]);

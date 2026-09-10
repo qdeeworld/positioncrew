@@ -13,7 +13,7 @@ import { assertTermixProviderIntent, normalizeTermixProviderOrder, createTermixL
 import { validateServicePolicy, assertServiceOrder, assertZeroStakeConfig, reserveOrder, ServiceLedgerSchema, SELLER_WALLET, type ServiceLedger } from "../commerce/termix-service-policy.js";
 import { inspectVenusAccount } from "../telemetry/bsc.js";
 import { fetchOrders } from "./watch-termix-orders.js";
-import { protectedText, durableJournal, validateDeliveryPolicy } from "./fulfill-termix-lending.js";
+import { protectedText, durableJournal, validateDeliveryPolicy, assertDeliveryWindow } from "./fulfill-termix-lending.js";
 
 const BASE = "https://platform-backend.prod.termix.live";
 const log = (value: unknown) => console.log(JSON.stringify(value));
@@ -105,6 +105,7 @@ export async function runTermixService() {
       const order = (validateDeliveryPolicy(reservation.policy,await readOrder(id))).order;
       if (Date.parse(signed.expiresAt) <= Date.now()+60000) throw new Error(`Unconfirmed transaction expired for ${id}; reconciliation required`);
       if (name.startsWith("accept") ? order.status !== "PENDING_ACCEPT" : !["FUNDED","IN_PROGRESS"].includes(order.status)) throw new Error("Unconfirmed transaction conflicts with order state");
+      if (!name.startsWith("accept")) assertDeliveryWindow(reservation.policy,order,signed.expiresAt);
       if (!execute) {log({event:"service.pending-journal",orderId:id,hash:signed.hash});return;}
       await client.sendRawTransaction({serializedTransaction:signed.raw as Hex}).catch(error=>{
         // A known transaction may already be in the node's pool; wait for it.
