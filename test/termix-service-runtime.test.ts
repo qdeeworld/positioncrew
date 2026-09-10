@@ -1,13 +1,17 @@
+import lpFixture from "../fixtures/provider-conformance/lp-valid.v2.json" with {type:"json"};
+import yieldFixture from "../fixtures/yield-optimization/venus-to-beefy.v1.json" with {type:"json"};
+import gridFixture from "../fixtures/provider-conformance/grid-valid.v2.json" with {type:"json"};
+import {TERMIX_SERVICES} from "../src/commerce/termix-capital-services.js";
 import {afterEach,beforeEach,describe,expect,it,vi} from "vitest";
 import {mkdtempSync,writeFileSync,readFileSync,rmSync,existsSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {encodeFunctionData,parseAbi,keccak256} from "viem";
-const mocks=vi.hoisted(()=>({client:{getChainId:vi.fn(),getTransactionReceipt:vi.fn(),sendRawTransaction:vi.fn(),waitForTransactionReceipt:vi.fn(),getTransactionCount:vi.fn(),call:vi.fn(),estimateGas:vi.fn(),getGasPrice:vi.fn()},sign:vi.fn(),spawn:vi.fn(),probe:vi.fn()}));
+const mocks=vi.hoisted(()=>({client:{getChainId:vi.fn(),getTransactionReceipt:vi.fn(),sendRawTransaction:vi.fn(),waitForTransactionReceipt:vi.fn(),getTransactionCount:vi.fn(),call:vi.fn(),estimateGas:vi.fn(),getGasPrice:vi.fn()},sign:vi.fn(),spawn:vi.fn(),probe:vi.fn(),lp:vi.fn(),yield:vi.fn(),grid:vi.fn()}));
 vi.mock("viem",async original=>({...await original<typeof import("viem")>(),createPublicClient:()=>mocks.client}));
 vi.mock("viem/accounts",()=>({privateKeyToAccount:()=>({address:"0xADd748C416E8A7efd7d65D18Abb121dea268ddF9",signTransaction:mocks.sign})}));
 vi.mock("node:child_process",async original=>({...await original<typeof import("node:child_process")>(),spawnSync:mocks.spawn}));
-vi.mock("../src/telemetry/bsc.js",()=>({inspectVenusAccount:mocks.probe}));
+vi.mock("../src/telemetry/bsc.js",()=>({inspectVenusAccount:mocks.probe,inspectPancakePosition:mocks.lp,inspectVenusStableYields:mocks.yield,inspectPancakeGridMarket:mocks.grid}));
 import {runTermixService,collectRuntimeMessages} from "../src/cli/run-termix-service.js";
 import {LENDING_AGENT,LENDING_LISTING} from "../src/commerce/termix-service-policy.js";
 
@@ -103,5 +107,24 @@ describe("service coordinator integration with simulated chain and authenticated
  });
  it("never signs or replies in dry-run mode",async()=>{
   process.argv=["node","test"];await runTermixService();expect(mocks.probe).toHaveBeenCalled();expect(mocks.sign).not.toHaveBeenCalled();expect(mocks.spawn).not.toHaveBeenCalled();expect(replies).toBe(0);
+ });
+});
+
+describe.each(["LP_REBALANCE","YIELD_OPTIMIZATION","BOUNDED_GRID"] as const)("%s coordinator",service=>{
+ it("automatically accepts and dispatches once using the correct provider and protected runtime",async()=>{
+  const identity=TERMIX_SERVICES[service];orders[0]!.seller.id=identity.agentId;orders[0]!.listingId=identity.listingId;
+  const base={schemaVersion:"positioncrew.termix-capital-request.v1",service,analysisOnly:true,maxActionUsd:"1000",maxGasUsd:"5",maxSlippageBps:10};
+  let req:unknown;
+  const source={blockNumber:"123",explorerUrl:"https://bscscan.com/block/123"},generatedAt=new Date().toISOString();
+  if(service==="LP_REBALANCE") {const {tickSpacing,estimatedGasUsd,estimatedSwapCostUsd,...constraints}=lpFixture.constraints;req={...base,positionTokenId:"1456267",constraints};mocks.lp.mockResolvedValue({lpRequest:structuredClone(lpFixture),source,generatedAt});}
+  else if(service==="YIELD_OPTIMIZATION") {req={...base,account:yieldFixture.account,capitalUsd:"1000",capitalSource:"HYPOTHETICAL",maxExecutionCostUsd:"5",constraints:yieldFixture.constraints};mocks.yield.mockResolvedValue({yieldRequest:structuredClone(yieldFixture),source,generatedAt});}
+  else {const {estimatedGasUsd,capitalUsd,...constraints}=gridFixture.constraints;req={...base,account:gridFixture.account,capitalUsd:"1000",capitalSource:"HYPOTHETICAL",constraints:{...constraints,levelCount:5,orderExpirySeconds:120}};mocks.grid.mockResolvedValue({gridRequest:structuredClone(gridFixture),source,generatedAt});}
+  orders[0]!.scope="Buyer requirements:\n"+JSON.stringify(req);
+  writeFileSync(join(root,"policy"),JSON.stringify({...policy,enabledServices:["LENDING_RESCUE",service]}),{mode:0o600});
+  const tokenPath=join(root,"runtime");process.env[`TERMIX_${identity.credential.toUpperCase()}_RUNTIME_TOKEN_FILE`]=tokenPath;
+  await runTermixService();expect(mocks.sign).toHaveBeenCalledTimes(1);expect(mocks.spawn).toHaveBeenCalledTimes(1);
+  const invocation=mocks.spawn.mock.calls[0]![2];expect(invocation.env.TERMIX_RUNTIME_TOKEN_FILE).toBe(tokenPath);
+  const deliveryPolicy=JSON.parse(readFileSync(invocation.env.TERMIX_DELIVERY_POLICY_FILE,"utf8"));expect(deliveryPolicy.service).toBe(service);
+  await runTermixService();expect(mocks.sign).toHaveBeenCalledTimes(1);expect(mocks.spawn).toHaveBeenCalledTimes(1);
  });
 });

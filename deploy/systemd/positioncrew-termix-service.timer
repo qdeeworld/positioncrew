@@ -1,8 +1,8 @@
 [Unit]
-Description=Discover and fulfil bounded PositionCrew orders every minute
+Description=Discover and fulfil bounded PositionCrew orders every ten seconds
 [Timer]
 OnBootSec=45s
-OnUnitInactiveSec=60s
+OnUnitInactiveSec=10s
 Unit=positioncrew-termix-service.service
 [Install]
 WantedBy=timers.target

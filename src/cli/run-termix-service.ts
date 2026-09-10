@@ -1,3 +1,4 @@
+import {TERMIX_SERVICES,serviceForOrder,capitalRequirementsGuide,type TermixService} from "../commerce/termix-capital-services.js";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
 import { isCliEntrypoint } from "../core/cli-entrypoint.js";
@@ -9,9 +10,8 @@ import { z } from "zod";
 import { canonicalHash } from "../core/canonical.js";
 import { atomicJson } from "../core/atomic-json.js";
 import { TermixRuntimeClient } from "../commerce/aacp-runtime.js";
-import { assertTermixProviderIntent, normalizeTermixProviderOrder, createTermixLendingIntakeFromOrderScope, createTermixLendingIntakeFromRuntimeMessage, LENDING_REQUIREMENTS_GUIDE, type TermixProviderOrder } from "../commerce/termix-provider-delivery.js";
+import { assertTermixProviderIntent, normalizeTermixProviderOrder, createTermixIntakeFromOrderScope, createTermixIntakeFromRuntimeMessage, LENDING_REQUIREMENTS_GUIDE, observeTermixIntake, type TermixProviderOrder } from "../commerce/termix-provider-delivery.js";
 import { validateServicePolicy, assertServiceOrder, assertZeroStakeConfig, reserveOrder, ServiceLedgerSchema, SELLER_WALLET, type ServiceLedger } from "../commerce/termix-service-policy.js";
-import { inspectVenusAccount } from "../telemetry/bsc.js";
 import { fetchOrders } from "./watch-termix-orders.js";
 import { protectedText, durableJournal, validateDeliveryPolicy, assertDeliveryWindow } from "./fulfill-termix-lending.js";
 
@@ -35,7 +35,7 @@ export function intakeFromMessages(order: TermixProviderOrder, messages: unknown
   if (texts[1] && Date.parse(String(texts[1].createdAt)) === Date.parse(createdAt) && texts[1].messageId !== message.messageId) throw new Error("Latest buyer messages share a timestamp; send one clarified request");
   const locator = {schemaVersion:"positioncrew.termix-buyer-message-locator.v1" as const,orderId:order.id,conversationId,
     messageId:z.string().parse(message.messageId),since:new Date(Date.parse(createdAt)-1).toISOString()};
-  return {intake:createTermixLendingIntakeFromRuntimeMessage(order,locator,message),locator};
+  return {intake:createTermixIntakeFromRuntimeMessage(order,locator,message),locator};
 }
 /** Timestamp-only inbox pagination must overlap its boundary and deduplicate IDs.
  * A saturated timestamp that cannot advance is an error, never a complete inbox. */
@@ -74,14 +74,17 @@ export async function runTermixService() {
     schemaVersion:"positioncrew.termix-service-ledger.v1",policyHash:canonicalHash(policy),reservations:{}};
   if (ledger.policyHash !== canonicalHash(policy)) throw new Error("Service policy changed; explicit ledger migration required");
   const token = protectedText(process.env.TERMIX_SESSION_TOKEN_FILE ?? "");
-  const runtime = new TermixRuntimeClient(protectedText(process.env.TERMIX_RUNTIME_TOKEN_FILE ?? ""));
+  function runtimeFor(service:TermixService) {
+    const path=service==="LENDING_RESCUE" ? process.env.TERMIX_RUNTIME_TOKEN_FILE : process.env[`TERMIX_${TERMIX_SERVICES[service].credential.toUpperCase()}_RUNTIME_TOKEN_FILE`];
+    return new TermixRuntimeClient(protectedText(path??""));
+  }
   async function api(path: string, method: "GET" | "POST" = "GET") {
     const response = await fetch(BASE+path,{method,headers:{Authorization:`Bearer ${token}`,Accept:"application/json"},signal:AbortSignal.timeout(15000)});
     if (!response.ok) throw new Error(`TermiX ${method} failed (${response.status})`);
     return response.json();
   }
   const readOrder = async (id: string) => normalizeTermixProviderOrder(await api(`/api/v1/orders/${encodeURIComponent(id)}`));
-  const buyerMessages = (order: TermixProviderOrder) => collectRuntimeMessages((since,limit)=>runtime.poll(since,limit),z.string().datetime().parse(order.createdAt));
+  const buyerMessages = (order: TermixProviderOrder) => collectRuntimeMessages((since,limit)=>runtimeFor(serviceForOrder(order)).poll(since,limit),z.string().datetime().parse(order.createdAt));
   const config = assertZeroStakeConfig(await api("/api/v1/config/contracts"),policy);
   const client = createPublicClient({chain:bsc,transport:http("https://bsc-dataseed.bnbchain.org",{timeout:15000,retryCount:2})});
   if (await client.getChainId() !== 56) throw new Error("Wrong chain");
@@ -103,7 +106,7 @@ export async function runTermixService() {
         continue;
       }
       const order = (validateDeliveryPolicy(reservation.policy,await readOrder(id))).order;
-      if (Date.parse(signed.expiresAt) <= Date.now()+60000) throw new Error(`Unconfirmed transaction expired for ${id}; reconciliation required`);
+      if (Date.parse(signed.expiresAt) <= Date.now()+(reservation.policy.service && reservation.policy.service!=="LENDING_RESCUE" ? 30000 : 60000)) throw new Error(`Unconfirmed transaction expired for ${id}; reconciliation required`);
       if (name.startsWith("accept") ? order.status !== "PENDING_ACCEPT" : !["FUNDED","IN_PROGRESS"].includes(order.status)) throw new Error("Unconfirmed transaction conflicts with order state");
       if (!name.startsWith("accept")) assertDeliveryWindow(reservation.policy,order,signed.expiresAt);
       if (!execute) {log({event:"service.pending-journal",orderId:id,hash:signed.hash});return;}
@@ -111,7 +114,7 @@ export async function runTermixService() {
         // A known transaction may already be in the node's pool; wait for it.
         if (!/already known/i.test(String(error.shortMessage ?? error.message))) throw error;
       });
-      const recovered = await client.waitForTransactionReceipt({hash:signed.hash as Hex,timeout:60000});
+      const recovered = await client.waitForTransactionReceipt({hash:signed.hash as Hex,timeout:reservation.policy.service && reservation.policy.service!=="LENDING_RESCUE"?10000:60000});
       if (recovered.status !== "success") throw new Error("Recovered service transaction reverted");
     }
   }
@@ -120,9 +123,10 @@ export async function runTermixService() {
   for (const raw of orders) {
     let mayHaveSigned = false;
     // The account can own other agents. Do not treat their orders as malformed jobs.
-    if ((raw.seller as {id?:string} | undefined)?.id !== policy.providerAgentId && raw.providerAgentId !== policy.providerAgentId) continue;
+    if (!(policy.enabledServices ?? ["LENDING_RESCUE"]).some(s=>TERMIX_SERVICES[s].agentId===((raw.seller as {id?:string}|undefined)?.id ?? raw.providerAgentId))) continue;
     try {
       let order = await readOrder(raw.id);
+      const service=serviceForOrder(order);
       const reservation = ledger.reservations[order.id];
       if (["SETTLED","CANCELLED"].includes(order.status)) {
         if (reservation && !reservation.closedAt && execute) {
@@ -136,7 +140,7 @@ export async function runTermixService() {
       const directory = resolve(root,order.id);
       if (!reservation) {
         let intake, locator;
-        try {intake = createTermixLendingIntakeFromOrderScope(order);} catch {
+        try {intake = createTermixIntakeFromOrderScope(order);} catch {
           const messages = await buyerMessages(order);
           try {({intake,locator}=intakeFromMessages(order,messages));} catch {
             const conversationId = z.object({id:z.string()}).parse(order.conversation).id;
@@ -145,7 +149,7 @@ export async function runTermixService() {
             const key = `pc-intake-${canonicalHash({orderId:order.id,messages:relevant}).slice(7,39)}`;
             const noticePath = resolve(root,`notice-${key}.json`);
             if (execute && !existsSync(noticePath)) {
-              await runtime.reply(conversationId,LENDING_REQUIREMENTS_GUIDE,key);
+              await runtimeFor(service).reply(conversationId,service==="LENDING_RESCUE"?LENDING_REQUIREMENTS_GUIDE:capitalRequirementsGuide(service,order.id),key);
               await atomicJson(noticePath,{orderId:order.id,key});
             }
             log({event:"service.needs-requirements",orderId:order.id,execute});
@@ -153,7 +157,7 @@ export async function runTermixService() {
           }
         }
         // Verify this supported account can actually be observed before accepting paid work.
-        await inspectVenusAccount(intake.account,{targetHealthFactor:intake.targetHealthFactor,stressPriceDropBps:intake.stressPriceDropBps,maxActionUsd:intake.maxActionUsd,maxGasUsd:intake.maxGasUsd,maxSlippageBps:intake.maxSlippageBps});
+        await observeTermixIntake(intake);
         if (locator) {
           // Live account reads can take seconds. Do not seal an earlier buyer
           // message if a correction arrived while observing the account.
@@ -210,7 +214,7 @@ export async function runTermixService() {
       assertNoPendingNonce(latest,pending);
       mayHaveSigned = true;
       const completed = spawnSync(process.execPath,[process.env.TERMIX_FULFILL_SCRIPT ?? "/opt/positioncrew-termix-orders/fulfill-termix-lending.mjs"],{
-        env:{...process.env,TERMIX_DELIVERY_POLICY_FILE:resolve(directory,"policy.json"),TERMIX_FULFILLMENT_STATE_DIR:directory},encoding:"utf8",timeout:300000,maxBuffer:2*1024*1024});
+        env:{...process.env,TERMIX_RUNTIME_TOKEN_FILE:service==="LENDING_RESCUE"?process.env.TERMIX_RUNTIME_TOKEN_FILE:process.env[`TERMIX_${TERMIX_SERVICES[service].credential.toUpperCase()}_RUNTIME_TOKEN_FILE`],TERMIX_DELIVERY_POLICY_FILE:resolve(directory,"policy.json"),TERMIX_FULFILLMENT_STATE_DIR:directory},encoding:"utf8",timeout:300000,maxBuffer:2*1024*1024});
       if (completed.status !== 0) {
         await atomicJson(resolve(directory,"last-worker-failure.json"),{at:new Date().toISOString(),status:completed.status,signal:completed.signal,stderr:completed.stderr?.slice(0,16000),error:completed.error?.message});
         throw new Error("Delivery worker failed; inspect protected order checkpoint and failure record");

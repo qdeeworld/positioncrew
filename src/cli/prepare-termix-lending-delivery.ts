@@ -10,23 +10,23 @@ import { canonicalHash } from "../core/canonical.js";
 import {
   assertTermixProviderIntent,
   assertTermixProviderOrder,
-  assertTermixLendingArtifactOrder,
-  createTermixLendingIntakeFromRuntimeMessage,
-  createTermixLendingIntakeFromOrderScope,
-  createTermixLendingDeliveryArtifact,
+  assertTermixArtifactOrder,
+  createTermixIntakeFromRuntimeMessage,
+  createTermixIntakeFromOrderScope,
+  prepareTermixArtifact,
   sealTermixFulfillmentCheckpoint,
   termixDeliveryArtifactDescriptor,
   TermixContractsConfigSchema,
   TermixBuyerMessageLocatorSchema,
   TermixFulfillmentCheckpointSchema,
-  TermixLendingDeliveryArtifactSchema,
+  TermixDeliveryArtifactSchema,
   TermixProviderOrderSchema,
   TermixRuntimeBuyerMessageSchema,
   verifyTermixFulfillmentCheckpoint,
   type TermixFulfillmentCheckpoint,
   type TermixProviderOrder,
 } from "../commerce/termix-provider-delivery.js";
-import { inspectVenusAccount } from "../telemetry/bsc.js";
+import {serviceForOrder} from "../commerce/termix-capital-services.js";
 
 const BASE_URL = "https://platform-backend.prod.termix.live";
 const MAX_JSON_BYTES = 1_048_576;
@@ -294,7 +294,7 @@ function checkpointDraft(
   const round = order.redoUsed ? 2 : 1;
   const retain = previous?.orderId === order.id && previous.deliveryRound === round;
   return {
-    schemaVersion: "positioncrew.termix-lending-fulfillment.v1",
+    schemaVersion: serviceForOrder(order)==="LENDING_RESCUE" ? "positioncrew.termix-lending-fulfillment.v1" : "positioncrew.termix-fulfillment.v2",
     chainId: 56,
     baseUrl,
     providerAgentId: order.providerAgentId,
@@ -637,8 +637,8 @@ async function run(): Promise<void> {
     throw new Error("Order delivery deadline has less than 120 seconds remaining");
   }
   const intake = locator
-    ? createTermixLendingIntakeFromRuntimeMessage(order, locator, await fetchRuntimeMessage(baseUrl, await readRuntimeToken(), locator))
-    : createTermixLendingIntakeFromOrderScope(order);
+    ? createTermixIntakeFromRuntimeMessage(order, locator, await fetchRuntimeMessage(baseUrl, await readRuntimeToken(), locator))
+    : createTermixIntakeFromOrderScope(order);
   const intakeHash = canonicalHash(intake);
   const sameRound = previous?.deliveryRound === (order.redoUsed ? 2 : 1);
   if (sameRound && previous.intakeHash && previous.intakeHash !== intakeHash) {
@@ -663,8 +663,8 @@ async function run(): Promise<void> {
       throw new Error("Checkpoint artifact path escapes the protected artifact directory");
     }
     const storedContent = await readBoundedFile(artifactPath, true);
-    artifact = TermixLendingDeliveryArtifactSchema.parse(JSON.parse(storedContent));
-    assertTermixLendingArtifactOrder(artifact, order);
+    artifact = TermixDeliveryArtifactSchema.parse(JSON.parse(storedContent));
+    assertTermixArtifactOrder(artifact, order);
     descriptor = termixDeliveryArtifactDescriptor(artifact);
     if (
       storedContent !== descriptor.content ||
@@ -672,18 +672,7 @@ async function run(): Promise<void> {
       descriptor.sizeBytes !== priorArtifact.sizeBytes
     ) throw new Error("Current-round artifact differs from the protected checkpoint");
   } else {
-    const probe = await inspectVenusAccount(intake.account, {
-      targetHealthFactor: intake.targetHealthFactor,
-      stressPriceDropBps: intake.stressPriceDropBps,
-      maxActionUsd: intake.maxActionUsd,
-      maxGasUsd: intake.maxGasUsd,
-      maxSlippageBps: intake.maxSlippageBps,
-    });
-    const now = new Date();
-    if (Date.parse(order.deliveryDueAt) - now.getTime() < 120_000) {
-      throw new Error("Order deadline became unsafe while collecting the Venus observation");
-    }
-    artifact = createTermixLendingDeliveryArtifact(order, intake, probe, now);
+    artifact = await prepareTermixArtifact(order,intake);
     descriptor = termixDeliveryArtifactDescriptor(artifact);
   }
   if (previous && priorArtifact && !args.refreshExpired &&
@@ -767,8 +756,8 @@ async function run(): Promise<void> {
   draft.artifact.publicUrl = publicUrl;
   await saveCheckpoint(paths.checkpoint, draft);
 
-  if (Date.parse(artifact.result.expiresAt) - Date.now() < 120_000) {
-    throw new Error("Delivery artifact has less than 120 seconds remaining before submit preparation");
+  if (Date.parse(artifact.result.expiresAt) - Date.now() < (artifact.request.service === "LENDING_RESCUE" ? 120_000 : 90_000)) {
+    throw new Error("Delivery artifact lacks signing headroom before submit preparation");
   }
   const submitRaw = await apiJson(
     baseUrl,
@@ -777,11 +766,11 @@ async function run(): Promise<void> {
     `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/submit`,
     {
       artifactIds: [registered.id],
-      note: "PositionCrew bounded Lending Rescue analysis and conformance receipt.",
+      note: `${artifact.result.summary} Analysis only; no protocol trades executed.`,
     },
   );
   const manifestHash = termixPreparedManifestHash(submitRaw, order.id, registered.id, descriptor.sha256);
-  if (Date.parse(artifact.result.expiresAt) - Date.now() < 120_000) {
+  if (Date.parse(artifact.result.expiresAt) - Date.now() < (artifact.request.service === "LENDING_RESCUE" ? 120_000 : 90_000)) {
     throw new Error("Delivery artifact became unsafe while preparing the submit intent");
   }
   const guarded = assertTermixProviderIntent(order, config, submitRaw, "submitDelivery", {
