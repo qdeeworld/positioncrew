@@ -375,6 +375,15 @@ if (
   new Set(AACP_MAINNET_LISTING_EVIDENCE.listings.map((p) => p.listingId)).size !== 4
 ) throw new Error("Dedicated fleet evidence must bind four distinct providers to the production wallet");
 
+const activeLendingListing = AACP_MAINNET_LISTING_EVIDENCE.listings.find(
+  (listing) => listing.service === "LENDING_RESCUE",
+);
+for (const field of ["agentId", "agentTokenId", "listingId", "handle"] as const) {
+  if (activeLendingListing?.[field] !== AACP_DEDICATED_LENDING_EVIDENCE[field]) {
+    throw new Error(`Dedicated flagship ${field} differs from the active Lending Rescue provider`);
+  }
+}
+
 const providerNames = {
   LENDING_RESCUE: ["PositionCrew Lending Rescue", "lending-rescue"],
   LP_REBALANCE: ["PositionCrew LP Rebalance", "lp-rebalance"],
@@ -1156,126 +1165,6 @@ async function discoverProvider(
   };
 }
 
-const DedicatedListingDetailSchema = z
-  .object({
-    id: z.string().min(1),
-    title: z.string().min(1),
-    category: z.string().min(1),
-    skillTag: z.string().min(1),
-    tags: z.array(z.string().min(1)).min(1),
-    description: z.string().min(1),
-    status: z.string().min(1),
-    instantBuyable: z.boolean(),
-    coverImageUrl: z.string().url(),
-    basePrice: z.string().min(1),
-    currency: z.string().min(1),
-    deliveryDays: z.number().int().positive(),
-    proofMethod: z.string().min(1),
-    settlementType: z.string().min(1),
-    challengeWindowHours: z.number().int().nonnegative(),
-    bondAmount: z.string(),
-    publicSearch: z.boolean(),
-    createdAt: z.string().datetime(),
-    providerAgent: z.object({
-      id: z.string().min(1),
-      agentTokenId: z.string().regex(/^\d+$/),
-      name: z.string().min(1),
-      a2aStatus: z.string().min(1),
-      presence: z.string().min(1),
-      verified: z.boolean(),
-    }).passthrough(),
-  })
-  .passthrough();
-
-async function discoverDedicatedFlagship(
-  identityPromise: Promise<Awaited<ReturnType<typeof probeContracts>>["dedicatedIdentity"]>,
-  fetchImpl: typeof fetch,
-) {
-  const recorded = AACP_DEDICATED_LENDING_EVIDENCE;
-  const listingResultPromise = fetchJson(
-    `${AACP_BSC_API}/api/v1/listings/${encodeURIComponent(recorded.listingId)}`,
-    fetchImpl,
-  ).then(
-    (value) => {
-      const parsed = DedicatedListingDetailSchema.safeParse(value);
-      return { listing: parsed.success ? parsed.data : null };
-    },
-    () => ({ listing: null }),
-  );
-  const [identity, listingResult] = await Promise.all([identityPromise, listingResultPromise]);
-  if (!listingResult.listing) {
-    return {
-      ...recorded,
-      owner: identity.owner,
-      onchainVerified: identity.onchainVerified,
-      explorerUrl: identity.explorerUrl,
-      listingStatus: null,
-      liveListingVerified: false,
-      a2aStatus: null,
-      presence: null,
-      verified: false,
-      status: "LISTING_DISCOVERY_UNAVAILABLE" as const,
-    };
-  }
-  try {
-    const listing = listingResult.listing;
-    const expectedFields = [
-      ["listing ID", listing.id, recorded.listingId],
-      ["title", listing.title, recorded.title],
-      ["category", listing.category, recorded.category],
-      ["skill tag", listing.skillTag, recorded.skillTag],
-      ["description", listing.description, recorded.description],
-      ["status", listing.status, "PUBLISHED"],
-      ["base price", listing.basePrice, recorded.basePrice],
-      ["currency", listing.currency, recorded.currency],
-      ["delivery days", listing.deliveryDays, recorded.deliveryDays],
-      ["instant buy", listing.instantBuyable, recorded.instantBuyable],
-      ["public search", listing.publicSearch, recorded.publicSearch],
-      ["challenge window", listing.challengeWindowHours, recorded.challengeWindowHours],
-      ["settlement type", listing.settlementType, recorded.settlementType],
-      ["proof method", listing.proofMethod, recorded.proofMethod],
-      ["bond amount", listing.bondAmount, recorded.bondAmount],
-      ["cover image", listing.coverImageUrl, recorded.coverImageUrl],
-      ["created at", listing.createdAt, recorded.createdAt],
-      ["agent ID", listing.providerAgent.id, recorded.agentId],
-      ["agent token ID", listing.providerAgent.agentTokenId, recorded.agentTokenId],
-      ["agent handle", listing.providerAgent.name, recorded.handle],
-    ] as const;
-    for (const [field, actual, expected] of expectedFields) {
-      if (actual !== expected) throw new Error(`Dedicated flagship ${field} mismatch`);
-    }
-    if (JSON.stringify(listing.tags) !== JSON.stringify(recorded.tags)) {
-      throw new Error("Dedicated flagship listing tags mismatch");
-    }
-    const online = listing.providerAgent.a2aStatus === "ONLINE";
-    return {
-      ...recorded,
-      owner: identity.owner,
-      onchainVerified: identity.onchainVerified,
-      explorerUrl: identity.explorerUrl,
-      listingStatus: listing.status,
-      liveListingVerified: true,
-      a2aStatus: listing.providerAgent.a2aStatus,
-      presence: listing.providerAgent.presence,
-      verified: listing.providerAgent.verified,
-      status: online ? "ONLINE_AND_LISTED" as const : "LISTED_OFFLINE" as const,
-    };
-  } catch {
-    return {
-      ...recorded,
-      owner: identity.owner,
-      onchainVerified: identity.onchainVerified,
-      explorerUrl: identity.explorerUrl,
-      listingStatus: null,
-      liveListingVerified: false,
-      a2aStatus: null,
-      presence: null,
-      verified: false,
-      status: "LISTING_DISCOVERY_UNAVAILABLE" as const,
-    };
-  }
-}
-
 function aacpRuntimeReadiness() {
   const rotations = AACP_RUNTIME_ROTATION_EVIDENCE.rotations;
   return {
@@ -1325,15 +1214,22 @@ export async function getAacpProductionReadiness(options: FetchOptions = {}) {
       return discoverProvider(item, recordedIdentity(config, identity), fetchImpl);
     }),
   );
-  const dedicatedFlagshipPromise = discoverDedicatedFlagship(
-    chainPromise.then((chain) => chain.dedicatedIdentity),
-    fetchImpl,
-  );
-  const [chain, providers, dedicatedFlagship] = await Promise.all([
-    chainPromise,
-    providersPromise,
-    dedicatedFlagshipPromise,
-  ]);
+  const [chain, providers] = await Promise.all([chainPromise, providersPromise]);
+  const lending = providers.find((provider) => provider.service === "LENDING_RESCUE");
+  if (!lending) throw new Error("Dedicated Lending Rescue provider is missing");
+  // Compatibility view: use the same live observation as the active fleet.
+  const dedicatedFlagship = {
+    ...AACP_DEDICATED_LENDING_EVIDENCE,
+    owner: chain.dedicatedIdentity.owner,
+    onchainVerified: chain.dedicatedIdentity.onchainVerified,
+    explorerUrl: chain.dedicatedIdentity.explorerUrl,
+    listingStatus: lending.listingStatus,
+    liveListingVerified: lending.liveListingVerified,
+    a2aStatus: lending.a2aStatus,
+    presence: lending.presence,
+    verified: lending.verified,
+    status: lending.status,
+  };
   const deployedCount = chain.contracts.filter((contract) => contract.deployed).length;
   const listedCount = providers.filter((provider) => provider.listingStatus === "PUBLISHED").length;
   const onlineCount = providers.filter((provider) => provider.status === "ONLINE_AND_LISTED").length;

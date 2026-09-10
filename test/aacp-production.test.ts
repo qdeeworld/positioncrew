@@ -280,6 +280,25 @@ describe("dedicated TermiX flagship evidence", () => {
     });
   });
 
+  it("uses one live Lending Rescue observation for the fleet and compatibility field", async () => {
+    let lendingRequests = 0;
+    const fixture = mockedFetch({ listingA2aStatus: "ONLINE", listingPresence: "online" });
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith(`/api/v1/listings/${AACP_DEDICATED_LENDING_EVIDENCE.listingId}`)) {
+        lendingRequests += 1;
+        if (lendingRequests > 1) return json({ error: "transient failure" }, 503);
+      }
+      return fixture(input, init);
+    }) as typeof fetch;
+    const readiness = await getAacpProductionReadiness({ fetchImpl });
+    expect(lendingRequests).toBe(1);
+    expect(readiness.state).toBe("PROVIDERS_ONLINE");
+    expect(readiness.marketplace.onlineProviderCount).toBe(4);
+    const lending = readiness.marketplace.providers.find((p) => p.service === "LENDING_RESCUE");
+    expect(readiness.marketplace.dedicatedFlagship.status).toBe(lending?.status);
+    expect(readiness.marketplace.dedicatedFlagship.a2aStatus).toBe(lending?.a2aStatus);
+  });
+
   it("binds three chronological production rotations to the dedicated identity", () => {
     expect(AACP_RUNTIME_ROTATION_EVIDENCE).toMatchObject({
       agentId: AACP_DEDICATED_LENDING_EVIDENCE.agentId,
