@@ -38,6 +38,9 @@ export function protectedText(path: string, trim = true) {
   const text=readFileSync(path,"utf8");
   return trim ? text.trim() : text;
 }
+export function shouldRefreshDelivery(previous: {deliveryRound: number; artifact: {resultExpiresAt: string} | null} | null, redoUsed: boolean, now = Date.now()) {
+  return previous?.deliveryRound === (redoUsed ? 2 : 1) && !!previous.artifact && Date.parse(previous.artifact.resultExpiresAt) < now + 120000;
+}
 export function deliveryJournalName(orderId: string, redoUsed: boolean) {
   return `${orderId}.round-${redoUsed ? 2 : 1}.delivery-signed.json`;
 }
@@ -87,7 +90,7 @@ async function run() {
   const checkpointPath=resolve(root,`${canonicalHash(policy.orderId).slice(7)}.json`);
   const previous=existsSync(checkpointPath)?verifyTermixFulfillmentCheckpoint(JSON.parse(protectedText(checkpointPath))):null;
   const args=[resolve(process.env.TERMIX_PREPARE_SCRIPT ?? "/opt/positioncrew-termix-orders/prepare-termix-lending-delivery.mjs"),"prepare-delivery","--order",policy.orderId,"--from-order-scope"];
-  if(previous?.artifact && Date.parse(previous.artifact.resultExpiresAt)<Date.now()+120000)args.push("--refresh-expired");
+  if(shouldRefreshDelivery(previous,order.redoUsed))args.push("--refresh-expired");
   const prepared=spawnSync(process.execPath,args,{env:{...process.env,TERMIX_AGENT_ID:AGENT,TERMIX_LISTING_ID:LISTING},encoding:"utf8",maxBuffer:2*1024*1024,timeout:180000});
   if(prepared.status!==0) throw new Error(`Delivery preparation failed: ${prepared.stderr.slice(0,1500)}`);
   const checkpoint=verifyTermixFulfillmentCheckpoint(JSON.parse(protectedText(checkpointPath)));
