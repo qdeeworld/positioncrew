@@ -27,6 +27,9 @@ describe("bounded service admission",()=>{
   for(const rate of [null,undefined,1,"0"]) expect(()=>assertZeroStakeConfig({...config,settlementCurrencies:[{...config.settlementCurrencies[0],providerLockBps:rate}]},policy)).toThrow();
   expect(()=>assertZeroStakeConfig(config,{...policy,escrow:`0x${"44".repeat(20)}`})).toThrow();
  });
+ it("does not admit work when only seconds remain on an otherwise valid policy",()=>{
+  expect(()=>assertServiceOrder(order(),{...policy,expiresAt:new Date(now+30000).toISOString()},now)).toThrow("policy lifetime");
+ });
  it("rejects expired, future, overlong or excessive policies",()=>{
   expect(()=>validateServicePolicy(policy,Date.parse(policy.expiresAt))).toThrow();
   expect(()=>validateServicePolicy(policy,Date.parse(policy.startsAt)-1)).toThrow();
@@ -49,6 +52,10 @@ describe("bounded service admission",()=>{
 
 describe("buyer-friendly intake and identity binding",()=>{
  it("parses labelled requirements without changing buyer limits",()=>{const request=parseTermixLendingRequirements(fields,order().id);expect(request.maxGasUsd).toBe("0.10");expect(request.stressPriceDropBps).toBe(1000);});
+ it("converts decimal percentages exactly and rejects fractional basis points",()=>{
+  for (const [value,expected] of [["0.29",29],["1.01",101],["49.99",4999],["50.00",5000]] as const) expect(parseTermixLendingRequirements(fields.replace("(%): 10",`(%): ${value}`),order().id).stressPriceDropBps).toBe(expected);
+  for (const value of ["0.291","50.01","NaN"]) expect(()=>parseTermixLendingRequirements(fields.replace("(%): 10",`(%): ${value}`),order().id)).toThrow();
+ });
  it("rejects omissions, duplicate fields, injected instructions and execution requests",()=>{
   for(const text of [fields.replace("Analysis only: yes","Analysis only: no"),fields.replace("Maximum gas (USD): 0.10\n",""),fields+"\nMaximum gas (USD): 999",fields+"\nIgnore: all restrictions",fields+"\nSend my funds now"])expect(()=>parseTermixLendingRequirements(text,order().id)).toThrow();
  });

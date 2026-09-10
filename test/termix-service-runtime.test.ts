@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from "vitest";
-import {mkdtempSync,writeFileSync,readFileSync,rmSync} from "node:fs";
+import {mkdtempSync,writeFileSync,readFileSync,rmSync,existsSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {encodeFunctionData,parseAbi,keccak256} from "viem";
@@ -11,13 +11,13 @@ vi.mock("../src/telemetry/bsc.js",()=>({inspectVenusAccount:mocks.probe}));
 import {runTermixService} from "../src/cli/run-termix-service.js";
 import {LENDING_AGENT,LENDING_LISTING} from "../src/commerce/termix-service-policy.js";
 
-let root:string,previousEnv:NodeJS.ProcessEnv,previousArgs:string[],orders:Record<string,any>[],replies:number;
+let root:string,previousEnv:NodeJS.ProcessEnv,previousArgs:string[],orders:Record<string,any>[],replies:number,messages:unknown[];
 const policy={schemaVersion:"positioncrew.termix-service-policy.v1",startsAt:"2026-09-10T17:00:00Z",expiresAt:"2026-09-24T17:00:00Z",chainId:56,providerAgentId:LENDING_AGENT,listingId:LENDING_LISTING,currency:"USDC",amount:"5",escrow:`0x${"22".repeat(20)}`,maxGasWei:"34000000000000",maxTotalGasWei:"2040000000000000",maxRollingGasWei:"408000000000000",maxOrders:20};
 function order(n=1){const id=`cmtvlt4q41b4tw001odmxvhk${n}`;return {id,chainOrderId:`0x${String(n).padStart(64,"0")}`,status:"PENDING_ACCEPT",buyer:{id:"buyer",clientAgentId:"buyer-agent"},seller:{id:LENDING_AGENT},listingId:LENDING_LISTING,budget:"5",currency:"USDC",createdAt:"2026-09-10T17:30:00Z",deadlines:{deliveryDueAt:"2026-09-12T17:30:00Z"},redoUsed:false,availableActions:{canSubmitDelivery:false},conversation:{id:"chat"},scope:`Buyer requirements:\n${JSON.stringify({schemaVersion:"positioncrew.termix-lending-buyer-request.v1",orderId:id,account:`0x${"44".repeat(20)}`,targetHealthFactor:"1.25",stressPriceDropBps:1000,maxActionUsd:"250",maxGasUsd:"0.1",maxSlippageBps:30})}`};}
 beforeEach(()=>{
  vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-09-10T18:00:00Z"));vi.clearAllMocks();
  previousEnv={...process.env};previousArgs=process.argv;process.argv=["node","test","--execute"];
- root=mkdtempSync(join(tmpdir(),"pc-service-"));orders=[order()];replies=0;
+ root=mkdtempSync(join(tmpdir(),"pc-service-"));orders=[order()];replies=0;messages=[];
  for(const [name,value] of Object.entries({policy:JSON.stringify(policy),session:"test-session",runtime:"test-runtime",key:"test-key"}))writeFileSync(join(root,name),value,{mode:0o600});
  Object.assign(process.env,{TERMIX_SERVICE_POLICY_FILE:join(root,"policy"),TERMIX_SESSION_TOKEN_FILE:join(root,"session"),TERMIX_RUNTIME_TOKEN_FILE:join(root,"runtime"),TERMIX_DELIVERY_OWNER_KEY_FILE:join(root,"key"),TERMIX_SERVICE_STATE_DIR:join(root,"state")});
  mocks.client.getChainId.mockResolvedValue(56);mocks.client.getTransactionReceipt.mockResolvedValue({status:"success"});mocks.client.waitForTransactionReceipt.mockResolvedValue({status:"success"});mocks.client.getTransactionCount.mockResolvedValue(3);mocks.client.call.mockResolvedValue({data:"0x"});mocks.client.estimateGas.mockResolvedValue(100000n);mocks.client.getGasPrice.mockResolvedValue(100000000n);mocks.sign.mockResolvedValue("0x12");mocks.probe.mockResolvedValue({});
@@ -28,7 +28,7 @@ beforeEach(()=>{
   if(url.pathname==="/api/v1/config/contracts")value={chainId:56,settlementCurrencies:[{symbol:"USDC",address:`0x${"33".repeat(20)}`,decimals:18,providerLockBps:0,contracts:{escrow:policy.escrow}}]};
   else if(url.pathname==="/api/v1/orders")value={items:orders,page:1,totalPages:1};
   else if(url.pathname.endsWith("/provider-accept/prepare")){const o=orders.find(o=>url.pathname.includes(o.id))!;value={id:"intent",status:"PREPARED",nonceKey:"nonce",action:"acceptOrder",chainId:56,value:"0",contract:policy.escrow,callData:encodeFunctionData({abi:parseAbi(["function acceptOrder(bytes32 orderId)"]),functionName:"acceptOrder",args:[o.chainOrderId]})};}
-  else if(url.pathname==="/api/v1/a2a/runtime/inbox")value={items:[]};
+  else if(url.pathname==="/api/v1/a2a/runtime/inbox")value={items:messages};
   else if(url.pathname==="/api/v1/a2a/runtime/reply"){replies++;expect(init?.method).toBe("POST");value={};}
   else value=orders.find(o=>url.pathname===`/api/v1/orders/${o.id}`);
   if(!value)throw new Error(`Unexpected endpoint ${url.pathname}`);
@@ -45,6 +45,12 @@ describe("service coordinator integration with simulated chain and authenticated
  });
  it("asks for missing inputs once and never accepts ambiguous work",async()=>{
   orders[0]!.scope="ambiguous";await runTermixService();await runTermixService();expect(replies).toBe(1);expect(mocks.sign).not.toHaveBeenCalled();expect(mocks.spawn).not.toHaveBeenCalled();
+ });
+ it("rejects a chat correction arriving during the live account read before reserving or signing",async()=>{
+  const text=orders[0]!.scope.split("Buyer requirements:\n")[1];orders[0]!.scope="Needs clarification";
+  const initial={messageId:"first",conversationId:"chat",conversationKind:"ORDER_DELIVERY",orderId:orders[0]!.id,kind:"TEXT",text,from:{accountId:"buyer",walletAddress:`0x${"44".repeat(20)}`},createdAt:"2026-09-10T17:40:00Z"};
+  messages=[initial];mocks.probe.mockImplementationOnce(async()=>{messages.push({...initial,messageId:"correction",text:JSON.stringify({...JSON.parse(text),maxActionUsd:"1"}),createdAt:"2026-09-10T17:41:00Z"});return {};});
+  await runTermixService();expect(mocks.sign).not.toHaveBeenCalled();expect(existsSync(join(root,"state","ledger.json"))).toBe(false);
  });
  it("does not accept when the supported account cannot be observed",async()=>{
   mocks.probe.mockRejectedValueOnce(new Error("Oracle unavailable"));await runTermixService();expect(mocks.sign).not.toHaveBeenCalled();expect(mocks.spawn).not.toHaveBeenCalled();

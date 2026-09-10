@@ -58,6 +58,21 @@ export async function runTermixService() {
     return response.json();
   }
   const readOrder = async (id: string) => normalizeTermixProviderOrder(await api(`/api/v1/orders/${encodeURIComponent(id)}`));
+  async function buyerMessages(order: TermixProviderOrder) {
+    let since = z.string().datetime().parse(order.createdAt);
+    const messages: unknown[] = [];
+    let exhausted = false;
+    for (let page=0;page<20;page++) {
+      const batch = await runtime.poll(since,100);
+      messages.push(...batch);
+      if (batch.length < 100) {exhausted=true;break;}
+      const next = batch.map(m=>m.createdAt).sort().at(-1)!;
+      if (Date.parse(next)<=Date.parse(since)) throw new Error("Inbox pagination stalled; cannot safely choose current requirements");
+      since=next;
+    }
+    if (!exhausted) throw new Error("Inbox pagination limit reached");
+    return messages;
+  }
   const config = assertZeroStakeConfig(await api("/api/v1/config/contracts"),policy);
   const client = createPublicClient({chain:bsc,transport:http("https://bsc-dataseed.bnbchain.org",{timeout:15000,retryCount:2})});
   if (await client.getChainId() !== 56) throw new Error("Wrong chain");
@@ -112,18 +127,7 @@ export async function runTermixService() {
       if (!reservation) {
         let intake, locator;
         try {intake = createTermixLendingIntakeFromOrderScope(order);} catch {
-          let since = z.string().datetime().parse(order.createdAt);
-          const messages: unknown[] = [];
-          let exhausted = false;
-          for (let page=0;page<20;page++) {
-            const batch = await runtime.poll(since,100);
-            messages.push(...batch);
-            if (batch.length < 100) {exhausted=true;break;}
-            const next = batch.map(m=>m.createdAt).sort().at(-1)!;
-            if (Date.parse(next)<=Date.parse(since)) throw new Error("Inbox pagination stalled; cannot safely choose current requirements");
-            since=next;
-          }
-          if (!exhausted) throw new Error("Inbox pagination limit reached");
+          const messages = await buyerMessages(order);
           try {({intake,locator}=intakeFromMessages(order,messages));} catch {
             const conversationId = z.object({id:z.string()}).parse(order.conversation).id;
             // Stable key makes retrying a failed/ambiguous HTTP response idempotent.
@@ -140,6 +144,12 @@ export async function runTermixService() {
         }
         // Verify this supported account can actually be observed before accepting paid work.
         await inspectVenusAccount(intake.account,{targetHealthFactor:intake.targetHealthFactor,stressPriceDropBps:intake.stressPriceDropBps,maxActionUsd:intake.maxActionUsd,maxGasUsd:intake.maxGasUsd,maxSlippageBps:intake.maxSlippageBps});
+        if (locator) {
+          // Live account reads can take seconds. Do not seal an earlier buyer
+          // message if a correction arrived while observing the account.
+          const latest = intakeFromMessages(order, await buyerMessages(order));
+          if (canonicalHash(latest.intake) !== canonicalHash(intake) || canonicalHash(latest.locator) !== canonicalHash(locator)) throw new Error("Buyer requirements changed during observation; retry with latest input");
+        }
         const next = reserveOrder(ledger,policy,order,intake,locator);
         if (!execute) {log({event:"service.would-admit",orderId:order.id,currency:order.currency,amount:order.amount});continue;}
         // This reservation survives all retries and is never reclaimed on failure.

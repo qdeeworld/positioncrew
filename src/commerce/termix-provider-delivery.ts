@@ -261,6 +261,14 @@ Maximum gas (USD): your gas budget
 Maximum slippage (bps): your slippage limit
 Analysis only: yes`;
 
+export function stressPercentageToBps(value: string): number {
+  if (!/^\d+(?:\.\d{1,2})?$/.test(value)) throw new Error("Stress percentage requires at most two decimal places");
+  const [whole, fraction = ""] = value.split(".");
+  const bps = BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, "0"));
+  if (bps > 5000n) throw new Error("Stress percentage must be between zero and fifty");
+  return Number(bps);
+}
+
 export function parseTermixLendingRequirements(textInput: string, orderId: string) {
   const text = textInput.trim();
   let request: unknown;
@@ -275,7 +283,7 @@ export function parseTermixLendingRequirements(textInput: string, orderId: strin
       if (key === "analysisOnly") { if (value.toLowerCase() !== "yes") throw new Error("This service is analysis only"); fields[key] = true; }
       else if (key === "stressPriceDropBps" || key === "maxSlippageBps") {
         if (!/^\d+(?:\.\d+)?$/.test(value)) throw new Error("Invalid numeric requirement");
-        fields[key] = Number(value) * (key === "stressPriceDropBps" ? 100 : 1);
+        fields[key] = key === "stressPriceDropBps" ? stressPercentageToBps(value) : Number(value);
       } else fields[key] = value;
     }
     if (!fields.analysisOnly) throw new Error("Confirm analysis only: yes");
@@ -285,7 +293,7 @@ export function parseTermixLendingRequirements(textInput: string, orderId: strin
     const match = /^Assess the current Venus BSC mainnet position for (0x[a-fA-F0-9]{40})\. Target health factor (\d+(?:\.\d+)?); stress collateral prices by (\d+(?:\.\d+)?)%; maximum action budget USD (\d+(?:\.\d+)?); maximum gas USD (\d+(?:\.\d+)?); maximum slippage (\d+) bps\. Deliver current health factor, debt and collateral observations, stressed health factor, a bounded rescue recommendation or explicit no-action\/insufficient-budget result, projected health factor, source block, expiry, and a machine-readable report with a concise explanation\. Analysis only; do not execute protocol transactions\.$/.exec(text);
     if (!match) throw new Error("Unsupported or ambiguous buyer requirements; buyer clarification required");
     request = { schemaVersion: "positioncrew.termix-lending-buyer-request.v1", orderId: orderId,
-      account: match[1], targetHealthFactor: match[2], stressPriceDropBps: Number(match[3]) * 100,
+      account: match[1], targetHealthFactor: match[2], stressPriceDropBps: stressPercentageToBps(match[3]!),
       maxActionUsd: match[4], maxGasUsd: match[5], maxSlippageBps: Number(match[6]) };
   }
   const parsed = TermixLendingBuyerRequestSchema.parse(request);

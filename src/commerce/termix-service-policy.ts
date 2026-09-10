@@ -49,6 +49,7 @@ export function assertServiceOrder(input: unknown, policy: ServicePolicy, now = 
   // Never enrol historical work or orders created before this deployment's policy.
   const createdAt = z.string().datetime().parse(order.createdAt);
   if (Date.parse(createdAt) < Date.parse(policy.startsAt) || Date.parse(createdAt) > now) throw new Error("Order outside policy start window");
+  if (Date.parse(policy.expiresAt) < now + 600000) throw new Error("Insufficient service policy lifetime for fulfillment");
   if (!order.deliveryDueAt || Date.parse(order.deliveryDueAt) < now + 600000) throw new Error("Insufficient delivery time");
   if (!["PENDING_ACCEPT", "FUNDED", "IN_PROGRESS"].includes(order.status)) throw new Error("Order is not actionable");
   return order;
