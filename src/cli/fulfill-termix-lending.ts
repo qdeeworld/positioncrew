@@ -57,8 +57,10 @@ export function protectedText(path: string, trim = true) {
   const text=readFileSync(path,"utf8");
   return trim ? text.trim() : text;
 }
-export function shouldRefreshDelivery(previous: {deliveryRound: number; artifact: {resultExpiresAt: string} | null} | null, redoUsed: boolean, now = Date.now()) {
-  return previous?.deliveryRound === (redoUsed ? 2 : 1) && !!previous.artifact && Date.parse(previous.artifact.resultExpiresAt) < now + 240000;
+export function shouldRefreshDelivery(previous: {deliveryRound: number; artifact: {resultExpiresAt: string} | null} | null, redoUsed: boolean, _now = Date.now()) {
+  // Called only after signed-journal recovery. Each unsigned retry gets fresh
+  // observations; reusing an aging checkpoint spends the signing margin.
+  return previous?.deliveryRound === (redoUsed ? 2 : 1) && !!previous.artifact;
 }
 export function deliveryJournalName(orderId: string, redoUsed: boolean) {
   return `${orderId}.round-${redoUsed ? 2 : 1}.delivery-signed.json`;

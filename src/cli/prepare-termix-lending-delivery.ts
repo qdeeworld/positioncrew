@@ -648,8 +648,8 @@ async function run(): Promise<void> {
   const existingExpired = priorArtifact
     ? Date.parse(priorArtifact.resultExpiresAt) - Date.now() < 240_000
     : false;
-  if (args.refreshExpired && (!priorArtifact || !existingExpired)) {
-    throw new Error("--refresh-expired requires an existing current-round artifact with less than 240 seconds remaining");
+  if (args.refreshExpired && !priorArtifact) {
+    throw new Error("--refresh-expired requires an existing current-round artifact");
   }
 
   let artifact;

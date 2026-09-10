@@ -24,6 +24,7 @@ describe("delivery recovery persistence",()=>{
   expect(()=>assertDeliverySigningWindow(p,o,expiry(250),now)).not.toThrow();
   expect(()=>assertDeliveryWindow(p,o,expiry(250),now+125000)).not.toThrow();
   for(const seconds of [90,120,239]){expect(()=>assertDeliverySigningWindow(p,o,expiry(seconds),now)).toThrow("recovery time");expect(shouldRefreshDelivery({deliveryRound:1,artifact:{resultExpiresAt:expiry(seconds)}},false,now)).toBe(true);}
+  for(const seconds of [240,241,300])expect(shouldRefreshDelivery({deliveryRound:1,artifact:{resultExpiresAt:expiry(seconds)}},false,now)).toBe(true);
   expect(()=>assertDeliverySigningWindow(p,{...o,deadlines:{deliveryDueAt:expiry(200)}},expiry(250),now)).toThrow("recovery time");
  });
  it("preserves artifact bytes including the hashed trailing newline",()=>{const dir=mkdtempSync(join(tmpdir(),"termix-artifact-"));try{const path=join(dir,"artifact.json"),content=JSON.stringify({result:"HOLD"},null,2)+"\n";writeFileSync(path,content,{mode:0o600});expect(protectedText(path,false)).toBe(content);expect(protectedText(path)).not.toBe(content);}finally{rmSync(dir,{recursive:true});}});
