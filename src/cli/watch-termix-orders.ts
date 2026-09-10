@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isCliEntrypoint } from "../core/cli-entrypoint.js";
 import { z } from "zod";
 import { atomicJson } from "../core/atomic-json.js";
 
@@ -197,7 +197,7 @@ async function main(): Promise<void> {
   })}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isCliEntrypoint(import.meta.url, process.argv[1], "watch-termix-orders")) {
   main().catch((error: unknown) => {
     process.stderr.write(`${JSON.stringify({
       event: "termix.order-watch.failed",

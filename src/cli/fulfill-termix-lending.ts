@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, lstatSync, mkdirSync, openSync, fsyncSync, closeSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve, isAbsolute, dirname } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isCliEntrypoint } from "../core/cli-entrypoint.js";
 import { createPublicClient, http, keccak256, formatEther, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { bsc } from "viem/chains";
@@ -140,4 +140,4 @@ async function run() {
   if(receipt.status!=="success")throw new Error("Delivery reverted");
   console.log(json({event:"delivery.confirmed",orderId:policy.orderId,hash,gasCostBnb:formatEther(receipt.gasUsed*receipt.effectiveGasPrice)}));
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)run().catch(e=>{console.error(json({event:"delivery.failed",error:e.shortMessage??e.message}));process.exitCode=1;});
+if(isCliEntrypoint(import.meta.url, process.argv[1], "fulfill-termix-lending"))run().catch(e=>{console.error(json({event:"delivery.failed",error:e.shortMessage??e.message}));process.exitCode=1;});

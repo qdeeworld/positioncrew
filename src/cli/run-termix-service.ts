@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isCliEntrypoint } from "../core/cli-entrypoint.js";
 import { spawnSync } from "node:child_process";
 import { createPublicClient, http, keccak256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -206,6 +206,6 @@ export async function runTermixService() {
   log({event:"service.scan-complete",execute,orders:orders.length,reserved:Object.keys(ledger.reservations).length,failures,escrow:config.settlementCurrencies.find(c=>c.symbol===policy.currency)!.contracts.escrow});
   if (failures) process.exitCode=1;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runTermixService().catch(error=>{
+if (isCliEntrypoint(import.meta.url, process.argv[1], "run-termix-service")) runTermixService().catch(error=>{
   log({event:"service.failed",error:error.shortMessage ?? error.message});process.exitCode=1;
 });
