@@ -9,7 +9,7 @@ import {
   fetchAacpProductionConfig,
 } from "./aacp-production.js";
 
-const AgentCategorySchema = z.literal("Market & Protocol Research");
+const AgentCategorySchema = z.enum(["Market & Protocol Research", "Security & Verification"]);
 const SettlementSymbolSchema = z.enum(["USDC", "USDT"]);
 
 export const AacpAgentPreparePayloadSchema = z

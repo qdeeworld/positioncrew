@@ -2476,7 +2476,7 @@ async function api(
         {
           schemaVersion: "positioncrew.provider-catalog-response.v1",
           generatedAt: new Date().toISOString(),
-          commerceAdapter: "AACP_PRODUCTION_RUNTIME_PENDING",
+          commerceAdapter: "AACP_DEDICATED_RUNTIME_CONFIGURED",
           providers: PROVIDER_CATALOG,
         },
         200,

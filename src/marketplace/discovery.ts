@@ -148,7 +148,7 @@ export function buildProviderManifest(
     },
     commerce: {
       settlement: provider.settlement,
-      adapter: "AACP_PRODUCTION_RUNTIME_PENDING",
+      adapter: "AACP_DEDICATED_RUNTIME_CONFIGURED",
       readinessUrl: absolute(origin, "/api/commerce/aacp"),
       freshHistoricalHireUrl: absolute(origin, "/api/benchmark-hires"),
       freshCurrentHireUrl: absolute(origin, "/api/benchmark-hires"),
@@ -240,7 +240,7 @@ export function buildMarketplaceManifest(
       categoryCoverage: "4_OF_4",
       providerIdentity: "ERC8004_BSC_TESTNET_VERIFIED",
       settlement: "IN_MEMORY_CONFORMANCE",
-      aacp: "PRODUCTION_RUNTIME_PENDING",
+      aacp: "DEDICATED_RUNTIME_CONFIGURED",
       judgeTrial: "NO_WALLET_PROVIDER_CALL",
       publicAssessment: "ZERO_COST_UNSIGNED_PLAN_OR_REFUSAL_NO_PAYMENT",
       legacyJudgeTrialAlias: "claims.judgeTrial describes the public assessment, not a separate evaluator-only journey.",

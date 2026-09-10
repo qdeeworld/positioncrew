@@ -28,14 +28,14 @@ const expectedServices = new Set([
   "YIELD_OPTIMIZATION",
   "BOUNDED_GRID",
 ]);
-const expectedAacpAgentTokenIds = new Set(["266229", "266231", "266232", "266234"]);
+const expectedAacpAgentTokenIds = new Set(["293111", "342734", "342735", "342736"]);
 const expectedAacpListings = new Map([
-  ["266229", "cmsrfz5ze0t4otn01pm8bdane"],
-  ["266231", "cmsrg0fq00td7tn01awonk3td"],
-  ["266232", "cmsrg1lr20tkytn01gs2ynens"],
-  ["266234", "cmsrg2czh0tohtn01ng23b34c"],
+  ["293111", "cmt4e8j3nlmuiw7019f4qf24x"],
+  ["342734", "cmtvay77n03cguu01yha0429i"],
+  ["342735", "cmtvay8gz03d2uu01qv1h1r91"],
+  ["342736", "cmtvay99y03dguu011pkb99wv"],
 ]);
-const expectedAacpOwner = "0xbad35fa6e368e90fc4faf63507f2d0a2fdf94baf";
+const expectedAacpOwner = "0xadd748c416e8a7efd7d65d18abb121dea268ddf9";
 const referencePancakePositionId = "1456267";
 const expectedShadowGridClaimBoundary = [
   "Forward-only, zero-fund shadow outcomes use only actual block-pinned PancakeSwap WBNB/USDT observations recorded after precommitment.",
@@ -1088,7 +1088,7 @@ try {
     "Marketplace judge-trial boundary changed unexpectedly",
   );
   assert(
-    marketplace.claims?.aacp === "PRODUCTION_RUNTIME_PENDING",
+    marketplace.claims?.aacp === "DEDICATED_RUNTIME_CONFIGURED",
     "Marketplace AACP claim boundary changed unexpectedly",
   );
   assert(
@@ -1322,10 +1322,8 @@ try {
     "Dedicated Lending Rescue flagship is not published and online",
   );
   assert(
-    (onlineAacpProviders.length === 4 && aacpReadiness.state === "PROVIDERS_ONLINE") ||
-      (onlineAacpProviders.length < 4 &&
-        aacpReadiness.state === "LISTINGS_PUBLISHED_RUNTIME_PENDING"),
-    "AACP readiness state is inconsistent with live runtime presence",
+    onlineAacpProviders.length === 4 && aacpReadiness.state === "PROVIDERS_ONLINE",
+    "All four dedicated TermiX providers must be online",
   );
   assert(
     aacpReadiness.integration?.guide?.status === "CURRENT_HUMAN_GUIDE_VERIFIED" &&
@@ -1343,11 +1341,13 @@ try {
   const rotations = runtimeEvidence?.rotations ?? [];
   const archiveAttestation = runtimeEvidence?.archiveAttestation;
   assert(
-    aacpReadiness.integration.runtime.automationScope === "DEDICATED_FLAGSHIP_ONLY" &&
+    aacpReadiness.integration.runtime.automationScope === "DEDICATED_FOUR_PROVIDERS" &&
       aacpReadiness.integration.runtime.signerIsolation ===
         "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT" &&
       aacpReadiness.integration.runtime.pollerHasSigningMaterial === false &&
-      aacpReadiness.integration.runtime.originalProvidersAutoRenew === false,
+      aacpReadiness.integration.runtime.originalProvidersAutoRenew === false &&
+      aacpReadiness.integration.runtime.activeProvidersAutoRenew === true &&
+      aacpReadiness.integration.runtime.activeProviderCount === 4,
     "AACP runtime automation scope is overstated",
   );
   assert(
@@ -1627,7 +1627,7 @@ try {
   );
   report.aacpReadiness = aacpReadiness;
   report.aacpRuntime = {
-    requiredForCoreHealth: false,
+    requiredForCoreHealth: true,
     status: onlineAacpProviders.length === 4 ? "ONLINE" : "RUNTIME_PENDING",
     onlineProviderCount: onlineAacpProviders.length,
     requiredProviderCount: 4,
@@ -1635,7 +1635,7 @@ try {
     verifiedAutomaticRotations: runtimeEvidence.verifiedRotationCount,
     latestRotationAt: runtimeEvidence.latestCompletedAt,
     boundary:
-      "TermiX integration is optional for the challenge. Expiring A2A presence is reported separately and never converted into continuous-uptime evidence.",
+      "The four dedicated TermiX runtimes are required for production health. A passing observation does not establish continuous uptime.",
   };
 
   const marketplaceDelivery = await fetchJson(
@@ -2468,7 +2468,7 @@ try {
       `${entry.service} settlement boundary changed unexpectedly`,
     );
     assert(
-      manifest.commerce?.adapter === "AACP_PRODUCTION_RUNTIME_PENDING" &&
+      manifest.commerce?.adapter === "AACP_DEDICATED_RUNTIME_CONFIGURED" &&
         new URL(manifest.commerce?.readinessUrl).origin === baseUrl.origin,
       `${entry.service} AACP readiness binding changed unexpectedly`,
     );

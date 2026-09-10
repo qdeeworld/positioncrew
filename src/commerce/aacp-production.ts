@@ -7,8 +7,8 @@ import {
   sha256,
   stringToHex,
 } from "viem";
-import termixIdentityEvidence from "../../evidence/termix-identities.mainnet.json" with { type: "json" };
-import termixListingEvidence from "../../evidence/termix-listings.mainnet.json" with { type: "json" };
+import termixIdentityEvidence from "../../evidence/termix-dedicated-identities.mainnet.json" with { type: "json" };
+import termixListingEvidence from "../../evidence/termix-dedicated-listings.mainnet.json" with { type: "json" };
 import dedicatedLendingEvidence from "../../evidence/termix-dedicated-lending.mainnet.json" with { type: "json" };
 import termixRuntimeRotationManifest from "../../evidence/termix-runtime-rotation-events.manifest.json" with { type: "json" };
 import termixRuntimeRotationEvidence from "../../evidence/termix-runtime-rotations.mainnet.json" with { type: "json" };
@@ -95,7 +95,7 @@ const AacpMainnetListingEvidenceSchema = z
           listingId: z.string().min(1),
           listingUrl: z.string().url(),
           title: z.string().min(1),
-          category: z.literal("Market & Protocol Research"),
+          category: z.enum(["Market & Protocol Research", "Security & Verification"]),
           skillTag: z.string().min(1),
           tags: z.array(z.string().min(1)).min(1),
           basePrice: z.literal("5"),
@@ -103,11 +103,12 @@ const AacpMainnetListingEvidenceSchema = z
           deliveryDays: z.literal(1),
           instantBuyable: z.literal(true),
           publicSearch: z.literal(true),
-          challengeWindowHours: z.literal(24),
-          settlementType: z.literal("escrow"),
-          proofMethod: z.literal("optimistic"),
+          challengeWindowHours: z.literal(48),
+          settlementType: z.literal("optimistic"),
+          proofMethod: z.literal("manual"),
           bondAmount: z.literal("0"),
-          packageScope: z.literal("One bounded decision or explicit refusal"),
+          description: z.string().min(1),
+          packages: z.array(z.never()).length(0),
           coverImageUrl: z.string().url(),
           coverImageState: z.literal("DEFAULT_PLATFORM_BANNER"),
           createdAt: z.string().datetime(),
@@ -343,118 +344,6 @@ export const AacpProductionConfigSchema = z
 
 export type AacpProductionConfig = z.infer<typeof AacpProductionConfigSchema>;
 
-export interface AacpProviderBlueprint {
-  service: z.infer<typeof ServiceTypeSchema>;
-  mintName: string;
-  handle: string;
-  displayName: string;
-  category: "Market & Protocol Research";
-  description: string;
-  tags: string[];
-  listing: {
-    title: string;
-    category: "Market & Protocol Research";
-    basePrice: "5";
-    currency: "USDC";
-    deliveryDays: 1;
-    description: string;
-    skillTag: string;
-    tags: string[];
-    instantBuyable: true;
-    publicSearch: true;
-    challengeWindowHours: 24;
-    settlementType: "escrow";
-    proofMethod: "optimistic";
-    bondAmount: "0";
-    coverImageUrl: string;
-    coverImageAlt: string;
-  };
-}
-
-function blueprint(
-  service: AacpProviderBlueprint["service"],
-  mintName: string,
-  displayName: string,
-  description: string,
-  title: string,
-  skillTag: string,
-  coverSlug: string,
-  agentTags: string[],
-  listingTags: string[] = agentTags,
-): AacpProviderBlueprint {
-  return {
-    service,
-    mintName,
-    handle: `${mintName}.agent`,
-    displayName,
-    category: "Market & Protocol Research",
-    description,
-    tags: agentTags,
-    listing: {
-      title,
-      category: "Market & Protocol Research",
-      basePrice: "5",
-      currency: "USDC",
-      deliveryDays: 1,
-      description: `${description} The deliverable is machine-readable JSON with source commitments, execution bounds, expiry, and an explicit refusal when the evidence or buyer limits do not support a safe action. A no-wallet trial is available at https://positioncrew.dolepee.com.`,
-      skillTag,
-      tags: listingTags,
-      instantBuyable: true,
-      publicSearch: true,
-      challengeWindowHours: 24,
-      settlementType: "escrow",
-      proofMethod: "optimistic",
-      bondAmount: "0",
-      coverImageUrl: `https://positioncrew.dolepee.com/listing-media/${coverSlug}.png`,
-      coverImageAlt: `${displayName} example deliverable with bounded inputs, decision, execution guards, and evidence status.`,
-    },
-  };
-}
-
-export const AACP_PROVIDER_BLUEPRINTS: readonly AacpProviderBlueprint[] = [
-  blueprint(
-    "LENDING_RESCUE",
-    "positioncrew-lending-rescue",
-    "PositionCrew Lending Rescue",
-    "Computes the smallest bounded Venus debt repayment or collateral top-up needed to reach a buyer-selected health factor.",
-    "Rescue a Venus lending position",
-    "On-chain Analytics",
-    "lending-rescue",
-    ["Monitor", "On-chain Analytics", "Financial Advisor"],
-    ["On-chain Analytics", "Financial Advisor", "Portfolio Management"],
-  ),
-  blueprint(
-    "LP_REBALANCE",
-    "positioncrew-lp-rebalance",
-    "PositionCrew LP Range Operator",
-    "Evaluates a PancakeSwap V3 position and proposes a cost-, slippage-, inventory-, and break-even-bounded range shift or HOLD.",
-    "Rebalance a PancakeSwap V3 LP range",
-    "DeFi Yield Optimizer",
-    "lp-rebalance",
-    ["DeFi Yield Optimizer", "Portfolio Management", "On-chain Analytics"],
-  ),
-  blueprint(
-    "YIELD_OPTIMIZATION",
-    "positioncrew-yield-optimizer",
-    "PositionCrew Yield Allocator",
-    "Compares block-pinned Venus stablecoin markets and returns a liquidity-, concentration-, migration-cost-, and risk-bounded allocation or HOLD.",
-    "Optimise a Venus stablecoin allocation",
-    "DeFi Yield Optimizer",
-    "yield-optimization",
-    ["DeFi Yield Optimizer", "Portfolio Management", "On-chain Analytics"],
-  ),
-  blueprint(
-    "BOUNDED_GRID",
-    "positioncrew-bounded-grid",
-    "PositionCrew Bounded Grid Builder",
-    "Constructs or rejects a PancakeSwap WBNB/USDT grid under explicit volatility, fee, slippage, inventory, gas, and maximum-loss limits.",
-    "Build or reject a bounded PancakeSwap grid",
-    "Trading Bot",
-    "bounded-grid",
-    ["Trading Bot", "Quant Strategy", "Technical Analysis"],
-  ),
-] as const;
-
 export const AACP_MAINNET_IDENTITY_EVIDENCE =
   AacpMainnetIdentityEvidenceSchema.parse(termixIdentityEvidence);
 
@@ -463,6 +352,81 @@ export const AACP_MAINNET_LISTING_EVIDENCE =
 
 export const AACP_DEDICATED_LENDING_EVIDENCE =
   AacpDedicatedLendingEvidenceSchema.parse(dedicatedLendingEvidence);
+
+type ActiveListing = (typeof AACP_MAINNET_LISTING_EVIDENCE.listings)[number];
+export interface AacpProviderBlueprint {
+  service: z.infer<typeof ServiceTypeSchema>;
+  mintName: string;
+  handle: string;
+  displayName: string;
+  category: ActiveListing["category"];
+  description: string;
+  tags: string[];
+  listing: Pick<ActiveListing, "title" | "category" | "basePrice" | "currency" | "deliveryDays" | "description" | "skillTag" | "tags" | "instantBuyable" | "publicSearch" | "challengeWindowHours" | "settlementType" | "proofMethod" | "bondAmount" | "coverImageUrl"> & { coverImageAlt: string };
+}
+
+if (
+  AACP_MAINNET_IDENTITY_EVIDENCE.owner.toLowerCase() !== AACP_DEDICATED_LENDING_EVIDENCE.owner.toLowerCase() ||
+  AACP_MAINNET_LISTING_EVIDENCE.owner.toLowerCase() !== AACP_DEDICATED_LENDING_EVIDENCE.owner.toLowerCase() ||
+  new Set(AACP_MAINNET_IDENTITY_EVIDENCE.providers.map((p) => p.service)).size !== 4 ||
+  new Set(AACP_MAINNET_IDENTITY_EVIDENCE.providers.map((p) => p.agentTokenId)).size !== 4 ||
+  new Set(AACP_MAINNET_LISTING_EVIDENCE.listings.map((p) => p.service)).size !== 4 ||
+  new Set(AACP_MAINNET_LISTING_EVIDENCE.listings.map((p) => p.agentId)).size !== 4 ||
+  new Set(AACP_MAINNET_LISTING_EVIDENCE.listings.map((p) => p.listingId)).size !== 4
+) throw new Error("Dedicated fleet evidence must bind four distinct providers to the production wallet");
+
+const activeLendingListing = AACP_MAINNET_LISTING_EVIDENCE.listings.find(
+  (listing) => listing.service === "LENDING_RESCUE",
+);
+for (const field of ["agentId", "agentTokenId", "listingId", "handle"] as const) {
+  if (activeLendingListing?.[field] !== AACP_DEDICATED_LENDING_EVIDENCE[field]) {
+    throw new Error(`Dedicated flagship ${field} differs from the active Lending Rescue provider`);
+  }
+}
+
+const providerNames = {
+  LENDING_RESCUE: ["PositionCrew Lending Rescue", "lending-rescue"],
+  LP_REBALANCE: ["PositionCrew LP Rebalance", "lp-rebalance"],
+  YIELD_OPTIMIZATION: ["PositionCrew Yield Optimization", "yield-optimization"],
+  BOUNDED_GRID: ["PositionCrew Bounded Grid", "bounded-grid"],
+} as const;
+
+export const AACP_PROVIDER_BLUEPRINTS: readonly AacpProviderBlueprint[] =
+  AACP_MAINNET_IDENTITY_EVIDENCE.providers.map((identity) => {
+    const listing = AACP_MAINNET_LISTING_EVIDENCE.listings.find(
+      (item) => item.service === identity.service,
+    );
+    if (!listing) throw new Error(`Missing dedicated listing for ${identity.service}`);
+    const [displayName, coverSlug] = providerNames[identity.service];
+    return {
+      service: identity.service,
+      mintName: identity.handle.replace(/\.agent$/, ""),
+      handle: identity.handle,
+      displayName,
+      category: listing.category,
+      description: identity.description,
+      tags: identity.tags,
+      listing: {
+        title: listing.title,
+        category: listing.category,
+        basePrice: listing.basePrice,
+        currency: listing.currency,
+        deliveryDays: listing.deliveryDays,
+        description: listing.description,
+        skillTag: listing.skillTag,
+        tags: listing.tags,
+        instantBuyable: listing.instantBuyable,
+        publicSearch: listing.publicSearch,
+        challengeWindowHours: listing.challengeWindowHours,
+        settlementType: listing.settlementType,
+        proofMethod: listing.proofMethod,
+        bondAmount: listing.bondAmount,
+        // Prepared onboarding media is separate from the currently published cover.
+        coverImageUrl: `https://positioncrew.dolepee.com/listing-media/${coverSlug}.png`,
+        coverImageAlt: `${displayName} example deliverable with bounded inputs, decision, execution guards, and evidence status.`,
+      },
+    };
+  });
 
 export function redactedRuntimeRotationEventSha256(input: {
   completedAt: string;
@@ -879,7 +843,7 @@ const ListingDetailSchema = z
           delivery: z.string().min(1),
         })
         .passthrough(),
-    ).length(3),
+    ).length(0),
   })
   .passthrough();
 
@@ -1179,16 +1143,8 @@ async function discoverProvider(
   if (JSON.stringify(listing.tags) !== JSON.stringify(blueprintValue.listing.tags)) {
     throw new Error(`Agent.family listing tags mismatch for ${blueprintValue.handle}`);
   }
-  for (const packageId of ["basic", "standard", "premium"] as const) {
-    const servicePackage = listing.packages.find((candidate) => candidate.id === packageId);
-    if (
-      !servicePackage ||
-      servicePackage.price !== blueprintValue.listing.basePrice ||
-      servicePackage.delivery !== String(blueprintValue.listing.deliveryDays) ||
-      servicePackage.scope !== recorded.packageScope
-    ) {
-      throw new Error(`Agent.family ${packageId} package mismatch for ${blueprintValue.handle}`);
-    }
+  if (listing.packages.length !== recorded.packages.length) {
+    throw new Error(`Agent.family package mismatch for ${blueprintValue.handle}`);
   }
 
   const online = listing.providerAgent.a2aStatus === "ONLINE";
@@ -1209,136 +1165,18 @@ async function discoverProvider(
   };
 }
 
-const DedicatedListingDetailSchema = z
-  .object({
-    id: z.string().min(1),
-    title: z.string().min(1),
-    category: z.string().min(1),
-    skillTag: z.string().min(1),
-    tags: z.array(z.string().min(1)).min(1),
-    description: z.string().min(1),
-    status: z.string().min(1),
-    instantBuyable: z.boolean(),
-    coverImageUrl: z.string().url(),
-    basePrice: z.string().min(1),
-    currency: z.string().min(1),
-    deliveryDays: z.number().int().positive(),
-    proofMethod: z.string().min(1),
-    settlementType: z.string().min(1),
-    challengeWindowHours: z.number().int().nonnegative(),
-    bondAmount: z.string(),
-    publicSearch: z.boolean(),
-    createdAt: z.string().datetime(),
-    providerAgent: z.object({
-      id: z.string().min(1),
-      agentTokenId: z.string().regex(/^\d+$/),
-      name: z.string().min(1),
-      a2aStatus: z.string().min(1),
-      presence: z.string().min(1),
-      verified: z.boolean(),
-    }).passthrough(),
-  })
-  .passthrough();
-
-async function discoverDedicatedFlagship(
-  identityPromise: Promise<Awaited<ReturnType<typeof probeContracts>>["dedicatedIdentity"]>,
-  fetchImpl: typeof fetch,
-) {
-  const recorded = AACP_DEDICATED_LENDING_EVIDENCE;
-  const listingResultPromise = fetchJson(
-    `${AACP_BSC_API}/api/v1/listings/${encodeURIComponent(recorded.listingId)}`,
-    fetchImpl,
-  ).then(
-    (value) => {
-      const parsed = DedicatedListingDetailSchema.safeParse(value);
-      return { listing: parsed.success ? parsed.data : null };
-    },
-    () => ({ listing: null }),
-  );
-  const [identity, listingResult] = await Promise.all([identityPromise, listingResultPromise]);
-  if (!listingResult.listing) {
-    return {
-      ...recorded,
-      owner: identity.owner,
-      onchainVerified: identity.onchainVerified,
-      explorerUrl: identity.explorerUrl,
-      listingStatus: null,
-      liveListingVerified: false,
-      a2aStatus: null,
-      presence: null,
-      verified: false,
-      status: "LISTING_DISCOVERY_UNAVAILABLE" as const,
-    };
-  }
-  try {
-    const listing = listingResult.listing;
-    const expectedFields = [
-      ["listing ID", listing.id, recorded.listingId],
-      ["title", listing.title, recorded.title],
-      ["category", listing.category, recorded.category],
-      ["skill tag", listing.skillTag, recorded.skillTag],
-      ["description", listing.description, recorded.description],
-      ["status", listing.status, "PUBLISHED"],
-      ["base price", listing.basePrice, recorded.basePrice],
-      ["currency", listing.currency, recorded.currency],
-      ["delivery days", listing.deliveryDays, recorded.deliveryDays],
-      ["instant buy", listing.instantBuyable, recorded.instantBuyable],
-      ["public search", listing.publicSearch, recorded.publicSearch],
-      ["challenge window", listing.challengeWindowHours, recorded.challengeWindowHours],
-      ["settlement type", listing.settlementType, recorded.settlementType],
-      ["proof method", listing.proofMethod, recorded.proofMethod],
-      ["bond amount", listing.bondAmount, recorded.bondAmount],
-      ["cover image", listing.coverImageUrl, recorded.coverImageUrl],
-      ["created at", listing.createdAt, recorded.createdAt],
-      ["agent ID", listing.providerAgent.id, recorded.agentId],
-      ["agent token ID", listing.providerAgent.agentTokenId, recorded.agentTokenId],
-      ["agent handle", listing.providerAgent.name, recorded.handle],
-    ] as const;
-    for (const [field, actual, expected] of expectedFields) {
-      if (actual !== expected) throw new Error(`Dedicated flagship ${field} mismatch`);
-    }
-    if (JSON.stringify(listing.tags) !== JSON.stringify(recorded.tags)) {
-      throw new Error("Dedicated flagship listing tags mismatch");
-    }
-    const online = listing.providerAgent.a2aStatus === "ONLINE";
-    return {
-      ...recorded,
-      owner: identity.owner,
-      onchainVerified: identity.onchainVerified,
-      explorerUrl: identity.explorerUrl,
-      listingStatus: listing.status,
-      liveListingVerified: true,
-      a2aStatus: listing.providerAgent.a2aStatus,
-      presence: listing.providerAgent.presence,
-      verified: listing.providerAgent.verified,
-      status: online ? "ONLINE_AND_LISTED" as const : "LISTED_OFFLINE" as const,
-    };
-  } catch {
-    return {
-      ...recorded,
-      owner: identity.owner,
-      onchainVerified: identity.onchainVerified,
-      explorerUrl: identity.explorerUrl,
-      listingStatus: null,
-      liveListingVerified: false,
-      a2aStatus: null,
-      presence: null,
-      verified: false,
-      status: "LISTING_DISCOVERY_UNAVAILABLE" as const,
-    };
-  }
-}
-
 function aacpRuntimeReadiness() {
   const rotations = AACP_RUNTIME_ROTATION_EVIDENCE.rotations;
   return {
     status: "PREISSUED_TOKEN_ADAPTER_IMPLEMENTED" as const,
     ownerSignerOnHost: true as const,
     autoRenewsToken: true as const,
-    automationScope: "DEDICATED_FLAGSHIP_ONLY" as const,
+    automationScope: "DEDICATED_FOUR_PROVIDERS" as const,
     signerIsolation: "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT" as const,
     pollerHasSigningMaterial: false as const,
     originalProvidersAutoRenew: false as const,
+    activeProvidersAutoRenew: true as const,
+    activeProviderCount: 4 as const,
     tokenLifetimeHours: TERMIX_RUNTIME_TOKEN_LIFETIME_HOURS,
     expiryBufferSeconds: TERMIX_RUNTIME_EXPIRY_BUFFER_SECONDS,
     pollSeconds: TERMIX_RUNTIME_DEFAULT_POLL_SECONDS,
@@ -1376,15 +1214,22 @@ export async function getAacpProductionReadiness(options: FetchOptions = {}) {
       return discoverProvider(item, recordedIdentity(config, identity), fetchImpl);
     }),
   );
-  const dedicatedFlagshipPromise = discoverDedicatedFlagship(
-    chainPromise.then((chain) => chain.dedicatedIdentity),
-    fetchImpl,
-  );
-  const [chain, providers, dedicatedFlagship] = await Promise.all([
-    chainPromise,
-    providersPromise,
-    dedicatedFlagshipPromise,
-  ]);
+  const [chain, providers] = await Promise.all([chainPromise, providersPromise]);
+  const lending = providers.find((provider) => provider.service === "LENDING_RESCUE");
+  if (!lending) throw new Error("Dedicated Lending Rescue provider is missing");
+  // Compatibility view: use the same live observation as the active fleet.
+  const dedicatedFlagship = {
+    ...AACP_DEDICATED_LENDING_EVIDENCE,
+    owner: chain.dedicatedIdentity.owner,
+    onchainVerified: chain.dedicatedIdentity.onchainVerified,
+    explorerUrl: chain.dedicatedIdentity.explorerUrl,
+    listingStatus: lending.listingStatus,
+    liveListingVerified: lending.liveListingVerified,
+    a2aStatus: lending.a2aStatus,
+    presence: lending.presence,
+    verified: lending.verified,
+    status: lending.status,
+  };
   const deployedCount = chain.contracts.filter((contract) => contract.deployed).length;
   const listedCount = providers.filter((provider) => provider.listingStatus === "PUBLISHED").length;
   const onlineCount = providers.filter((provider) => provider.status === "ONLINE_AND_LISTED").length;
@@ -1485,8 +1330,8 @@ export async function getAacpProductionReadiness(options: FetchOptions = {}) {
         : "The four listings are published at 5 USDC each; it does not claim an online A2A runtime, stake, token approval, paid order, delivery, settlement, reputation result, external purchase, or revenue.",
       "Agent.family's default banner remains on the four listings until the prepared PositionCrew media is uploaded through the supported editor flow.",
       "PositionCrew's no-wallet trial and deterministic conformance scorer remain separate from AACP escrow and operator-granted dispute adjudication.",
-      `${AACP_RUNTIME_ROTATION_EVIDENCE.rotations.length} automatic scoped-token rotations have been observed for the dedicated Lending Rescue runtime. The owner signer is isolated in its root-only renewal unit, the unprivileged poller never receives signing material, and these discrete events do not establish continuous uptime or future renewal success.`,
-      "The additional dedicated flagship identity and listing are reported separately and do not replace, transfer, or erase the four original provider records.",
+      `${AACP_RUNTIME_ROTATION_EVIDENCE.rotations.length} automatic scoped-token rotations have been observed for the dedicated Lending Rescue runtime. These historical rotation receipts apply to Lending Rescue only; all four active providers now have separate renewal timers. The owner signer is isolated in its root-only renewal unit, the unprivileged poller never receives signing material, and these discrete events do not establish continuous uptime or future renewal success.`,
+      "The four active providers belong to the dedicated production wallet. The original personal-wallet identities and listings remain preserved as historical evidence; no ownership transfer is claimed.",
     ],
   };
 }
@@ -1586,7 +1431,7 @@ export function unavailableAacpProductionReadiness(now = new Date()) {
       "This record does not claim that a wallet-signed agent mint, paid order, delivery, settlement, reputation result, or external purchase has occurred.",
       "PositionCrew's no-wallet trial and deterministic conformance scorer remain separate from AACP escrow and operator-granted dispute adjudication.",
       `Committed evidence records ${AACP_RUNTIME_ROTATION_EVIDENCE.rotations.length} host-observed automatic rotations for the dedicated Lending Rescue runtime; current runtime presence is unavailable and is not inferred from that history.`,
-      "The additional dedicated flagship identity and listing are reported separately and do not replace, transfer, or erase the four original provider records.",
+      "The four active providers belong to the dedicated production wallet. The original personal-wallet identities and listings remain preserved as historical evidence; no ownership transfer is claimed.",
     ],
   };
 }

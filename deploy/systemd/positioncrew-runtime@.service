@@ -11,7 +11,9 @@ StartLimitBurst=5
 Type=simple
 DynamicUser=yes
 WorkingDirectory=-/opt/positioncrew-runtime
-EnvironmentFile=/home/crosswind/.config/positioncrew/runtimes/%i.env
+Environment=TERMIX_AACP_BASE_URL=https://platform-backend.prod.termix.live
+Environment=TERMIX_A2A_POLL_SECONDS=5
+EnvironmentFile=/etc/positioncrew-runtime/%i.env
 EnvironmentFile=-/etc/positioncrew-runtime/credentials/%i.expiry.env
 UnsetEnvironment=TERMIX_A2A_RUNTIME_TOKEN TERMIX_A2A_RUNTIME_TOKEN_FILE WALLET_KEY PRIVATE_KEY NODE_OPTIONS NODE_PATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES BASH_ENV ENV
 LoadCredential=runtime-token:/etc/positioncrew-runtime/credentials/%i.token
@@ -20,13 +22,13 @@ BindReadOnlyPaths=-/home/crosswind/.local/state/positioncrew:/run/positioncrew-l
 # cd /home/crosswind/apps/positioncrew && npm run build:core
 # /usr/bin/node /home/crosswind/apps/positioncrew/dist/cli/run-termix-runtime.js --bundle-runtime-artifact /home/crosswind/.local/lib/positioncrew/positioncrew-runtime.mjs
 ExecStartPre=+/usr/bin/env -i /usr/bin/install -d -o root -g root -m 0755 /opt/positioncrew-runtime
-ExecStartPre=+/usr/bin/env -i /usr/bin/install -T -o root -g root -m 0500 -- /home/crosswind/.local/lib/positioncrew/positioncrew-runtime.mjs /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate
-ExecStartPre=+/usr/bin/env -i /bin/sh -ec 'echo "0fe25cbcfcf7550ccc0714f2908f7725d325e00f87c27ed1db78a9633a3621c9  /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate" | /usr/bin/sha256sum --check --status'
-ExecStartPre=+/usr/bin/env -i /usr/bin/chmod 0555 /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate
-ExecStartPre=+/usr/bin/env -i /usr/bin/mv -fT -- /opt/positioncrew-runtime/.positioncrew-runtime.mjs.candidate /opt/positioncrew-runtime/positioncrew-runtime.mjs
+ExecStartPre=+/usr/bin/env -i /usr/bin/install -T -o root -g root -m 0500 -- /home/crosswind/.local/lib/positioncrew/positioncrew-runtime.mjs /opt/positioncrew-runtime/.positioncrew-runtime.%i.mjs.candidate
+ExecStartPre=+/usr/bin/env -i /bin/sh -ec 'echo "0fe25cbcfcf7550ccc0714f2908f7725d325e00f87c27ed1db78a9633a3621c9  /opt/positioncrew-runtime/.positioncrew-runtime.%i.mjs.candidate" | /usr/bin/sha256sum --check --status'
+ExecStartPre=+/usr/bin/env -i /usr/bin/chmod 0555 /opt/positioncrew-runtime/.positioncrew-runtime.%i.mjs.candidate
+ExecStartPre=+/usr/bin/env -i /usr/bin/mv -fT -- /opt/positioncrew-runtime/.positioncrew-runtime.%i.mjs.candidate /opt/positioncrew-runtime/positioncrew-runtime.mjs
 ExecStartPre=!/usr/bin/env -i /usr/bin/node /opt/positioncrew-runtime/positioncrew-runtime.mjs --validate-runtime-token-file /etc/positioncrew-runtime/credentials/%i.token
 ExecStartPre=!/usr/bin/env -i TERMIX_A2A_AGENT_ID=${TERMIX_A2A_AGENT_ID} POSITIONCREW_SERVICE=${POSITIONCREW_SERVICE} /usr/bin/node /opt/positioncrew-runtime/positioncrew-runtime.mjs --migrate-runtime-state /run/positioncrew-legacy-state/%i.json /var/lib/positioncrew-runtime-%i/runtime.json
-ExecStart=/usr/bin/env -i TERMIX_A2A_AGENT_ID=${TERMIX_A2A_AGENT_ID} POSITIONCREW_SERVICE=${POSITIONCREW_SERVICE} TERMIX_A2A_RUNTIME_TOKEN_EXPIRES_AT=${TERMIX_A2A_RUNTIME_TOKEN_EXPIRES_AT} POSITIONCREW_ORIGIN=https://positioncrew.dolepee.com TERMIX_A2A_STATE_PATH=/var/lib/positioncrew-runtime-%i/runtime.json /usr/bin/node /opt/positioncrew-runtime/positioncrew-runtime.mjs --runtime-token-file %d/runtime-token
+ExecStart=/usr/bin/env -i TERMIX_A2A_AGENT_ID=${TERMIX_A2A_AGENT_ID} POSITIONCREW_SERVICE=${POSITIONCREW_SERVICE} TERMIX_AACP_BASE_URL=${TERMIX_AACP_BASE_URL} TERMIX_A2A_POLL_SECONDS=${TERMIX_A2A_POLL_SECONDS} TERMIX_A2A_RUNTIME_TOKEN_EXPIRES_AT=${TERMIX_A2A_RUNTIME_TOKEN_EXPIRES_AT} POSITIONCREW_ORIGIN=https://positioncrew.dolepee.com TERMIX_A2A_STATE_PATH=/var/lib/positioncrew-runtime-%i/runtime.json /usr/bin/node /opt/positioncrew-runtime/positioncrew-runtime.mjs --runtime-token-file %d/runtime-token
 Restart=on-failure
 RestartPreventExitStatus=78
 RestartSec=30
@@ -78,8 +80,8 @@ Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 
-StandardOutput=append:/var/log/positioncrew-runtime-%i/runtime.log
-StandardError=append:/var/log/positioncrew-runtime-%i/runtime.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

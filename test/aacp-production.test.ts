@@ -193,12 +193,7 @@ function mockedFetch(options: {
           presence: options.listingPresence ?? "recent",
           verified: false,
         },
-        packages: ["basic", "standard", "premium"].map((id) => ({
-          id,
-          price: listing.basePrice,
-          scope: listing.packageScope,
-          delivery: String(listing.deliveryDays),
-        })),
+        packages: listing.packages,
       });
     }
     if (init?.method === "POST") {
@@ -256,7 +251,7 @@ function mockedFetch(options: {
 }
 
 describe("dedicated TermiX flagship evidence", () => {
-  it("preserves the original four providers while reporting the additional live listing separately", async () => {
+  it("counts the existing flagship within the dedicated four-provider fleet", async () => {
     const readiness = await getAacpProductionReadiness({ fetchImpl: mockedFetch() });
     expect(readiness.marketplace.providers).toHaveLength(4);
     expect(readiness.marketplace.dedicatedFlagship).toMatchObject({
@@ -269,18 +264,39 @@ describe("dedicated TermiX flagship evidence", () => {
       onchainVerified: true,
     });
     expect(readiness.state).toBe("LISTINGS_PUBLISHED_RUNTIME_PENDING");
-    expect(readiness.marketplace.onlineProviderCount).toBe(0);
+    expect(readiness.marketplace.onlineProviderCount).toBe(1);
     expect(readiness.integration.runtime).toMatchObject({
-      automationScope: "DEDICATED_FLAGSHIP_ONLY",
+      automationScope: "DEDICATED_FOUR_PROVIDERS",
       signerIsolation: "ROOT_ONLY_SYSTEMD_RENEWAL_UNIT",
       pollerHasSigningMaterial: false,
       originalProvidersAutoRenew: false,
+      activeProvidersAutoRenew: true,
+      activeProviderCount: 4,
       rotationEvidence: {
         verifiedRotationCount: 3,
         agentId: readiness.marketplace.dedicatedFlagship.agentId,
         agentTokenId: readiness.marketplace.dedicatedFlagship.agentTokenId,
       },
     });
+  });
+
+  it("uses one live Lending Rescue observation for the fleet and compatibility field", async () => {
+    let lendingRequests = 0;
+    const fixture = mockedFetch({ listingA2aStatus: "ONLINE", listingPresence: "online" });
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith(`/api/v1/listings/${AACP_DEDICATED_LENDING_EVIDENCE.listingId}`)) {
+        lendingRequests += 1;
+        if (lendingRequests > 1) return json({ error: "transient failure" }, 503);
+      }
+      return fixture(input, init);
+    }) as typeof fetch;
+    const readiness = await getAacpProductionReadiness({ fetchImpl });
+    expect(lendingRequests).toBe(1);
+    expect(readiness.state).toBe("PROVIDERS_ONLINE");
+    expect(readiness.marketplace.onlineProviderCount).toBe(4);
+    const lending = readiness.marketplace.providers.find((p) => p.service === "LENDING_RESCUE");
+    expect(readiness.marketplace.dedicatedFlagship.status).toBe(lending?.status);
+    expect(readiness.marketplace.dedicatedFlagship.a2aStatus).toBe(lending?.a2aStatus);
   });
 
   it("binds three chronological production rotations to the dedicated identity", () => {
@@ -401,10 +417,10 @@ describe("dedicated TermiX flagship evidence", () => {
   it("fails closed when the dedicated NFT owner or metadata URI changes on chain", async () => {
     await expect(
       getAacpProductionReadiness({ fetchImpl: mockedFetch({ wrongDedicatedIdentityOwner: true }) }),
-    ).rejects.toThrow("owner mismatch for dedicated Lending Rescue flagship");
+    ).rejects.toThrow("owner mismatch for positioncrew-rescue-adf9.agent");
     await expect(
       getAacpProductionReadiness({ fetchImpl: mockedFetch({ wrongDedicatedMetadata: true }) }),
-    ).rejects.toThrow("metadata URI mismatch for dedicated Lending Rescue flagship");
+    ).rejects.toThrow("metadata URI mismatch for positioncrew-rescue-adf9.agent");
   });
 
   it("starts dedicated listing discovery before the shared chain probe resolves", async () => {
@@ -478,7 +494,7 @@ describe("TermiX production AACP readiness", () => {
           status: "PREISSUED_TOKEN_ADAPTER_IMPLEMENTED",
           ownerSignerOnHost: true,
           autoRenewsToken: true,
-          automationScope: "DEDICATED_FLAGSHIP_ONLY",
+          automationScope: "DEDICATED_FOUR_PROVIDERS",
           pollerHasSigningMaterial: false,
           originalProvidersAutoRenew: false,
           tokenLifetimeHours: 12,
@@ -501,19 +517,19 @@ describe("TermiX production AACP readiness", () => {
         registeredIdentityCount: 4,
         indexedProviderCount: 4,
         publishedListingCount: 4,
-        onlineProviderCount: 0,
+        onlineProviderCount: 1,
       },
     });
     expect(readiness.protocol.deployedCount).toBe(readiness.protocol.contractCount);
     expect(readiness.protocol.currencies.map((currency) => currency.symbol)).toEqual(["USDC", "USDT"]);
-    expect(readiness.marketplace.providers.every((provider) => provider.status === "LISTED_OFFLINE")).toBe(true);
+    expect(readiness.marketplace.providers.filter((provider) => provider.status === "LISTED_OFFLINE")).toHaveLength(3);
     expect(readiness.marketplace.providers.every((provider) => provider.liveListingVerified)).toBe(true);
-    expect(readiness.marketplace.providers.every((provider) => provider.a2aStatus === "UNBOUND")).toBe(true);
+    expect(readiness.marketplace.providers.filter((provider) => provider.a2aStatus === "UNBOUND")).toHaveLength(3);
     expect(readiness.marketplace.providers.map((provider) => provider.agentTokenId)).toEqual([
-      "266229",
-      "266231",
-      "266232",
-      "266234",
+      "293111",
+      "342734",
+      "342735",
+      "342736",
     ]);
     expect(readiness.marketplace.providers.every((provider) => provider.identity.onchainVerified)).toBe(true);
     expect(readiness.integration.lifecycle).toContain("PENDING_OR_EXPIRED_CANCELLATION");

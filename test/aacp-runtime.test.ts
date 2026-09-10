@@ -99,6 +99,18 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(advanced.changed.map((order) => order.id)).toEqual(["order-1"]);
   });
 
+  it("watches all selected dedicated providers without accepting another provider's orders", () => {
+    const selected = ["lending", "lp", "yield", "grid"];
+    const orders = selected.map((providerAgentId) => ({
+      id: `${providerAgentId}-order`, status: "FUNDED", providerAgentId,
+    }));
+    orders.push({ id: "foreign-order", status: "FUNDED", providerAgentId: "foreign" });
+    orders.push({ id: "settled-order", status: "SETTLED", providerAgentId: "lp" });
+    expect(actionableOrders(orders, selected).map((order) => order.id)).toEqual([
+      "lending-order", "lp-order", "yield-order", "grid-order",
+    ]);
+  });
+
   it("publishes an alert durably before the watcher may advance its cursor", async () => {
     const operations: string[] = [];
     let openCount = 0;
@@ -499,7 +511,7 @@ describe("PositionCrew TermiX A2A runtime", () => {
         "utf8",
       );
       const pinnedHash = unit.match(
-        /echo "([a-f0-9]{64})  \/opt\/positioncrew-runtime\/\.positioncrew-runtime\.mjs\.candidate"/,
+        /echo "([a-f0-9]{64})  \/opt\/positioncrew-runtime\/\.positioncrew-runtime\.%i\.mjs\.candidate"/,
       )?.[1];
       expect(pinnedHash).toBe(createHash("sha256").update(first).digest("hex"));
     } finally {
@@ -513,10 +525,19 @@ describe("PositionCrew TermiX A2A runtime", () => {
       "utf8",
     );
     expect(unit).toContain("WorkingDirectory=-/opt/positioncrew-runtime");
+    expect(unit).toContain("/.positioncrew-runtime.%i.mjs.candidate");
+    expect(unit).not.toContain("/.positioncrew-runtime.mjs.candidate");
+    expect(unit).toContain("StandardOutput=journal");
+    expect(unit).toContain("StandardError=journal");
     expect(unit).toContain(
       "ExecStart=/usr/bin/env -i TERMIX_A2A_AGENT_ID=${TERMIX_A2A_AGENT_ID} POSITIONCREW_SERVICE=${POSITIONCREW_SERVICE}",
     );
     expect(unit).toContain("/usr/bin/node /opt/positioncrew-runtime/positioncrew-runtime.mjs --runtime-token-file %d/runtime-token");
+    const launch = unit.split("\n").find((line) => line.startsWith("ExecStart="));
+    expect(launch).toContain("TERMIX_AACP_BASE_URL=${TERMIX_AACP_BASE_URL}");
+    expect(launch).toContain("TERMIX_A2A_POLL_SECONDS=${TERMIX_A2A_POLL_SECONDS}");
+    expect(unit).toContain("Environment=TERMIX_AACP_BASE_URL=https://platform-backend.prod.termix.live");
+    expect(unit).toContain("Environment=TERMIX_A2A_POLL_SECONDS=5");
     expect(unit).not.toContain("BindReadOnlyPaths=/home/crosswind/apps/positioncrew");
     expect(unit).toContain(
       "ConditionFileNotEmpty=/home/crosswind/.local/lib/positioncrew/positioncrew-runtime.mjs",
@@ -527,9 +548,9 @@ describe("PositionCrew TermiX A2A runtime", () => {
     expect(unit).toContain("ExecStartPre=+/usr/bin/env -i /usr/bin/chmod 0555");
     expect(unit).toContain("ExecStartPre=+/usr/bin/env -i /usr/bin/mv -fT");
     expect(unit).toContain(
-      "EnvironmentFile=/home/crosswind/.config/positioncrew/runtimes/%i.env",
+      "EnvironmentFile=/etc/positioncrew-runtime/%i.env",
     );
-    expect(unit).not.toContain("EnvironmentFile=/etc/positioncrew-runtime/%i.env");
+    expect(unit).not.toContain("EnvironmentFile=/home/crosswind/.config/positioncrew/runtimes/%i.env");
     expect(unit).toContain(
       "UnsetEnvironment=TERMIX_A2A_RUNTIME_TOKEN TERMIX_A2A_RUNTIME_TOKEN_FILE WALLET_KEY PRIVATE_KEY NODE_OPTIONS NODE_PATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES BASH_ENV ENV",
     );
