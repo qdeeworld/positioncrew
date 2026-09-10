@@ -227,7 +227,7 @@ export function isRetryableRpcFailure(error: NonNullable<RpcResult["error"]>): b
     (error.code === -32_602 && /archive requests require a personal token/i.test(error.message)) ||
     error.code === -32_002 ||
     error.code === -32_005 ||
-    /busy|gateway|header not found|internal error|limit|rate|temporar|timeout/i.test(error.message)
+    /busy|gateway|header(?: for hash)? not found|internal error|limit|rate|temporar|timeout/i.test(error.message)
   );
 }
 

@@ -84,6 +84,13 @@ describe("BSC telemetry math", () => {
     expect(isRetryableRpcFailure({ code: 3, message: "execution reverted: policy failed" })).toBe(false);
   });
 
+  it("retries missing-header variants while preserving contract revert failures", () => {
+    expect(isRetryableRpcFailure({ code: -32_000, message: "header for hash not found" })).toBe(true);
+    expect(isRetryableRpcFailure({ code: -32_000, message: "header not found" })).toBe(true);
+    expect(isRetryableRpcFailure({ code: 3, message: "execution reverted: header for hash not found" })).toBe(false);
+    expect(isRetryableRpcFailure({ code: -32_000, message: "invalid argument: malformed block hash" })).toBe(false);
+  });
+
   it("uses three distinct mainnet transports in a deterministic failover order", () => {
     const publicBnbRpc = "https://bsc-dataseed-public.bnbchain.org";
     const publicNodeRpc = "https://bsc-rpc.publicnode.com";
