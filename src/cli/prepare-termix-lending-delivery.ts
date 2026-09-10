@@ -428,11 +428,20 @@ function registeredArtifact(input: unknown): z.infer<typeof RemoteArtifactSchema
   throw new Error("TermiX artifact registration has an undocumented response shape");
 }
 
-export function assertAttachedTermixArtifact(input: unknown, artifactId: string, sha256: string): void {
-  const attached = remoteArtifacts(input).find((item) => item.id === artifactId);
-  if (!attached || normalizeSha256(attached.sha256) !== normalizeSha256(sha256)) {
-    throw new Error("TermiX delivery is missing the verified report attachment");
+export function termixPreparedManifestHash(input: unknown, orderId: string, artifactId: string, sha256: string): string {
+  const prepared = z.object({
+    orderId: z.string(),
+    deliveryHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+    artifacts: z.array(RemoteArtifactSchema.extend({ orderId: z.string() })).length(1),
+  }).passthrough().parse(input);
+  const attached = prepared.artifacts[0]!;
+  if (prepared.orderId !== orderId || attached.orderId !== orderId || attached.id !== artifactId ||
+      normalizeSha256(attached.sha256) !== normalizeSha256(sha256)) {
+    throw new Error("TermiX prepared manifest does not bind the verified report attachment");
   }
+  // The official API computes the attachment manifest hash; the file SHA256
+  // remains separately checked against local and downloaded report bytes.
+  return prepared.deliveryHash;
 }
 
 async function uploadArtifact(grantInput: unknown, content: string, contentType: string): Promise<void> {
@@ -647,7 +656,6 @@ async function run(): Promise<void> {
     if (
       storedContent !== descriptor.content ||
       descriptor.sha256 !== priorArtifact.sha256 ||
-      descriptor.deliveryHash.toLowerCase() !== priorArtifact.deliveryHash.toLowerCase() ||
       descriptor.sizeBytes !== priorArtifact.sizeBytes
     ) throw new Error("Current-round artifact differs from the protected checkpoint");
   } else {
@@ -740,22 +748,21 @@ async function run(): Promise<void> {
     "POST",
     `/api/v1/orders/${encodeURIComponent(order.id)}/delivery/submit`,
     {
-      deliveryHash: descriptor.deliveryHash,
       artifactIds: [registered.id],
       note: "PositionCrew bounded Lending Rescue analysis and conformance receipt.",
     },
   );
-  assertAttachedTermixArtifact(
-    await apiJson(baseUrl, token, "GET", artifactPathname), registered.id, descriptor.sha256,
-  );
+  const manifestHash = termixPreparedManifestHash(submitRaw, order.id, registered.id, descriptor.sha256);
   if (Date.parse(artifact.result.expiresAt) - Date.now() < 120_000) {
     throw new Error("Delivery artifact became unsafe while preparing the submit intent");
   }
   const guarded = assertTermixProviderIntent(order, config, submitRaw, "submitDelivery", {
-    expectedDeliveryHash: descriptor.deliveryHash,
+    expectedDeliveryHash: manifestHash,
     now: new Date(),
   });
   draft = checkpointDraft(baseUrl, order, "SUBMIT_INTENT_PREPARED", await loadCheckpoint(paths.checkpoint), new Date());
+  if (!draft.artifact) throw new Error("Prepared artifact disappeared from checkpoint");
+  draft.artifact.deliveryHash = manifestHash;
   draft.submitIntent = guarded.intent;
   draft.submitIntentHash = guarded.intentHash;
   const checkpoint = await saveCheckpoint(paths.checkpoint, draft);
