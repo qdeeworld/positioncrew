@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
+import tls from 'node:tls';
 import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -41,6 +42,30 @@ function raw(port, message) {
     socket.once('error', reject); socket.once('end', () => resolve(data));
     socket.setTimeout(1500, () => { socket.destroy(); reject(new Error('Raw request timed out')); });
   });
+}
+function halfOpenRaw(port, message) {
+  return new Promise((resolve, reject) => {
+    const socket = new net.Socket({ allowHalfOpen: true });
+    let data = '';
+    socket.on('data', (chunk) => { data += chunk; });
+    socket.once('error', reject);
+    socket.once('end', () => { socket.setTimeout(0); resolve({ socket, data }); });
+    socket.setTimeout(1500, () => { socket.destroy(); reject(new Error('Half-open request timed out')); });
+    socket.connect(port, '127.0.0.1', () => socket.write(message));
+  });
+}
+function connectionCount(server) {
+  return new Promise((resolve, reject) => server.getConnections((error, count) => {
+    if (error) reject(error); else resolve(count);
+  }));
+}
+async function waitForNoConnections(server, context) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (await connectionCount(server) === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(await connectionCount(server), 0, `${context} socket still occupies gateway capacity`);
 }
 async function bodyOf(req) { const parts = []; for await (const part of req) parts.push(part); return Buffer.concat(parts); }
 
@@ -129,6 +154,70 @@ test('rejects framing, oversized bodies, unsupported methods and protocols', asy
   assert.equal(calls, 0);
 });
 
+test('rejected half-open sockets release capacity for subsequent requests', async (t) => {
+  let calls = 0;
+  const { gateway, port } = await fixture(t, (_req, res) => { calls++; res.end('ok'); }, { concurrency: 1 });
+  const cases = [
+    ['CONNECT', 'CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n\r\n', 405],
+    ['Upgrade', 'GET / HTTP/1.1\r\nHost: local\r\nConnection: upgrade\r\nUpgrade: websocket\r\n\r\n', 405],
+    ['Malformed', 'POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n', 400],
+  ];
+  for (const [name, message, status] of cases) {
+    const { socket, data } = await halfOpenRaw(port, message);
+    try {
+      assert.match(data, new RegExp(`^HTTP/1\\.1 ${status}`), name);
+      await waitForNoConnections(gateway, name);
+      assert.equal((await request(port, '/', { headers: { Connection: 'close' } })).status, 200,
+        `${name} exhausted gateway capacity`);
+      await waitForNoConnections(gateway, `${name} follow-up`);
+    } finally {
+      socket.destroy();
+    }
+  }
+  assert.equal(calls, cases.length);
+});
+
+test('two rejected half-open clients cannot fill the connection ceiling', async (t) => {
+  const { gateway, port } = await fixture(t, (_req, res) => res.end('ok'), { concurrency: 1 });
+  const message = 'CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n\r\n';
+  const clients = await Promise.all([halfOpenRaw(port, message), halfOpenRaw(port, message)]);
+  try {
+    for (const client of clients) assert.match(client.data, /^HTTP\/1\.1 405/);
+    await waitForNoConnections(gateway, 'two rejected clients');
+    assert.equal((await request(port, '/__gateway/health', { headers: { Connection: 'close' } })).status, 200);
+  } finally {
+    for (const client of clients) client.socket.destroy();
+  }
+});
+
+test('stalled rejection response has an absolute socket close deadline', async (t) => {
+  const { gateway, port } = await fixture(t, (_req, res) => res.end('ok'), { concurrency: 1 });
+  // Simulate a response write that never flushes or invokes its completion callback.
+  gateway.once('connection', (socket) => {
+    const originalEnd = socket.end;
+    socket.end = function (...args) {
+      if (String(args[0]).startsWith('HTTP/1.1 405')) return this;
+      return originalEnd.apply(this, args);
+    };
+  });
+  const client = new net.Socket({ allowHalfOpen: true });
+  client.connect(port, '127.0.0.1', () => client.write('CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n\r\n'));
+  const startedAt = Date.now();
+  let timeout;
+  try {
+    await Promise.race([
+      once(client, 'end'),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Rejected socket was not closed')), 3000); }),
+    ]);
+    assert.ok(Date.now() - startedAt >= 1500, 'response write did not stall');
+    await waitForNoConnections(gateway, 'stalled rejection');
+    assert.equal((await request(port, '/__gateway/health', { headers: { Connection: 'close' } })).status, 200);
+  } finally {
+    clearTimeout(timeout);
+    client.destroy();
+  }
+});
+
 test('allows the exact body boundary and propagates OPTIONS and HEAD', async (t) => {
   let captured;
   const { port } = await fixture(t, async (req, res) => {
@@ -208,7 +297,7 @@ test('serves verified TLS and rejects other Host values before forwarding', asyn
   function secureRequest(host) {
     return new Promise((resolve, reject) => {
       https.get({ hostname: '127.0.0.1', port: gateway.address().port,
-        servername: 'positioncrew.dolepee.com', ca: cert, headers: { Host: host } }, (res) => {
+        servername: 'positioncrew.dolepee.com', ca: cert, agent: false, headers: { Host: host } }, (res) => {
         res.resume(); res.once('end', () => resolve(res.statusCode));
       }).once('error', reject);
     });
@@ -216,4 +305,18 @@ test('serves verified TLS and rejects other Host values before forwarding', asyn
   assert.equal(await secureRequest('untrusted.example'), 421); assert.equal(calls, 0);
   assert.equal(await secureRequest('positioncrew.dolepee.com:443'), 200);
   assert.equal(await secureRequest('positioncrew.dolepee.com'), 200); assert.equal(calls, 2);
+  const halfOpen = tls.connect({ host: '127.0.0.1', port: gateway.address().port,
+    servername: 'positioncrew.dolepee.com', ca: cert, allowHalfOpen: true });
+  let rejection = '';
+  halfOpen.on('data', (chunk) => { rejection += chunk; });
+  try {
+    await once(halfOpen, 'secureConnect');
+    halfOpen.write('CONNECT example.com:443 HTTP/1.1\r\nHost: positioncrew.dolepee.com\r\n\r\n');
+    await once(halfOpen, 'end');
+    assert.match(rejection, /^HTTP\/1\.1 405/);
+    await waitForNoConnections(gateway, 'TLS CONNECT');
+    assert.equal(await secureRequest('positioncrew.dolepee.com'), 200);
+  } finally {
+    halfOpen.destroy();
+  }
 });
