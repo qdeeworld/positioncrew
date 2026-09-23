@@ -104,6 +104,14 @@ function responseHeaders(upstream) {
   return headers;
 }
 
+function rejectRawSocket(socket, response) {
+  if (!socket.writable) { socket.destroy(); return; }
+  const deadline = setTimeout(() => socket.destroy(), 2000);
+  deadline.unref();
+  socket.once('close', () => clearTimeout(deadline));
+  socket.end(response, () => socket.destroy());
+}
+
 /** Fixed-origin proxy. HTTP binding is restricted to literal loopback addresses. */
 export function createGatewayServer({ secret, tls, testUpstream, limits: overrides = {} } = {}) {
   if (!/^[0-9a-f]{64}$/.test(secret ?? '')) throw new Error('A 64-character lowercase hex gateway key is required.');
@@ -195,13 +203,25 @@ export function createGatewayServer({ secret, tls, testUpstream, limits: overrid
   const server = tls ? https.createServer({ ...options, ...tls, minVersion: 'TLSv1.2', handshakeTimeout: limits.bodyMs }, handler) : http.createServer(options, handler);
   server.maxConnections = limits.concurrency * 2;
   server.maxRequestsPerSocket = 100;
+  let droppedConnections = 0; let tlsClientErrors = 0;
+  const reportConnectionErrors = () => {
+    if (droppedConnections || tlsClientErrors) {
+      console.warn(JSON.stringify({ event: 'gateway_connection_errors', droppedConnections, tlsClientErrors }));
+      droppedConnections = 0; tlsClientErrors = 0;
+    }
+  };
+  const reportInterval = setInterval(reportConnectionErrors, 60_000);
+  reportInterval.unref();
+  server.once('close', () => { clearInterval(reportInterval); reportConnectionErrors(); });
+  server.on('drop', () => { droppedConnections++; });
+  if (tls) server.on('tlsClientError', () => { tlsClientErrors++; });
   server.on('checkContinue', (req, res) => { res.writeHead(417, { connection: 'close' }); res.end(); });
   server.on('checkExpectation', (req, res) => { res.writeHead(417, { connection: 'close' }); res.end(); });
   for (const event of ['connect', 'upgrade']) server.on(event, (_req, socket) => {
-    socket.end('HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    rejectRawSocket(socket, 'HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
   });
   server.on('clientError', (_error, socket) => {
-    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    rejectRawSocket(socket, 'HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
   });
   const listen = server.listen.bind(server);
   server.listen = (options, ...args) => {
