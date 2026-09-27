@@ -9,7 +9,9 @@ const CANONICAL = 'https://positioncrew.dolepee.com';
 const CHALLENGES = '/var/lib/positioncrew-acme/.well-known/acme-challenge';
 
 /** Plain HTTP serves only public ACME tokens or a fixed-origin HTTPS redirect. */
-export function createRedirectServer({ challengeDirectory = CHALLENGES } = {}) {
+export function createRedirectServer({ challengeDirectory = CHALLENGES, additionalChallengeHosts = [] } = {}) {
+  if (!Array.isArray(additionalChallengeHosts) || additionalChallengeHosts.length > 8 || additionalChallengeHosts.some(host => typeof host !== 'string' || host.length > 253 || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host))) throw new Error('Invalid additional ACME host allowlist');
+  const challengeHosts = new Set(additionalChallengeHosts.flatMap(host => [host, host + ':80']));
   const server = http.createServer({ maxHeaderSize: 8192, requestTimeout: 5000,
     headersTimeout: 5000, keepAliveTimeout: 1000, requireHostHeader: true }, async (req, res) => {
     const reply = (status, body = '', extra = {}) => {
@@ -22,7 +24,9 @@ export function createRedirectServer({ challengeDirectory = CHALLENGES } = {}) {
       let hosts = 0;
       for (let i = 0; i < req.rawHeaders.length; i += 2) if (req.rawHeaders[i].toLowerCase() === 'host') hosts++;
       if (hosts !== 1) return reply(400);
-      if (!['positioncrew.dolepee.com', 'positioncrew.dolepee.com:80'].includes(req.headers.host?.toLowerCase())) return reply(421);
+      const host = req.headers.host?.toLowerCase();
+      const canonicalHost = ['positioncrew.dolepee.com', 'positioncrew.dolepee.com:80'].includes(host);
+      if (!canonicalHost && !challengeHosts.has(host)) return reply(421);
       if (!['GET', 'HEAD'].includes(req.method)) return reply(405);
       if (Number(req.headers['content-length'] ?? 0) !== 0 || req.headers['transfer-encoding']) return reply(400);
       const target = checkedTarget(req.url);
@@ -41,6 +45,7 @@ export function createRedirectServer({ challengeDirectory = CHALLENGES } = {}) {
         } catch { return reply(404); }
         finally { await file?.close(); }
       }
+      if (!canonicalHost) return reply(404);
       reply(308, '', { Location: CANONICAL + target });
     } catch {
       if (res.headersSent) res.destroy(); else reply(400);
@@ -63,7 +68,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const host = process.env.REDIRECT_HOST ?? '127.0.0.1';
   const port = Number(process.env.REDIRECT_PORT ?? 18080);
   if (!['127.0.0.1', '0.0.0.0'].includes(host) || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid listener.');
-  const server = createRedirectServer();
+  const additionalChallengeHosts = (process.env.ACME_ADDITIONAL_HOSTS ?? '').split(',').filter(Boolean);
+  const server = createRedirectServer({ additionalChallengeHosts });
   server.listen(port, host);
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
     server.close(() => process.exit(0));

@@ -66,3 +66,21 @@ assessment, historical receipt reload, TLS renewal, monitoring and rollback.
 Retain the previous exact DNS record and Sites deployment. Preserve existing
 runtime services and database bindings. A gateway failure must not trigger an
 automatic replay of a possibly completed mutation.
+
+### Additional certificate challenge hosts
+
+The HTTP listener defaults to PositionCrew only. To enable certificate renewal for
+another service on the same VPS, install `shared-acme-hosts.conf.example` as
+`/etc/systemd/system/positioncrew-http-redirect.service.d/shared-acme-hosts.conf`
+(root-owned, mode 0644), then run `systemctl daemon-reload` and
+`systemctl restart positioncrew-http-redirect.service`.
+
+`ACME_ADDITIONAL_HOSTS` is an exact, comma-separated hostname allowlist (at most
+eight; no schemes, ports or wildcards). The included example enables
+`api.shadowbuild.xyz`. Those hosts serve only validated HTTP-01 tokens from
+`/var/lib/positioncrew-acme/.well-known/acme-challenge`; other paths return 404.
+Use Certbot's webroot `/var/lib/positioncrew-acme` for those certificates, and a
+separate lineage-specific deploy hook for each service. Private keys and HTTPS
+application listeners remain separate. Verify each added hostname's public token
+response before configuring unattended renewal. Removing this drop-in restores
+the original host policy after a unit reload and restart.
