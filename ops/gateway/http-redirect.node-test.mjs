@@ -32,3 +32,21 @@ test('HTTP preserves paths in fixed HTTPS redirects and serves only bounded regu
   assert.equal((await request(prefix+token,{method:'HEAD',host:'positioncrew.dolepee.com:80'})).body,'');
   for (const suffix of ['missing'.repeat(5),'symlink'.repeat(5),'oversized'.repeat(5),token+'?x=1']) assert.equal((await request(prefix+suffix)).status,404);
 });
+
+
+test('additional hosts expose only ACME challenges; redirects and unrelated hosts stay isolated', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'shared-acme-test-'));
+  const token='s'.repeat(43), body=token+'.'+'k'.repeat(43);
+  await writeFile(join(directory,token),body);
+  const server=createRedirectServer({challengeDirectory:directory,additionalChallengeHosts:['api.shadowbuild.xyz']});
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  t.after(async()=>{await new Promise(resolve=>{server.close(resolve);server.closeAllConnections()});await rm(directory,{recursive:true,force:true})});
+  const get=(host,path)=>new Promise((resolve,reject)=>{http.get({hostname:'127.0.0.1',port:server.address().port,path,headers:{host}},res=>{let body='';res.on('data',c=>body+=c);res.on('end',()=>resolve({status:res.statusCode,body,location:res.headers.location}))}).on('error',reject)});
+  for(const host of ['api.shadowbuild.xyz','api.shadowbuild.xyz:80']) {
+    assert.equal((await get(host,'/.well-known/acme-challenge/'+token)).body,body);
+    const response=await get(host,'/v1/catalog');assert.equal(response.status,404);assert.equal(response.location,undefined);
+  }
+  assert.equal((await get('api.shadowbuild.xyz.evil.example','/.well-known/acme-challenge/'+token)).status,421);
+  assert.equal((await get('positioncrew.dolepee.com','/health')).location,'https://positioncrew.dolepee.com/health');
+  for(const hosts of [['*'],['evil.example:80'],['https://evil.example'],['good.example,evil.example']]) assert.throws(()=>createRedirectServer({additionalChallengeHosts:hosts}),/Invalid/);
+});
