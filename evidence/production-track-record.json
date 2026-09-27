@@ -1,6 +1,6 @@
 {
   "schemaVersion": "positioncrew.production-track-record.v1",
-  "generatedAt": "2026-09-27T14:05:43.958Z",
+  "generatedAt": "2026-09-27T14:18:42.860Z",
   "status": "DEGRADED",
   "epoch": {
     "schemaVersion": "positioncrew.production-monitor-epoch.v1",
@@ -41,17 +41,26 @@
     "sourceStatus": "AVAILABLE"
   },
   "summary": {
-    "totalScheduledRunsSinceEpoch": 715,
+    "totalScheduledRunsSinceEpoch": 716,
     "observedRunCount": 100,
     "completedRuns": 100,
-    "successfulRuns": 56,
-    "unsuccessfulRuns": 44,
+    "successfulRuns": 55,
+    "unsuccessfulRuns": 45,
     "pendingRuns": 0,
-    "rollingPassRatePct": 56,
-    "rollingWindowStartedAt": "2026-09-18T21:53:08Z",
-    "rollingWindowEndedAt": "2026-09-27T14:05:14Z"
+    "rollingPassRatePct": 55,
+    "rollingWindowStartedAt": "2026-09-18T22:37:10Z",
+    "rollingWindowEndedAt": "2026-09-27T14:18:16Z"
   },
   "runs": [
+    {
+      "runId": 36325424601,
+      "status": "completed",
+      "conclusion": "failure",
+      "createdAt": "2026-09-27T14:18:16Z",
+      "completedAt": "2026-09-27T14:18:42.860Z",
+      "headSha": "1fb1e5a271ad017eaeba0c69e1eadd7362b580dd",
+      "url": "https://github.com/qdeeworld/positioncrew/actions/runs/36325424601"
+    },
     {
       "runId": 36324650533,
       "status": "completed",
@@ -942,15 +951,6 @@
       "completedAt": "2026-09-18T22:38:32.540Z",
       "headSha": "285b037712d7fca9e8da27fad4bb9d1a72ca134f",
       "url": "https://github.com/qdeeworld/positioncrew/actions/runs/35402345166"
-    },
-    {
-      "runId": 35398967189,
-      "status": "completed",
-      "conclusion": "success",
-      "createdAt": "2026-09-18T21:53:08Z",
-      "completedAt": "2026-09-18T21:54:40.205Z",
-      "headSha": "285b037712d7fca9e8da27fad4bb9d1a72ca134f",
-      "url": "https://github.com/qdeeworld/positioncrew/actions/runs/35398967189"
     }
   ],
   "boundary": "This record measures scheduled production verification outcomes after the fixed epoch. It is not external demand, investment performance, mainnet execution, or an Agent Advantage result."
